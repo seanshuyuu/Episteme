@@ -1,0 +1,148 @@
+{
+  "pass": 28,
+  "fail": 0,
+  "total": 28,
+  "runtimeErrors": [],
+  "results": [
+    {
+      "name": "空壳启动：零业务语义",
+      "ok": true,
+      "detail": "0 空间 / 无业务词"
+    },
+    {
+      "name": "创建空间后仍是 0 目录 0 类型 0 文档",
+      "ok": true,
+      "detail": "1 空间 / 0-0-0 / 1 commit"
+    },
+    {
+      "name": "安装「通用阅读台」Pack 生成目录、类型与示例文档",
+      "ok": true,
+      "detail": "6 目录 / 4 类型 / 4 文档 / tools v2"
+    },
+    {
+      "name": "目录树：选中节点过滤文档列表",
+      "ok": true,
+      "detail": "节点过滤生效"
+    },
+    {
+      "name": "目录树：折叠 / 展开子节点",
+      "ok": true,
+      "detail": "6 → 5 → 6"
+    },
+    {
+      "name": "文档搜索框真实过滤（不是装饰）",
+      "ok": true,
+      "detail": "命中 / 无结果 / 清空 三态均正确"
+    },
+    {
+      "name": "自定义新建目录并绑定内容类型",
+      "ok": true,
+      "detail": "目录 +1 / tools v3"
+    },
+    {
+      "name": "Schema：新建内容类型并动态派生 3 个 MCP 工具",
+      "ok": true,
+      "detail": "类型 +1 / 派生工具 +3 / tools v4"
+    },
+    {
+      "name": "Schema：改字段 + 关闭 MCP 暴露 → 工具签名重建",
+      "ok": true,
+      "detail": "字段已改 / 隐藏字段不出现在工具 / tools v5"
+    },
+    {
+      "name": "MCP 面板：tools/list 可展开查看 JSON Schema",
+      "ok": true,
+      "detail": "工具签名可见且含审计/幂等参数"
+    },
+    {
+      "name": "MCP：模拟工具调用产生 Commit 与审计日志",
+      "ok": true,
+      "detail": "commit +1 / 日志已记录"
+    },
+    {
+      "name": "新建文档：表单由 Schema 动态生成（无硬编码字段）",
+      "ok": true,
+      "detail": "动态字段 3 个 / 文档 +1"
+    },
+    {
+      "name": "Markdown 阅读器：编辑实时预览 + 保存生成 Commit",
+      "ok": true,
+      "detail": "预览实时 / commit +1"
+    },
+    {
+      "name": "Code 阅读器：行号 / 语法高亮 / 编辑保存",
+      "ok": true,
+      "detail": "行号 + 高亮 + 保存 commit"
+    },
+    {
+      "name": "PDF 阅读器：选中文本高亮并进入标注列表",
+      "ok": true,
+      "detail": "标注 2 → 3"
+    },
+    {
+      "name": "PDF：添加文字批注并显示在侧栏",
+      "ok": true,
+      "detail": "批注已保存"
+    },
+    {
+      "name": "Web 阅读器：阅读模式 / 原文快照切换",
+      "ok": true,
+      "detail": "两种模式可切换"
+    },
+    {
+      "name": "Web：重新抓取生成 Commit",
+      "ok": true,
+      "detail": "commit +1"
+    },
+    {
+      "name": "版本面板：Commit 时间线 + diff 审阅 + 回滚",
+      "ok": true,
+      "detail": "12 条提交 / diff 可见 / 回滚 commit +1"
+    },
+    {
+      "name": "MCP：模拟 Agent 在隔离分支写入",
+      "ok": true,
+      "detail": "文档 +1 / 分支 agent/demo / mcp commit"
+    },
+    {
+      "name": "版本：合并 agent/demo 到 main",
+      "ok": true,
+      "detail": "合并完成 / main 保留"
+    },
+    {
+      "name": "命令面板 Ctrl+K 搜索并跳转文档",
+      "ok": true,
+      "detail": "搜索命中并跳转"
+    },
+    {
+      "name": "四套主题切换真实生效",
+      "ok": true,
+      "detail": "mint/sky/lilac/blush 全部生效"
+    },
+    {
+      "name": "安装 Workbench Pack → 真实 11 个模块目录出现",
+      "ok": true,
+      "detail": "11 个 M 目录 / 17 个内容类型"
+    },
+    {
+      "name": "导出 Pack 定义触发下载",
+      "ok": true,
+      "detail": "episteme-pack.json"
+    },
+    {
+      "name": "移动端：底部导航 + 抽屉菜单可用",
+      "ok": true,
+      "detail": "375px 下导航与抽屉可用"
+    },
+    {
+      "name": "重置回空壳状态",
+      "ok": true,
+      "detail": "回到 0 空间空壳"
+    },
+    {
+      "name": "全流程无浏览器运行时错误",
+      "ok": true,
+      "detail": "console / pageerror / requestfailed 均为 0"
+    }
+  ]
+}

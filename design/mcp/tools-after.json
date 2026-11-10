@@ -1,0 +1,109 @@
+{
+  "description": "用户在界面新建「竞品情报」内容类型（绑定到 /竞品 节点，3 个字段）并保存后，同一 Space 的 tools/list 快照。全过程不重启服务、不改代码、不重新配置客户端。",
+  "spaceId": "sp_reading_desk",
+  "toolsVersion": 13,
+  "trigger": {
+    "event": "content_type.created",
+    "slug": "competitor_intel",
+    "version": 1,
+    "nodePath": "/竞品",
+    "schemaCommitId": "cm_01J8Y...",
+    "source": "schema"
+  },
+  "broadcast": {
+    "method": "notifications/tools/list_changed",
+    "params": {
+      "spaceId": "sp_reading_desk",
+      "toolsVersion": 13,
+      "added": [
+        "episteme.query_competitor_intel",
+        "episteme.create_competitor_intel",
+        "episteme.update_competitor_intel"
+      ],
+      "removed": [],
+      "changed": []
+    }
+  },
+  "newTools": [
+    {
+      "name": "episteme.query_competitor_intel",
+      "description": "查询节点 /竞品 下的「竞品情报」文档。可按已索引字段筛选：title / releaseDate / tags。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodePath": { "type": "string", "default": "/竞品" },
+          "title": { "type": "string", "description": "标题（模糊匹配）" },
+          "releaseDate": { "type": "string", "format": "date-time", "description": "发布日期" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "标签" },
+          "ref": { "type": "string", "description": "可选：读历史 commitId / branch / tag" },
+          "page": { "type": "integer", "default": 1 },
+          "pageSize": { "type": "integer", "default": 20 }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "episteme.create_competitor_intel",
+      "description": "在节点 /竞品 下新建「竞品情报」文档。必填：标题。写入会产生一条 Commit，可用 episteme.log 查看、episteme.revert 撤销；建议在 agent/ 分支上试写。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "nodePath": { "type": "string", "default": "/竞品" },
+          "title": { "type": "string", "description": "标题" },
+          "releaseDate": { "type": "string", "format": "date-time", "description": "发布日期" },
+          "tags": { "type": "array", "items": { "type": "string" }, "description": "标签" },
+          "parts": {
+            "type": "array",
+            "description": "可选媒介部件",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "enum": ["md", "code", "pdf", "web", "attachment"] },
+                "content": { "type": "string" },
+                "sourceUri": { "type": "string", "format": "uri" },
+                "language": { "type": "string" }
+              },
+              "required": ["kind"]
+            }
+          },
+          "branch": { "type": "string", "description": "目标分支，默认 refs/heads/main" },
+          "reason": { "type": "string", "description": "改动理由，写入 Commit 审计" },
+          "expectParent": { "type": "string", "description": "乐观锁：期望的当前 HEAD commitId" },
+          "idempotencyKey": { "type": "string", "description": "幂等键，重放返回原 Commit" },
+          "dryRun": { "type": "boolean", "description": "仅返回 diff 预览，不落 Commit" }
+        },
+        "required": ["title"]
+      }
+    },
+    {
+      "name": "episteme.update_competitor_intel",
+      "description": "更新「竞品情报」文档的可写字段。所有字段均可选；只读字段与未暴露字段不会出现在参数中。",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "docId": { "type": "string", "description": "目标文档 ID" },
+          "title": { "type": "string" },
+          "releaseDate": { "type": "string", "format": "date-time" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "branch": { "type": "string" },
+          "reason": { "type": "string" },
+          "expectParent": { "type": "string" },
+          "idempotencyKey": { "type": "string" }
+        },
+        "required": ["docId"]
+      }
+    }
+  ],
+  "fieldVisibilityDemo": {
+    "description": "同一个 Space 的 paper 类型有三个特殊字段，演示双层暴露开关如何影响工具签名",
+    "cases": [
+      { "key": "reviewedBy", "exposeToMcp": true, "mcpWritable": false, "effect": "出现在 query_* 返回描述，不出现在 create_*/update_* 参数" },
+      { "key": "internalCost", "exposeToMcp": false, "mcpWritable": false, "effect": "完全不出现在任何工具签名与返回值" },
+      { "key": "fetchedAt", "exposeToMcp": true, "mcpWritable": false, "effect": "clip 类型中由抓取 worker 写入，Agent 只读" }
+    ]
+  },
+  "rebuildSlo": { "targetMs": 50, "scope": "100 contentTypes / 1000 nodes" },
+  "total": 35,
+  "staticToolCount": 20,
+  "dynamicToolCount": 15
+}

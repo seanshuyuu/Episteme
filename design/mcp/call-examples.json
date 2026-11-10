@@ -1,0 +1,118 @@
+{
+  "description": "一次完整的 Agent 协作流程：探查结构 → 在隔离分支写入 → 人工 diff 审阅 → 合并或整批撤销。所有写操作都落在同一条 Commit 链上。",
+  "transport": "Streamable HTTP POST /mcp?space=reading-desk",
+  "auth": {
+    "mode": "api-key-hmac",
+    "headers": ["X-Key-Id", "X-Timestamp", "X-Nonce", "X-Signature"],
+    "signatureOrder": "timestamp -> nonce -> key -> body",
+    "scope": ["episteme:read", "episteme:write", "episteme:version"]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "title": "探查目录树",
+      "request": { "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "episteme.tree", "arguments": { "path": "/", "includeTypes": true } } },
+      "response": {
+        "nodes": [
+          { "path": "/论文库", "contentType": "paper", "exposeToMcp": true, "docCount": 12 },
+          { "path": "/代码片段", "contentType": "snippet", "exposeToMcp": true, "docCount": 8 },
+          { "path": "/网页剪藏", "contentType": "clip", "exposeToMcp": true, "docCount": 24 },
+          { "path": "/内部草稿", "exposeToMcp": false }
+        ],
+        "head": "cm_01J8Y...",
+        "toolsVersion": 13
+      },
+      "note": "exposeToMcp=false 的节点不出现在树中；显式 docId 读取仍受 RBAC 约束"
+    },
+    {
+      "step": 2,
+      "title": "用户刚新建了「竞品情报」类型，收到版本广播后重取工具清单",
+      "notification": { "method": "notifications/tools/list_changed", "params": { "toolsVersion": 13, "added": ["episteme.create_competitor_intel"] } },
+      "request": { "jsonrpc": "2.0", "id": 2, "method": "tools/list" },
+      "note": "工具签名见 tools-after.json；无需重启服务"
+    },
+    {
+      "step": 3,
+      "title": "在隔离分支写入（含网页 Part 与审计理由）",
+      "request": {
+        "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+        "params": {
+          "name": "episteme.create_competitor_intel",
+          "arguments": {
+            "nodePath": "/竞品",
+            "title": "某产品 2026 Q3 更新",
+            "releaseDate": "2026-09-30T00:00:00Z",
+            "tags": ["定价", "AI"],
+            "parts": [{ "kind": "web", "sourceUri": "https://example.com/changelog" }],
+            "branch": "refs/heads/agent/claude/20261109",
+            "reason": "每日情报采集任务补齐 Q3 更新",
+            "expectParent": "cm_01J8Y...",
+            "idempotencyKey": "task-8891-20261109"
+          }
+        }
+      },
+      "response": {
+        "commitId": "cm_01J8Z...",
+        "docId": "doc_01J9A...",
+        "branch": "refs/heads/agent/claude/20261109",
+        "parent": "cm_01J8Y...",
+        "stats": { "added": 1, "modified": 0, "deleted": 0, "parts": 1 },
+        "fetchJobId": "fetch_01J9B...",
+        "toolsVersion": 13,
+        "auditId": "al_01J9C..."
+      },
+      "note": "web Part 的 URL 不在 API 进程抓取，投递到隔离 fetch-worker；一次调用 = 一个事务 = 一个 Commit"
+    },
+    {
+      "step": 4,
+      "title": "幂等重放（网络重试）",
+      "request": { "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "episteme.create_competitor_intel", "arguments": { "idempotencyKey": "task-8891-20261109", "title": "某产品 2026 Q3 更新", "nodePath": "/竞品" } } },
+      "response": { "code": "IDEMPOTENT_REPLAY", "commitId": "cm_01J8Z...", "newCommit": false },
+      "note": "重复请求不产生第二个 Commit（SPEC 验收项 7）"
+    },
+    {
+      "step": 5,
+      "title": "人工审阅差异",
+      "request": { "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "episteme.diff", "arguments": { "base": "refs/heads/main", "target": "refs/heads/agent/claude/20261109" } } },
+      "response": {
+        "tree": [{ "op": "added", "path": "/竞品/某产品 2026 Q3 更新" }],
+        "documents": [{
+          "docId": "doc_01J9A...",
+          "fields": [{ "key": "title", "from": null, "to": "某产品 2026 Q3 更新" }, { "key": "releaseDate", "from": null, "to": "2026-09-30T00:00:00Z" }],
+          "parts": [{ "kind": "web", "op": "added", "sourceUri": "https://example.com/changelog" }],
+          "annotations": []
+        }],
+        "mainHeadUnchanged": "cm_01J8Y..."
+      }
+    },
+    {
+      "step": 6,
+      "title": "合并到 main（或整批撤销 Agent 改动）",
+      "merge": { "jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": { "name": "episteme.merge", "arguments": { "from": "refs/heads/agent/claude/20261109", "message": "审阅通过：补齐 Q3 竞品情报" } } },
+      "mergeResponse": { "commitId": "cm_01J9D...", "parents": ["cm_01J8Y...", "cm_01J8Z..."], "conflicts": [] },
+      "alternativeRevert": { "jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": { "name": "episteme.revert", "arguments": { "agentId": "claude-desktop", "since": "2026-11-09T00:00:00Z", "reason": "采集任务结果不符合预期，整批撤销" } } },
+      "note": "revert 生成反向提交，不改写历史"
+    }
+  ],
+  "resources": {
+    "listTemplates": [
+      "episteme://reading-desk/{nodePath}",
+      "episteme://reading-desk/{nodePath}/{docId}",
+      "episteme://reading-desk/{nodePath}/{docId}/part/{kind}",
+      "episteme://reading-desk/{nodePath}/{docId}/annotations"
+    ],
+    "readExample": {
+      "uri": "episteme://reading-desk/论文库/doc_01J7P/part/pdf?ref=cm_01J8Y...",
+      "mime": "application/pdf",
+      "note": "带 ref 可读历史快照；Part MIME 按 kind 映射"
+    }
+  },
+  "errorExamples": [
+    { "code": "CONFLICT_PARENT", "http": 409, "request": { "expectParent": "cm_OLD" }, "response": { "head": "cm_01J8Z...", "expected": "cm_OLD", "hint": "调用 episteme.log 重读后重试，不得盲目覆盖" } },
+    { "code": "FORBIDDEN_SCOPE", "http": 403, "request": { "name": "episteme.define_content_type" }, "response": { "message": "agent 角色默认无 schema scope" } },
+    { "code": "SSRF_BLOCKED", "http": 422, "request": { "sourceUri": "http://127.0.0.1:5080/openapi.json" }, "response": { "message": "命中禁网段，抓取请求已在 fetch-worker 前置校验拦截" } },
+    { "code": "SCHEMA_VALIDATION", "http": 422, "request": { "year": 1800 }, "response": { "details": [{ "field": "year", "message": "minimum is 1900" }] } },
+    { "code": "TOOLS_STALE", "http": 409, "response": { "clientToolsVersion": 12, "serverToolsVersion": 13, "hint": "重新 tools/list" } },
+    { "code": "ANNOTATION_ANCHOR_LOST", "http": 422, "response": { "message": "PDF 文本层已变化，锚点需重新定位；原标注保留并高亮提示" } }
+  ]
+}

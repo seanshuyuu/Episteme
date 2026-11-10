@@ -1,0 +1,20 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# local runtime artifacts
+node_modules/
+*.log
+.env
+.env.*
+!.env.example
+
+# WorkBuddy session & memory data (never commit)
+.workbuddy/
+
+# browser test runtime output (reports are intentionally tracked)
+playwright-report/
+test-results/

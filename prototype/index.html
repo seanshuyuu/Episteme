@@ -1,0 +1,1268 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="mint">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#79c6a3">
+<title>Episteme · 知书｜通用文档操作系统 · 交互原型 v0.1</title>
+<style>
+:root{
+  --bg:#f6faf8; --panel:#fff; --panel2:#f2f8f5; --line:#e4eeea;
+  --text:#2c3b43; --muted:#7d9199; --faint:#a7b7bd;
+  --primary:#79c6a3; --primary-soft:#e8f6ee; --primary-deep:#3f8d69;
+  --green:#79c6a3; --green-s:#e8f6ee; --blue:#8bb9e8; --blue-s:#e9f2fd;
+  --purple:#b2a3e0; --purple-s:#f0ebfb; --pink:#eda7c0; --pink-s:#fdeef4;
+  --amber:#ba7517; --amber-s:#faeeda; --red:#e24b4a; --red-s:#fcebeb;
+  --shadow:0 6px 22px rgba(70,110,100,.07); --shadow-lg:0 16px 48px rgba(50,90,80,.16);
+  --r:16px; --r-sm:10px;
+}
+html[data-theme="sky"]{--bg:#f5f9fd;--panel2:#f0f6fc;--line:#e3ecf6;--primary:#8bb9e8;--primary-soft:#e9f2fd;--primary-deep:#3f78b4;}
+html[data-theme="lilac"]{--bg:#f9f7fd;--panel2:#f5f2fb;--line:#ece7f5;--primary:#b2a3e0;--primary-soft:#f0ebfb;--primary-deep:#7a63ba;}
+html[data-theme="blush"]{--bg:#fdf7f9;--panel2:#fdf2f6;--line:#f4e8ee;--primary:#eda7c0;--primary-soft:#fdeef4;--primary-deep:#b96288;}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+input,textarea,select{outline:none}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#d9e5e0;border-radius:8px}
+.app{display:flex;height:100vh;overflow:hidden}
+
+/* ---------- sidebar ---------- */
+.sidebar{width:252px;flex:none;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;z-index:40}
+.brand{display:flex;align-items:center;gap:10px;padding:18px 16px 12px}
+.brand-mark{width:34px;height:34px;border-radius:11px;background:var(--primary-soft);color:var(--primary-deep);display:grid;place-items:center;font-weight:800;font-size:17px;flex:none}
+.brand-name{font-size:15px;font-weight:750;letter-spacing:.2px;line-height:1.2}
+.brand-sub{font-size:10.5px;color:var(--muted);letter-spacing:1.1px;text-transform:uppercase}
+.space-box{margin:4px 12px 12px;padding:9px 10px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}
+.space-box .lbl{font-size:10px;color:var(--muted);letter-spacing:.6px;margin-bottom:5px}
+.space-select{width:100%;border:0;background:transparent;font-weight:650;font-size:12.5px;cursor:pointer}
+.side-scroll{flex:1;overflow-y:auto;padding:0 10px 18px}
+.side-title{display:flex;align-items:center;justify-content:space-between;padding:12px 6px 6px;font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.7px}
+.side-title button{font-size:11px;color:var(--primary-deep);font-weight:700;padding:2px 6px;border-radius:6px}
+.side-title button:hover{background:var(--primary-soft)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;font-size:12.5px;color:var(--text);cursor:pointer;width:100%;text-align:left}
+.nav-item:hover{background:var(--panel2)}
+.nav-item.active{background:var(--primary-soft);color:var(--primary-deep);font-weight:700}
+.nav-item .n-ico{width:16px;text-align:center;flex:none;font-size:13px}
+.nav-item .n-badge{margin-left:auto;font-size:10px;color:var(--muted);background:var(--panel2);border-radius:20px;padding:1px 7px}
+.tree-row{display:flex;align-items:center;gap:5px;border-radius:8px;padding:5px 6px;font-size:12.2px;cursor:pointer}
+.tree-row:hover{background:var(--panel2)}
+.tree-row.active{background:var(--primary-soft);color:var(--primary-deep);font-weight:650}
+.tree-caret{width:14px;text-align:center;color:var(--faint);font-size:10px;flex:none;user-select:none}
+.tree-caret.leaf{opacity:.25}
+.tree-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.tree-type{font-size:9.5px;color:var(--muted);border:1px solid var(--line);border-radius:5px;padding:0 4px;flex:none}
+.tree-hidden{opacity:.5}
+.side-foot{padding:10px 14px;border-top:1px solid var(--line);font-size:10.5px;color:var(--muted);line-height:1.6}
+
+/* ---------- topbar ---------- */
+.main-wrap{flex:1;display:flex;flex-direction:column;min-width:0}
+.topbar{height:60px;flex:none;display:flex;align-items:center;gap:12px;padding:0 20px;background:var(--panel);border-bottom:1px solid var(--line);z-index:30}
+.hamb{display:none;width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);place-items:center;font-size:16px}
+.crumb{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:7px;min-width:0;flex:1;overflow:hidden;white-space:nowrap}
+.crumb b{color:var(--text);font-weight:650;overflow:hidden;text-overflow:ellipsis}
+.top-search{display:flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:7px 10px;font-size:11.5px;color:var(--muted);cursor:pointer;min-width:168px}
+.top-search:hover{border-color:var(--primary)}
+.theme-dots{display:flex;gap:6px;align-items:center}
+.theme-dot{width:17px;height:17px;border-radius:50%;border:2px solid transparent;box-shadow:0 0 0 1px var(--line)}
+.theme-dot.active{border-color:var(--panel);box-shadow:0 0 0 2px var(--primary-deep)}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:20px;font-size:11px;background:var(--panel2);border:1px solid var(--line);color:var(--muted);white-space:nowrap;cursor:pointer}
+.pill.live{background:var(--green-s);color:var(--primary-deep);border-color:transparent;font-weight:650}
+.pill:hover{border-color:var(--primary)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--primary);display:inline-block}
+.content{flex:1;overflow-y:auto;padding:22px 24px 40px;scroll-behavior:smooth}
+.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+.page-title{font-size:21px;font-weight:750;letter-spacing:-.3px;margin:0}
+.page-desc{font-size:12.5px;color:var(--muted);margin-top:4px;max-width:660px}
+.head-actions{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- common ---------- */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+.pad{padding:18px}
+.grid{display:grid;gap:14px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 13px;border-radius:9px;font-size:12.3px;font-weight:650;border:1px solid var(--line);background:var(--panel);white-space:nowrap;transition:.15s}
+.btn:hover{border-color:var(--primary);transform:translateY(-1px)}
+.btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+.btn.primary:hover{background:var(--primary-deep)}
+.btn.soft{background:var(--primary-soft);color:var(--primary-deep);border-color:transparent}
+.btn.danger{color:var(--red);border-color:var(--red-s);background:var(--red-s)}
+.btn.sm{padding:5px 10px;font-size:11.3px}
+.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:20px;font-size:10.8px;background:var(--panel2);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
+.chip.green{background:var(--green-s);color:var(--primary-deep);border-color:transparent}
+.chip.blue{background:var(--blue-s);color:#3f78b4;border-color:transparent}
+.chip.purple{background:var(--purple-s);color:#7a63ba;border-color:transparent}
+.chip.amber{background:var(--amber-s);color:var(--amber);border-color:transparent}
+.chip.red{background:var(--red-s);color:var(--red);border-color:transparent}
+.input,.select,.textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px;font-size:12.5px;transition:.15s}
+.input:focus,.select:focus,.textarea:focus{border-color:var(--primary);background:var(--panel)}
+.textarea{resize:vertical;min-height:90px;line-height:1.7}
+.field{margin-bottom:13px}
+.field label{display:block;font-size:11.5px;font-weight:650;margin-bottom:5px}
+.field .hint{font-size:10.5px;color:var(--muted);margin-top:4px}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:11.8px;cursor:pointer;user-select:none}
+.check input{accent-color:var(--primary);width:14px;height:14px}
+.small{font-size:12px}.muted{color:var(--muted)}.tiny{font-size:10.8px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.section-title{font-size:12.5px;font-weight:700;margin:0 0 11px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.divider{height:1px;background:var(--line);margin:16px 0}
+.banner{padding:10px 13px;border-radius:10px;font-size:12px;margin-bottom:14px;background:var(--primary-soft);color:var(--primary-deep);border:1px solid transparent}
+.banner.warn{background:var(--amber-s);color:var(--amber)}
+.banner.err{background:var(--red-s);color:var(--red)}
+.banner.info{background:var(--blue-s);color:#3f78b4}
+.empty{text-align:center;padding:56px 20px;color:var(--muted)}
+.empty-ico{width:64px;height:64px;border-radius:20px;background:var(--primary-soft);color:var(--primary-deep);display:grid;place-items:center;font-size:30px;margin:0 auto 16px}
+.empty h2{font-size:19px;color:var(--text);margin:0 0 8px}
+.empty p{font-size:12.5px;max-width:460px;margin:0 auto 20px;line-height:1.8}
+.table{width:100%;border-collapse:collapse;font-size:12.2px}
+.table th{text-align:left;font-weight:650;color:var(--muted);font-size:11px;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--panel2)}
+.table td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.table tr:hover td{background:var(--panel2)}
+.table tr.clickable{cursor:pointer}
+.row-actions{display:flex;gap:6px}
+.tag{display:inline-block;padding:1px 7px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);font-size:10.5px;color:var(--muted);margin:1px 3px 1px 0}
+.stat{display:flex;flex-direction:column;gap:2px}
+.stat .num{font-size:22px;font-weight:750;letter-spacing:-.5px}
+.stat .lbl{font-size:11px;color:var(--muted)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px;overflow-x:auto}
+.tab{padding:8px 13px;font-size:12px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;cursor:pointer}
+.tab.active{color:var(--primary-deep);border-bottom-color:var(--primary)}
+.tab:hover{color:var(--text)}
+.list-item{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);font-size:12px}
+.list-item:last-child{border-bottom:0}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12px}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--muted);flex:none}
+.kv .v{text-align:right;word-break:break-all}
+.codeblk{background:#f7fafb;border:1px solid var(--line);border-radius:9px;padding:11px 13px;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-all;color:#465c68;max-height:300px;overflow:auto}
+
+/* ---------- viewers ---------- */
+.viewer-shell{display:grid;grid-template-columns:1fr 250px;gap:14px}
+.viewer-main{min-width:0}
+.editor-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.editor-pane{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}
+.editor-head{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;background:var(--panel2);border-bottom:1px solid var(--line);font-size:10.8px;color:var(--muted);font-weight:650}
+.editor-area{width:100%;min-height:290px;border:0;background:var(--panel);padding:14px;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;resize:vertical;display:block}
+.md-preview{padding:14px 18px;min-height:290px;font-size:12.8px;line-height:1.85;overflow:auto}
+.md-preview h2{font-size:16px;margin:14px 0 8px}.md-preview h3{font-size:14px;margin:12px 0 6px}
+.md-preview p{margin:7px 0}.md-preview ul{margin:7px 0;padding-left:20px}
+.md-preview code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11.5px}
+.md-preview pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto}
+.md-preview strong{color:var(--primary-deep)}
+.code-view{display:grid;grid-template-columns:42px 1fr;background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden;min-height:290px}
+.code-lines{padding:14px 8px;background:var(--panel2);color:var(--faint);font:11.5px/1.8 ui-monospace,monospace;text-align:right;user-select:none;border-right:1px solid var(--line)}
+.code-body{padding:14px;font:12px/1.8 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;overflow:auto}
+.code-body .k{color:#7a63ba;font-weight:650}.code-body .s{color:#3f8d69}.code-body .c{color:#a7b7bd;font-style:italic}.code-body .n{color:#ba7517}
+.pdf-paper{background:#fff;border:1px solid var(--line);box-shadow:var(--shadow);border-radius:6px;padding:34px 38px;max-width:660px;margin:0 auto 16px;font:12.5px/2.05 Georgia,"Songti SC",serif;color:#33414a;min-height:420px}
+.pdf-paper h3{font:700 16px/1.5 -apple-system,"PingFang SC",sans-serif;margin:0 0 4px}
+.pdf-paper .pdf-meta{font:10.5px/1.6 -apple-system,sans-serif;color:var(--muted);margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.pdf-paper p{margin:0 0 11px;text-indent:2em}
+.pdf-paper mark{background:#ffeaa0;border-radius:3px;padding:1px 2px;cursor:pointer}
+.web-reader{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}
+.web-bar{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--panel2);border-bottom:1px solid var(--line);font-size:11px}
+.web-url{flex:1;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:5px 9px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.web-body{padding:22px 30px;font-size:13px;line-height:1.9;max-width:720px}
+.web-body h2{font-size:18px;margin:0 0 10px}.web-body p{margin:0 0 12px}
+.web-body mark{background:#ffeaa0;border-radius:3px;padding:1px 2px;cursor:pointer}
+.web-raw .web-body{background:repeating-linear-gradient(0deg,#fff,#fff 28px,#fafcfb 28px,#fafcfb 56px)}
+.web-raw .ad{background:var(--amber-s);color:var(--amber);font-size:10.5px;padding:6px 10px;border-radius:6px;margin-bottom:10px}
+.ann-item{padding:9px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;font-size:11.5px;background:var(--panel);cursor:pointer}
+.ann-item:hover{border-color:var(--primary)}
+.ann-item .q{color:var(--muted);font-size:10.5px;border-left:2px solid var(--primary);padding-left:7px;margin:5px 0}
+.ann-item .del{float:right;color:var(--red);font-size:11px}
+
+/* ---------- drawer / modal / toast / cmdk ---------- */
+.drawer-host{position:fixed;inset:0;z-index:60;pointer-events:none}
+.drawer-mask{position:absolute;inset:0;background:rgba(40,60,55,.24);opacity:0;transition:.2s;pointer-events:none}
+.drawer-mask.show{opacity:1;pointer-events:auto}
+.drawer{position:absolute;right:0;top:0;bottom:0;width:min(560px,100%);background:var(--bg);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;transform:translateX(100%);transition:.24s;pointer-events:auto}
+.drawer.show{transform:translateX(0)}
+.drawer-head{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.drawer-head h3{font-size:14px;margin:0;flex:1}
+.drawer-body{flex:1;overflow-y:auto;padding:18px}
+.icon-btn{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--panel2);display:grid;place-items:center;font-size:15px;color:var(--muted)}
+.icon-btn:hover{color:var(--text);border-color:var(--primary)}
+.modal-host{position:fixed;inset:0;z-index:80;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(40,60,55,.3)}
+.modal-host.show{display:flex}
+.modal{width:min(520px,100%);max-height:88vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);padding:20px}
+.modal h3{font-size:15px;margin:0 0 4px}
+.modal .sub{font-size:11.5px;color:var(--muted);margin-bottom:16px}
+.modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.toast-host{position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none}
+.toast{background:#2c3b43;color:#fff;padding:9px 16px;border-radius:20px;font-size:12px;box-shadow:var(--shadow-lg);animation:tin .22s ease}
+.toast.ok{background:var(--primary-deep)}.toast.err{background:var(--red)}
+@keyframes tin{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.cmdk{position:fixed;inset:0;z-index:90;display:none;align-items:flex-start;justify-content:center;padding-top:12vh;background:rgba(40,60,55,.28)}
+.cmdk.show{display:flex}
+.cmdk-box{width:min(560px,94%);background:var(--panel);border-radius:14px;box-shadow:var(--shadow-lg);overflow:hidden}
+.cmdk input{width:100%;border:0;border-bottom:1px solid var(--line);padding:14px 16px;font-size:14px;background:var(--panel)}
+.cmdk-list{max-height:320px;overflow-y:auto;padding:6px}
+.cmdk-row{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;font-size:12.5px;cursor:pointer}
+.cmdk-row:hover,.cmdk-row.sel{background:var(--primary-soft)}
+.bottom-nav{display:none}
+.timeline{position:relative;padding-left:20px}
+.timeline:before{content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;background:var(--line)}
+.commit{position:relative;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:9px;cursor:pointer}
+.commit:before{content:"";position:absolute;left:-18px;top:17px;width:9px;height:9px;border-radius:50%;background:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.commit.sel{border-color:var(--primary);background:var(--primary-soft)}
+.commit.agent:before{background:var(--purple);box-shadow:0 0 0 3px var(--purple-s)}
+.commit .msg{font-size:12px;font-weight:650}
+.commit .meta{font-size:10.5px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap}
+.diff-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.diff-col{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel)}
+.diff-col .h{padding:7px 10px;background:var(--panel2);font-size:10.5px;color:var(--muted);border-bottom:1px solid var(--line);font-weight:650}
+.diff-col .b{padding:10px;font:11px/1.7 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;min-height:70px}
+.diff-add{background:var(--green-s);color:var(--primary-deep)}
+.diff-del{background:var(--red-s);color:var(--red)}
+.tool-row{border:1px solid var(--line);border-radius:9px;margin-bottom:7px;background:var(--panel);overflow:hidden}
+.tool-head{display:flex;align-items:center;gap:8px;padding:9px 11px;cursor:pointer;font-size:11.8px}
+.tool-head:hover{background:var(--panel2)}
+.tool-name{font-family:ui-monospace,monospace;font-size:11px;flex:1;word-break:break-all}
+.tool-detail{padding:10px 12px;border-top:1px solid var(--line);background:var(--panel2)}
+.schema-field{display:grid;grid-template-columns:1.1fr 1fr 62px 62px 28px;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:11.5px}
+.schema-field .select,.schema-field .input{padding:6px 8px;font-size:11px}
+.logline{font:10.8px/1.7 ui-monospace,monospace;padding:7px 9px;border-bottom:1px solid var(--line);word-break:break-all}
+.logline:last-child{border-bottom:0}
+.logline .t{color:var(--faint)}
+@media(max-width:1100px){.viewer-shell{grid-template-columns:1fr}.editor-grid{grid-template-columns:1fr}.g4{grid-template-columns:repeat(2,1fr)}.g3{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){
+  .sidebar{position:fixed;left:0;top:0;bottom:0;transform:translateX(-100%);transition:.24s;box-shadow:var(--shadow-lg)}
+  .sidebar.open{transform:translateX(0)}
+  .hamb{display:grid}.top-search{min-width:0;width:38px;justify-content:center;padding:7px}
+  .top-search span{display:none}.content{padding:16px 14px 90px}
+  .g2,.g3,.g4{grid-template-columns:1fr}
+  .bottom-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:34;background:var(--panel);border-top:1px solid var(--line);padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+  .bottom-nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--muted);padding:4px}
+  .bottom-nav button.active{color:var(--primary-deep);font-weight:700}
+  .bottom-nav button i{font-style:normal;font-size:17px}
+  .diff-grid{grid-template-columns:1fr}
+  .drawer{width:100%}
+  .page-title{font-size:18px}
+  .schema-field{grid-template-columns:1fr 1fr 54px 54px 26px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">知</div>
+      <div><div class="brand-name">知书 Episteme</div><div class="brand-sub">Document OS</div></div>
+    </div>
+    <div class="space-box">
+      <div class="lbl">当前空间 / SPACE</div>
+      <select class="space-select" id="spaceSelect" data-bind="space"></select>
+    </div>
+    <div class="side-scroll" id="sideScroll"></div>
+    <div class="side-foot">v0.1 · 通用内核空壳<br>内核零业务语义 · MCP 动态工具</div>
+  </aside>
+
+  <div class="main-wrap">
+    <header class="topbar">
+      <button class="hamb" data-action="toggle-sidebar" aria-label="菜单">☰</button>
+      <div class="crumb" id="crumb"></div>
+      <button class="top-search" data-action="open-cmdk"><span>🔍 搜索文档 / 跳转…</span><span>⌘K</span></button>
+      <div class="theme-dots" id="themeDots"></div>
+      <button class="pill live" id="mcpPill" data-action="open-drawer" data-drawer="mcp"><span class="dot"></span> MCP <span id="toolsVerTop">v1</span></button>
+      <button class="pill" data-action="open-drawer" data-drawer="version" title="版本历史">⑂ 版本</button>
+    </header>
+    <main class="content" id="content"></main>
+  </div>
+</div>
+
+<div class="drawer-host" id="drawerHost">
+  <div class="drawer-mask" id="drawerMask" data-action="close-drawer"></div>
+  <div class="drawer" id="drawer">
+    <div class="drawer-head"><h3 id="drawerTitle">面板</h3><button class="icon-btn" data-action="close-drawer">✕</button></div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </div>
+</div>
+
+<div class="modal-host" id="modalHost"><div class="modal" id="modal"></div></div>
+<div class="toast-host" id="toastHost"></div>
+<div class="cmdk" id="cmdk"><div class="cmdk-box">
+  <input id="cmdkInput" placeholder="搜索文档、目录，或输入命令…" autocomplete="off">
+  <div class="cmdk-list" id="cmdkList"></div>
+</div></div>
+
+<nav class="bottom-nav" id="bottomNav"></nav>
+
+<script>
+"use strict";
+/* ============================================================
+   Episteme 知书 · 高保真交互原型 v0.1
+   单文件 / 零依赖 / 纯前端状态驱动 / localStorage 持久化
+   ============================================================ */
+var STORE_KEY = "episteme-prototype-v1";
+var THEMES = [["mint","浅绿","var(--green)"],["sky","浅蓝","var(--blue)"],["lilac","浅紫","var(--purple)"],["blush","浅粉","var(--pink)"]];
+var FIELD_TYPES = ["text","longtext","markdown","code","number","date","boolean","select","multi_select","tags","url","ref","json","file","user"];
+var STATIC_TOOLS = ["list_spaces","tree","read","search","list_content_types","define_content_type","create_node","move_node","delete_node","create_document","update_document","append_part","annotate","commit","log","diff","branch","merge","revert","export_as_git"];
+var UID = 0;
+function uid(p){ UID++; return (p||"id") + "_" + Date.now().toString(36) + "_" + UID; }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+function now(){ return new Date().toISOString(); }
+function fmt(t){ try{ var d=new Date(t); return (d.getMonth()+1)+"/"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }catch(e){ return String(t); } }
+function shortId(s){ return String(s||"").slice(-7); }
+
+/* ---------- templates ---------- */
+function ct(slug,label,fields,extra){
+  var o={id:uid("ct"),slug:slug,label:label,version:1,exposeToMcp:true,defaultPartKinds:["md"],fields:fields.map(function(f,i){return Object.assign({key:"f"+i,label:"字段",type:"text",required:false,indexed:true,exposeToMcp:true,mcpWritable:true},f);})};
+  return Object.assign(o,extra||{});
+}
+function F(key,label,type,extra){ return Object.assign({key:key,label:label,type:type},extra||{}); }
+
+var TPL_GENERIC = {
+  id:"generic", name:"通用阅读台", desc:"论文 / 代码 / 网页剪藏 / 笔记，一份文档可同时挂四种媒介",
+  build:function(){
+    var types=[
+      ct("paper","论文",[F("title","标题","text",{required:true}),F("year","发表年份","number",{required:true}),F("venue","发表 venue","select",{options:["期刊","会议","预印本"]}),F("tags","主题标签","tags"),F("sourceUrl","原文链接","url"),F("reviewedBy","人工复核结论","text",{mcpWritable:false}),F("internalCost","内部成本","number",{exposeToMcp:false})],{defaultPartKinds:["pdf","md"]}),
+      ct("snippet","代码片段",[F("title","名称","text",{required:true}),F("language","语言","select",{options:["csharp","python","sql","typescript"]}),F("purpose","用途","longtext"),F("tags","标签","tags")],{defaultPartKinds:["code"]}),
+      ct("clip","网页剪藏",[F("title","标题","text",{required:true}),F("sourceUrl","原文 URL","url",{required:true}),F("fetchedAt","抓取时间","date",{mcpWritable:false}),F("tags","标签","tags")],{defaultPartKinds:["web"]}),
+      ct("note","笔记",[F("title","标题","text",{required:true}),F("tags","标签","tags"),F("pinned","置顶","boolean")],{defaultPartKinds:["md"]})
+    ];
+    var nodes=[
+      {id:uid("n"),parentId:null,path:"/论文库",name:"论文库",typeSlug:"paper",exposeToMcp:true,expanded:true},
+      {id:uid("n"),parentId:null,path:"/代码片段",name:"代码片段",typeSlug:"snippet",exposeToMcp:true,expanded:true},
+      {id:uid("n"),parentId:null,path:"/网页剪藏",name:"网页剪藏",typeSlug:"clip",exposeToMcp:true,expanded:true},
+      {id:uid("n"),parentId:null,path:"/笔记",name:"笔记",typeSlug:"note",exposeToMcp:true,expanded:true},
+      {id:uid("n"),parentId:null,path:"/归档",name:"归档",typeSlug:null,exposeToMcp:false,expanded:true}
+    ];
+    var paperRoot=nodes[0];
+    nodes.push({id:uid("n"),parentId:paperRoot.id,path:"/论文库/2026",name:"2026",typeSlug:"paper",exposeToMcp:true,expanded:true});
+    var byPath={}; nodes.forEach(function(n){byPath[n.path]=n.id;});
+    var docs=[
+      {id:uid("d"),nodeId:byPath["/论文库"],typeSlug:"paper",title:"内容寻址版本模型在协同写作中的应用",
+       fields:{title:"内容寻址版本模型在协同写作中的应用",year:2026,venue:"预印本",tags:["版本管理","MCP"],sourceUrl:"https://example.org/paper.pdf"},
+       parts:[
+         {id:uid("p"),kind:"pdf",sourceUri:"https://example.org/paper.pdf",meta:{pages:12,title:"内容寻址版本模型在协同写作中的应用"}},
+         {id:uid("p"),kind:"md",content:"## 阅读笔记\n\n- 用 **Tree 快照** 而非增量补丁，diff 更直观。\n- 三条写入路径共享同一条 Commit 链。\n- **待确认**：合并冲突策略是否要人工逐条确认。\n\n### 结论\n适合人机共写的知识库场景。"},
+         {id:uid("p"),kind:"web",sourceUri:"https://example.org/blog/versioning",meta:{origin:"external"}},
+         {id:uid("p"),kind:"code",language:"python",content:"def tree_hash(entries):\n    # canonical serialization\n    payload = canonical(sorted(entries))\n    return sha256(payload)\n\nclass Commit:\n    parents = []\n    tree = None"}
+       ],
+       annotations:[{id:uid("a"),partKind:"pdf",kind:"highlight",text:"内容寻址快照 DAG",note:"这是与真 git 的核心差异",color:"#ffeaa0"}]},
+      {id:uid("d"),nodeId:byPath["/代码片段"],typeSlug:"snippet",title:"PostgreSQL jsonb 表达式索引生成",
+       fields:{title:"PostgreSQL jsonb 表达式索引生成",language:"sql",purpose:"按动态字段建索引",tags:["postgres","schema"]},
+       parts:[{id:uid("p"),kind:"code",language:"sql",content:"-- dynamic field index from FieldDef.indexed\nCREATE INDEX doc_year_idx\n  ON documents ((fields->>'year'));\nCREATE INDEX doc_tags_idx\n  ON documents USING gin ((fields->'tags'));"}],
+       annotations:[{id:uid("a"),partKind:"code",kind:"note",text:"dynamic field index",note:"大库需评估选择性",color:"#e9f2fd"}]},
+      {id:uid("d"),nodeId:byPath["/网页剪藏"],typeSlug:"clip",title:"MCP 工具动态注册机制解析",
+       fields:{title:"MCP 工具动态注册机制解析",sourceUrl:"https://example.org/mcp-tools",fetchedAt:"2026-11-08",tags:["MCP","协议"]},
+       parts:[{id:uid("p"),kind:"web",sourceUri:"https://example.org/mcp-tools",meta:{origin:"external"}}],annotations:[]},
+      {id:uid("d"),nodeId:byPath["/笔记"],typeSlug:"note",title:"关于「空壳」的几点思考",
+       fields:{title:"关于「空壳」的几点思考",tags:["产品"],pinned:true},
+       parts:[{id:uid("p"),kind:"md",content:"## 空壳原则\n\n- 内核不内置任何业务名词。\n- 目录与内容类型由用户定义。\n- **Schema 即契约**：字段一改，列表、表单、索引、MCP 工具签名同步重建。\n\n> 变的只有数据，不变的是内核。"}],annotations:[]}
+    ];
+    return {types:types,nodes:nodes,docs:docs};
+  }
+};
+
+var TPL_WORKBENCH = {
+  id:"workbench", name:"商业短篇创作工作台", desc:"现有 v3.2 产品降级为模板：11 个固定模块 → 11 个可改目录与内容类型",
+  build:function(){
+    var defs=[
+      ["work_archive","作品入库档案",[F("title","作品名","text",{required:true}),F("platform","首发平台","select"),F("track","题材赛道","select"),F("wordCount","总字数","number"),F("synopsis","核心剧情梗","longtext")]],
+      ["opening_hook","导语 & 开篇钩子",[F("title","模板名","text",{required:true}),F("style","开篇范式","select"),F("formula","留人公式","longtext"),F("pitfalls","避雷清单","tags")]],
+      ["track_topic","赛道选题",[F("title","选题名","text",{required:true}),F("track","赛道","select"),F("formula","爆款公式","longtext"),F("emotionPain","情绪痛点","tags")]],
+      ["character","人设素材",[F("title","人设名","text",{required:true}),F("archetype","原型","select"),F("surface","表层人设","longtext"),F("contrast","反差设计","longtext")]],
+      ["plot_structure","剧情结构 & 节奏",[F("title","框架名","text",{required:true}),F("wordTier","字数档","select"),F("threeAct","三幕式结构","longtext"),F("emotionCurve","情绪曲线","tags")]],
+      ["teardown","拆文复盘",[F("title","拆解对象","text",{required:true}),F("mainHook","核心大梗","longtext"),F("mainConflict","主线冲突","longtext"),F("viralAttribution","爆火归因","longtext"),F("rewritePlan","仿写方案","markdown")]],
+      ["quote","金句 & 对话",[F("title","金句","text",{required:true}),F("category","分类","select"),F("emotion","情绪标签","tags")]],
+      ["ending_template","结局闭环模板",[F("title","模板名","text",{required:true}),F("endingType","结局类型","select"),F("quickCloseRule","收尾规范","longtext")]],
+      ["compliance","平台过稿 & 合规",[F("title","规则名","text",{required:true}),F("platform","平台","select"),F("redLines","审核红线","tags"),F("complianceChecked","合规校验","select",{mcpWritable:false})]],
+      ["conflict_material","原创冲突素材",[F("title","素材名","text",{required:true}),F("category","分类","select"),F("detail","素材正文","markdown")]],
+      ["hotspot","每日全网热点",[F("title","热点标题","text",{required:true}),F("rank","榜单排名","number"),F("source","来源榜单","select"),F("sourceUrl","原文链接","url"),F("summary","① 精简梗概","longtext"),F("emotionTag","② 情绪标签","tags"),F("dramaticConflict","③ 核心冲突","longtext"),F("novelHook","④ 小说核心梗","longtext"),F("fitTrack","⑤ 适配赛道","select"),F("titleTemplates","⑥ 3 个标题模板","json"),F("blurredText","事实虚化改编","markdown"),F("complianceChecked","合规校验","select",{mcpWritable:false})]],
+      ["adaptation","热点改编示范",[F("title","示范标题","text",{required:true}),F("blurredText","改编文本","markdown")]]
+    ];
+    var types=defs.map(function(d){return ct(d[0],d[1],d[2],{defaultPartKinds:d[0]==="hotspot"?["web","md"]:["md"]});});
+    var names=[["M1-作品入库档案库","work_archive"],["M2-导语开篇钩子库","opening_hook"],["M3-赛道选题库","track_topic"],["M4-人设素材库","character"],["M5-剧情结构节奏库","plot_structure"],["M6-拆文复盘库","teardown"],["M7-金句对话库","quote"],["M8-结局闭环模板库","ending_template"],["M9-平台过稿合规自查库","compliance"],["M10-原创冲突素材储备库","conflict_material"],["M11-每日全网热点库","hotspot"]];
+    var nodes=names.map(function(x){return {id:uid("n"),parentId:null,path:"/"+x[0],name:x[0],typeSlug:x[1],exposeToMcp:true,expanded:true};});
+    var hot=nodes[10];
+    nodes.push({id:uid("n"),parentId:hot.id,path:hot.path+"/每日",name:"每日",typeSlug:"hotspot",exposeToMcp:true,expanded:false});
+    nodes.push({id:uid("n"),parentId:hot.id,path:hot.path+"/历史存档",name:"历史存档",typeSlug:"hotspot",exposeToMcp:true,expanded:false});
+    nodes.push({id:uid("n"),parentId:hot.id,path:hot.path+"/改编示范",name:"改编示范",typeSlug:"adaptation",exposeToMcp:true,expanded:false});
+    nodes.push({id:uid("n"),parentId:hot.id,path:hot.path+"/避雷清单",name:"避雷清单",typeSlug:"compliance",exposeToMcp:false,expanded:false});
+    return {types:types,nodes:nodes,docs:[]};
+  }
+};
+var TEMPLATES=[TPL_GENERIC,TPL_WORKBENCH];
+
+/* ---------- state ---------- */
+function blankSpace(name){
+  return {id:uid("sp"),name:name,slug:name.replace(/\s+/g,"_"),createdAt:now(),nodes:[],contentTypes:[],documents:[],commits:[],refs:{},toolsVersion:1,mcpLog:[],installedPacks:[],currentBranch:"main"};
+}
+function initialState(){ return {theme:"mint",spaces:[],activeSpaceId:null,page:"library",nodeId:null,docId:null,partKind:null,drawer:null,modal:null,webMode:"read",cmdkOpen:false,cmdkQuery:"",diffCommitId:null,busy:false,schemaDraft:null}; }
+var S = initialState();
+function load(){ try{ var raw=localStorage.getItem(STORE_KEY); if(raw){ var d=JSON.parse(raw); if(d&&d.spaces){ S=Object.assign(initialState(),d); S.drawer=null;S.modal=null;S.cmdkOpen=false;S.busy=false; } } }catch(e){ S=initialState(); } }
+function save(){ try{ var c={}; for(var k in S){ if(["modal","drawer","cmdkOpen","busy","schemaDraft"].indexOf(k)<0) c[k]=S[k]; } localStorage.setItem(STORE_KEY,JSON.stringify(c)); }catch(e){} }
+function sp(){ return S.spaces.find(function(x){return x.id===S.activeSpaceId;}) || null; }
+function nodeById(id){ var s=sp(); return s?s.nodes.find(function(n){return n.id===id;})||null:null; }
+function typeBySlug(slug){ var s=sp(); return s?s.contentTypes.find(function(t){return t.slug===slug;})||null:null; }
+function typeOfNode(n){ return n&&n.typeSlug?typeBySlug(n.typeSlug):null; }
+function docById(id){ var s=sp(); return s?s.documents.find(function(d){return d.id===id;})||null:null; }
+function currentNode(){ return S.nodeId?nodeById(S.nodeId):null; }
+function currentDoc(){ return S.docId?docById(S.docId):null; }
+function docPart(d,kind){ return d?d.parts.find(function(p){return p.kind===kind;})||null:null; }
+function head(){ var s=sp(); if(!s) return null; return s.refs[s.currentBranch]||s.refs.main||null; }
+
+/* ---------- commits ---------- */
+function commit(message,source,extra){
+  var s=sp(); if(!s) return null;
+  var c=Object.assign({id:uid("cm"),parents:head()?[head()]:[],message:message||"更新",source:source||"ui",author:source==="mcp"?"claude-desktop":"你",agentId:source==="mcp"?"claude-desktop":null,reason:"",branch:s.currentBranch,ts:now(),stats:{added:0,modified:1,deleted:0},changes:[]},extra||{});
+  s.commits.unshift(c); s.refs[s.currentBranch]=c.id;
+  return c;
+}
+function logMcp(line){ var s=sp(); if(!s) return; s.mcpLog.unshift({t:now(),line:line}); if(s.mcpLog.length>60)s.mcpLog.pop(); }
+function bumpTools(){ var s=sp(); if(!s)return; s.toolsVersion++; logMcp("notifications/tools/list_changed → toolsVersion="+s.toolsVersion); }
+
+/* ---------- dynamic MCP tools ---------- */
+function buildTools(){
+  var s=sp(); if(!s) return {statics:[],derived:[],version:0,total:0};
+  var derived=[];
+  s.contentTypes.forEach(function(t){
+    var bound=s.nodes.some(function(n){return n.typeSlug===t.slug&&n.exposeToMcp;});
+    if(!t.exposeToMcp||!bound) return;
+    var visible=t.fields.filter(function(f){return f.exposeToMcp;});
+    var writable=visible.filter(function(f){return f.mcpWritable;});
+    ["query","create","update"].forEach(function(op){
+      derived.push({name:"episteme."+op+"_"+t.slug,op:op,slug:t.slug,label:t.label,version:t.version,fields:op==="query"?visible.filter(function(f){return f.indexed;}):writable,required:op==="create"?writable.filter(function(f){return f.required;}).map(function(f){return f.key;}):(op==="update"?["docId"]:[])});
+    });
+  });
+  return {statics:STATIC_TOOLS.map(function(n){return "episteme."+n;}),derived:derived,version:s.toolsVersion,total:STATIC_TOOLS.length+derived.length};
+}
+function fieldJsonType(t){
+  switch(t){
+    case "number":return "integer"; case "boolean":return "boolean"; case "date":return "string (date-time)";
+    case "tags":case "multi_select":return "array<string>"; case "json":case "file":case "code":return "object";
+    case "url":return "string (uri)"; default:return "string";
+  }
+}
+function toolSchema(tool){
+  var props={};
+  tool.fields.forEach(function(f){ props[f.key]={type:fieldJsonType(f.type),description:f.label+(f.mcpWritable?"":" · 只读")}; });
+  if(tool.op==="query"){props.page={type:"integer",default:1};props.pageSize={type:"integer",default:20};}
+  if(tool.op==="create"){props.nodePath={type:"string",description:"目标目录路径"};props.parts={type:"array",description:"可选媒介部件 md/code/pdf/web"};props.branch={type:"string",description:"默认 refs/heads/main"};props.reason={type:"string",description:"写入 Commit 的审计理由"};props.expectParent={type:"string",description:"乐观锁"};props.idempotencyKey={type:"string",description:"幂等键"};props.dryRun={type:"boolean",description:"仅返回 diff 预览"};}
+  if(tool.op==="update"){props.branch={type:"string"};props.reason={type:"string"};props.expectParent={type:"string"};}
+  return {name:tool.name,description:"在节点下"+({query:"查询",create:"新建",update:"更新"}[tool.op])+"「"+tool.label+"」文档；Schema v"+tool.version+" 自动生成",inputSchema:{type:"object",properties:props,required:tool.required}};
+}
+
+/* ---------- render helpers ---------- */
+function chip(text,color){ return '<span class="chip '+(color||"")+'">'+esc(text)+"</span>"; }
+function btn(text,action,extra,cls){ return '<button class="btn '+(cls||"")+'" data-action="'+action+'" '+(extra||"")+">"+text+"</button>"; }
+function pageHead(title,desc,actions){ return '<div class="page-head"><div><h1 class="page-title">'+esc(title)+'</h1><div class="page-desc">'+esc(desc)+"</div></div><div class=\"head-actions\">"+(actions||"")+"</div></div>"; }
+
+/* ---------- render: shell ---------- */
+function renderShell(){
+  var s=sp();
+  document.documentElement.setAttribute("data-theme",S.theme);
+  document.getElementById("themeDots").innerHTML=THEMES.map(function(t){return '<button class="theme-dot'+(S.theme===t[0]?" active":"")+'" style="background:'+t[2]+'" data-action="theme" data-theme="'+t[0]+'" title="'+t[1]+'" aria-label="'+t[1]+'"></button>';}).join("");
+  var sel=document.getElementById("spaceSelect");
+  sel.innerHTML=S.spaces.length?S.spaces.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.id===S.activeSpaceId?" selected":"")+">"+esc(x.name)+"</option>";}).join(""):'<option value="">（尚无空间）</option>';
+  var tools=buildTools();
+  document.getElementById("toolsVerTop").textContent="v"+tools.version;
+  document.getElementById("mcpPill").title="动态 MCP 工具 "+tools.total+" 个 · toolsVersion v"+tools.version;
+  renderSidebar();
+  renderCrumb();
+  renderBottomNav();
+}
+function renderSidebar(){
+  var s=sp(),h="";
+  if(!s){
+    h+='<div class="side-title">开始使用</div>';
+    h+='<button class="nav-item active" data-action="open-modal" data-modal="create-space"><span class="n-ico">＋</span>创建空间</button>';
+    document.getElementById("sideScroll").innerHTML=h; return;
+  }
+  h+='<div class="side-title">工作台</div>';
+  [["library","▤","文档"],["schema","⚙","Schema / 内容类型"],["templates","◈","模板 Pack"],["mcp","⌘","MCP 工具"]].forEach(function(p){
+    h+='<button class="nav-item'+(S.page===p[0]?" active":"")+'" data-action="open-page" data-page="'+p[0]+'"><span class="n-ico">'+p[1]+"</span>"+p[2]+"</button>";
+  });
+  h+='<div class="side-title">目录树 <button data-action="open-modal" data-modal="new-node">＋ 新建</button></div>';
+  if(!s.nodes.length){ h+='<div class="tiny muted" style="padding:6px 10px;line-height:1.7">还是空的。新建目录，或安装一个模板 Pack。</div>'; }
+  else{
+    var roots=s.nodes.filter(function(n){return !n.parentId;});
+    roots.forEach(function(n){ h+=renderTreeNode(n,0); });
+  }
+  h+='<div class="divider"></div>';
+  h+='<div class="side-title">系统</div>';
+  h+='<button class="nav-item" data-action="open-drawer" data-drawer="version"><span class="n-ico">⑂</span>版本历史<span class="n-badge">'+s.commits.length+"</span></button>";
+  h+='<button class="nav-item" data-action="open-modal" data-modal="settings"><span class="n-ico">◎</span>设置与重置</button>';
+  document.getElementById("sideScroll").innerHTML=h;
+}
+function renderTreeNode(n,depth){
+  var s=sp(),kids=s.nodes.filter(function(x){return x.parentId===n.id;});
+  var t=typeOfNode(n);
+  var h='<div class="tree-row'+(S.nodeId===n.id?" active":"")+(n.exposeToMcp?"":" tree-hidden")+'" style="padding-left:'+(6+depth*13)+'px" data-action="select-node" data-id="'+esc(n.id)+'">';
+  h+='<span class="tree-caret'+(kids.length?"":" leaf")+'" data-action="toggle-node" data-id="'+esc(n.id)+'">'+(kids.length?(n.expanded?"▾":"▸"):"•")+"</span>";
+  h+='<span class="tree-label" title="'+esc(n.path)+'">'+esc(n.name)+"</span>";
+  h+=t?'<span class="tree-type">'+esc(t.label)+"</span>":"";
+  if(!n.exposeToMcp) h+='<span class="tiny muted" title="不暴露给 MCP">⊘</span>';
+  h+="</div>";
+  if(n.expanded) kids.forEach(function(k){h+=renderTreeNode(k,depth+1);});
+  return h;
+}
+function renderCrumb(){
+  var s=sp(),parts=["知书"];
+  if(s){ parts.push(s.name);
+    var n=currentNode(); if(n)parts.push(n.name);
+    var d=currentDoc(); if(d)parts.push(d.title);
+    else if(S.page==="schema")parts.push("Schema"); else if(S.page==="templates")parts.push("模板"); else if(S.page==="mcp")parts.push("MCP 工具");
+  }
+  document.getElementById("crumb").innerHTML=parts.map(function(p,i){return (i?'<span>/</span>':"")+"<b>"+esc(p)+"</b>";}).join("");
+}
+function renderBottomNav(){
+  var items=[["library","▤","文档"],["schema","⚙","Schema"],["mcp","⌘","MCP"],["version","⑂","版本"]];
+  document.getElementById("bottomNav").innerHTML=items.map(function(it){
+    var active=(it[0]==="version")?(S.drawer==="version"):(S.page===it[0]&&!S.drawer);
+    var act=it[0]==="version"?'data-action="open-drawer" data-drawer="version"':'data-action="open-page" data-page="'+it[0]+'"';
+    return '<button class="'+(active?"active":"")+'" '+act+'><i>'+it[1]+"</i>"+it[2]+"</button>";
+  }).join("");
+}
+
+/* ---------- render: pages ---------- */
+function renderContent(){
+  var el=document.getElementById("content"),s=sp();
+  if(!s){ el.innerHTML=renderEmptyStart(); return; }
+  if(S.page==="templates"){ el.innerHTML=renderTemplates(); return; }
+  if(S.page==="schema"){ el.innerHTML=renderSchemaPage(); return; }
+  if(S.page==="mcp"){ el.innerHTML=renderMcpPage(); return; }
+  if(currentDoc()){ el.innerHTML=renderDocPage(); return; }
+  el.innerHTML=renderLibraryPage();
+}
+function renderEmptyStart(){
+  return '<div class="card empty" style="max-width:760px;margin:6vh auto 0">'+
+    '<div class="empty-ico">知</div><h2>一个没有预设业务语义的文档内核</h2>'+
+    '<p>Episteme 知书 启动后是空的：没有固定目录、没有固定字段、没有内置模块。<br>目录与内容由你定义，随后自动成为 AI Agent 可通过 MCP 读写编辑的资源与工具。</p>'+
+    '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">'+
+      btn("创建你的第一个空间","open-modal",'data-modal="create-space"',"primary")+
+      btn("重置原型","reset-empty","","")+"</div>"+
+    '<div class="divider" style="max-width:520px;margin:26px auto"></div>'+
+    '<div class="grid g3" style="text-align:left;max-width:640px;margin:0 auto">'+
+      [["① 自定义","目录树 + Schema 字段，列表与表单即时生成"],["② 动态 MCP","工具随 Schema 变化，无需重启服务"],["③ git 式版本","界面 / API / Agent 共用一条 Commit 链"]].map(function(x){
+        return '<div class="card pad" style="padding:13px"><div class="small" style="font-weight:700;margin-bottom:4px">'+x[0]+'</div><div class="tiny muted">'+x[1]+"</div></div>";
+      }).join("")+"</div></div>";
+}
+function renderLibraryPage(){
+  var s=sp(),n=currentNode(),t=n?typeOfNode(n):null;
+  var q=(S.docQuery||"").trim().toLowerCase();
+  var docs=s.documents.filter(function(d){
+    var inNode = n? (d.nodeId===n.id || isDescendantNode(d.nodeId,n.id)) : true;
+    if(!inNode||!q)return inNode;
+    var hay=[d.title,d.typeSlug].concat(Object.keys(d.fields||{}).map(function(k){return d.fields[k];})).join(" ").toLowerCase();
+    return hay.indexOf(q)>=0;
+  });
+  var h=pageHead(n?n.name:"全部文档",n?("节点 "+n.path+(t?" · 内容类型「"+t.label+"」":" · 纯目录")):"当前空间下的全部文档",
+    btn("＋ 新建目录","open-modal",'data-modal="new-node"',"")+btn("＋ 新建文档","open-modal",'data-modal="new-doc"',"primary"));
+  if(!s.nodes.length){
+    return h+'<div class="card empty"><div class="empty-ico">▤</div><h2>这个空间还是空的</h2><p>先新建目录定义结构，或安装一个模板 Pack 一次性生成目录与内容类型。</p><div style="display:flex;gap:9px;justify-content:center">'+btn("安装模板 Pack","open-page",'data-page="templates"',"primary")+btn("新建目录","open-modal",'data-modal="new-node"',"")+"</div></div>";
+  }
+  h+='<div class="grid g4" style="margin-bottom:16px">'+
+    [["目录",s.nodes.length],["内容类型",s.contentTypes.length],["文档",s.documents.length],["提交",s.commits.length]].map(function(x){
+      return '<div class="card pad" style="padding:13px 15px"><div class="stat"><span class="num">'+x[1]+'</span><span class="lbl">'+x[0]+"</span></div></div>";
+    }).join("")+"</div>";
+  h+='<div class="card" style="padding:14px">';
+  h+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">'+
+     '<input class="input" id="docSearch" placeholder="搜索标题 / 标签…" style="max-width:240px" value="'+esc(S.docQuery||"")+'" data-bind="docQuery">'+
+     (n?'<button class="btn sm" data-action="clear-node">全部文档</button>':"")+
+     (n?chip("节点：" + n.path,"green"):chip("全部节点","blue"))+
+     (t?chip("Schema v"+t.version,"purple"):"")+
+     '<span class="tiny muted" style="margin-left:auto">共 '+docs.length+" 篇 · 列由 Schema 动态生成</span></div>";
+  var cols=t?t.fields.filter(function(f){return f.indexed;}).slice(0,4):[];
+  if(!docs.length){ h+='<div class="empty" style="padding:34px 10px"><div class="tiny muted">该节点下还没有文档。点右上角「新建文档」，表单会按这里的内容类型自动生成。</div></div>'; }
+  else{
+    h+='<table class="table"><thead><tr><th>标题</th>';
+    cols.forEach(function(f){h+="<th>"+esc(f.label)+"</th>";});
+    h+="<th>媒介</th><th>更新</th><th></th></tr></thead><tbody>";
+    docs.forEach(function(d){
+      var dt=typeBySlug(d.typeSlug);
+      h+='<tr class="clickable" data-action="open-doc" data-id="'+esc(d.id)+'"><td><b>'+esc(d.title)+"</b><div class=\"tiny muted\">"+esc(dt?dt.label:"—")+" · "+esc(shortId(d.id))+"</div></td>";
+      cols.forEach(function(f){ var v=d.fields[f.key]; h+="<td>"+(Array.isArray(v)?v.map(function(x){return '<span class="tag">'+esc(x)+"</span>";}).join(""):esc(v==null?"—":v))+"</td>"; });
+      h+="<td>"+d.parts.map(function(p){return chip(p.kind,p.kind==="pdf"?"amber":p.kind==="web"?"blue":p.kind==="code"?"purple":"green");}).join("")+"</td>";
+      h+='<td class="tiny muted">'+fmt(d.updatedAt||d.createdAt)+"</td>";
+      h+='<td><button class="btn sm" data-action="open-doc" data-id="'+esc(d.id)+'">打开</button></td></tr>';
+    });
+    h+="</tbody></table>";
+  }
+  h+="</div>";
+  return h;
+}
+function isDescendantNode(nodeId,ancestorId){
+  var s=sp(),cur=nodeById(nodeId),guard=0;
+  while(cur&&cur.parentId&&guard++<20){ if(cur.parentId===ancestorId)return true; cur=nodeById(cur.parentId); }
+  return false;
+}
+function renderTemplates(){
+  var s=sp();
+  var h=pageHead("模板 Pack","Pack 是纯数据：安装 = 在一个事务里创建目录与内容类型并生成一条 Commit。卸载不影响已有文档。",
+    btn("导出当前 Pack","export-pack","","")+btn("＋ 新建空间","open-modal",'data-modal="create-space"',""));
+  h+='<div class="banner info">内核零业务语义。下面两个 Pack 演示「同一空壳、两种完全不同的产品形态」；其中商业短篇创作工作台就是现有 v3.2 产品降级后的样子。</div>';
+  h+='<div class="grid g2">';
+  TEMPLATES.forEach(function(t){
+    var installed=s.installedPacks.indexOf(t.id)>=0;
+    h+='<div class="card pad"><div class="section-title">'+esc(t.name)+" "+(installed?chip("已安装","green"):chip("未安装",""))+"</div>"+
+      '<div class="small muted" style="min-height:44px">'+esc(t.desc)+"</div>"+
+      '<div class="tiny muted" style="margin:10px 0">声明式 JSON · 目录 + 内容类型 + 视图 + 提示词 + 定时任务</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        btn(installed?"重新安装（追加）":"安装此模板","install-template",'data-tpl="'+t.id+'"',"primary")+
+        (installed?btn("预览定义","preview-pack",'data-tpl="'+t.id+'"',""):"")+"</div></div>";
+  });
+  h+="</div>";
+  h+='<div class="card pad" style="margin-top:14px"><div class="section-title">已安装</div>';
+  h+=s.installedPacks.length?s.installedPacks.map(function(id){var t=TEMPLATES.find(function(x){return x.id===id;});return '<div class="kv"><span class="k">'+esc(t?t.name:id)+"</span><span class=\"v\">"+chip("active","green")+"</span></div>";}).join(""):'<div class="tiny muted">尚未安装任何模板</div>';
+  h+="</div>";
+  return h;
+}
+function renderSchemaPage(){
+  var s=sp();
+  var h=pageHead("Schema / 内容类型","字段定义就是契约：保存后列表列、新建表单、检索索引与 MCP 工具签名在同一事务内重建。",
+    btn("＋ 新建内容类型","open-modal",'data-modal="new-type"',"primary")+btn("查看动态工具","open-drawer",'data-drawer="mcp"',""));
+  h+='<div class="banner warn">双层暴露开关：<b>exposeToMcp=false</b> 的字段完全不出现在工具签名；<b>mcpWritable=false</b> 的字段 Agent 可读不可写。改完记得点「保存 Schema」。</div>';
+  if(!s.contentTypes.length) return h+'<div class="card empty"><div class="empty-ico">⚙</div><h2>还没有内容类型</h2><p>新建一个类型并定义字段，或先安装模板 Pack。</p>'+btn("＋ 新建内容类型","open-modal",'data-modal="new-type"',"primary")+"</div>";
+  h+='<div class="grid g2">';
+  s.contentTypes.forEach(function(t){
+    var bound=s.nodes.filter(function(n){return n.typeSlug===t.slug;});
+    h+='<div class="card pad"><div class="section-title"><span>'+esc(t.label)+' <span class="tiny muted mono">'+esc(t.slug)+"</span></span>"+chip("v"+t.version,"purple")+"</div>";
+    h+='<div class="tiny muted" style="margin-bottom:10px">'+t.fields.length+" 个字段 · 绑定 "+bound.length+" 个目录 · "+(t.exposeToMcp?chip("暴露给 MCP","green"):chip("不暴露","red"))+"</div>";
+    h+='<div class="schema-field" style="font-weight:650;color:var(--muted);font-size:10px;border-bottom:1px solid var(--line)"><span>字段 / KEY</span><span>类型</span><span>必填</span><span>MCP</span><span></span></div>';
+    t.fields.forEach(function(f){
+      h+='<div class="schema-field"><input class="input" value="'+esc(f.label)+'" data-bind="field-label" data-tid="'+esc(t.id)+'" data-fid="'+esc(f.key)+'" title="'+esc(f.key)+'">'+
+        '<select class="select" data-bind="field-type" data-tid="'+esc(t.id)+'" data-fid="'+esc(f.key)+'">'+FIELD_TYPES.map(function(x){return '<option value="'+x+'"'+(f.type===x?" selected":"")+">"+x+"</option>";}).join("")+"</select>"+
+        '<label class="check"><input type="checkbox" data-bind="field-required" data-tid="'+esc(t.id)+'" data-fid="'+esc(f.key)+'"'+(f.required?" checked":"")+"></label>"+
+        '<label class="check"><input type="checkbox" data-bind="field-expose" data-tid="'+esc(t.id)+'" data-fid="'+esc(f.key)+'"'+(f.exposeToMcp?" checked":"")+"></label>"+
+        '<button class="icon-btn" style="width:24px;height:24px;font-size:12px" data-action="del-field" data-tid="'+esc(t.id)+'" data-fid="'+esc(f.key)+'" title="删除字段">✕</button></div>';
+    });
+    h+='<div style="display:flex;gap:7px;margin-top:12px;flex-wrap:wrap">'+
+      btn("＋ 加字段","add-field",'data-tid="'+esc(t.id)+'"',"sm")+
+      btn("保存 Schema","save-schema",'data-tid="'+esc(t.id)+'"',"sm primary")+
+      btn("切换 MCP 暴露","toggle-type-expose",'data-tid="'+esc(t.id)+'"',"sm")+"</div></div>";
+  });
+  h+="</div>";
+  return h;
+}
+function renderMcpPage(){
+  var s=sp(),tools=buildTools();
+  var h=pageHead("动态 MCP Server","Streamable HTTP /mcp · 一次连接绑定一个 Space · 工具随 Schema 实时重建，无需重启服务。",
+    btn("模拟 Agent 写入","agent-write","","primary")+btn("打开工具面板","open-drawer",'data-drawer="mcp"',""));
+  h+='<div class="grid g4" style="margin-bottom:14px">'+
+    [["toolsVersion","v"+tools.version],["静态内核工具",tools.statics.length],["动态派生工具",tools.derived.length],["工具总数",tools.total]].map(function(x){
+      return '<div class="card pad" style="padding:13px 15px"><div class="stat"><span class="num">'+x[1]+'</span><span class="lbl">'+x[0]+"</span></div></div>";
+    }).join("")+"</div>";
+  h+='<div class="grid g2">';
+  h+='<div class="card pad"><div class="section-title">派生工具 <span class="tiny muted">按 exposeToMcp 的类型 × 3</span></div>';
+  h+=tools.derived.length?tools.derived.map(function(t){
+    return '<div class="tool-row"><div class="tool-head" data-action="call-tool" data-name="'+esc(t.name)+'"><span class="chip '+({query:"blue",create:"green",update:"purple"}[t.op])+'">'+t.op+"</span><span class=\"tool-name\">"+esc(t.name)+"</span><span class=\"tiny muted\">"+t.fields.length+" 参数</span></div></div>";
+  }).join(""):'<div class="tiny muted">暂无派生工具：新建内容类型并绑定到目录，或把类型的 MCP 暴露开关打开。</div>';
+  h+="</div>";
+  h+='<div class="card pad"><div class="section-title">调用日志 <span class="tiny muted">本地模拟</span></div><div style="max-height:330px;overflow:auto">';
+  h+=s.mcpLog.length?s.mcpLog.map(function(l){return '<div class="logline"><span class="t">'+fmt(l.t)+"</span> "+esc(l.line)+"</div>";}).join(""):'<div class="tiny muted">还没有调用。点右上角「模拟 Agent 写入」或点左侧任一工具。</div>';
+  h+="</div></div></div>";
+  h+='<div class="card pad" style="margin-top:14px"><div class="section-title">端点与鉴权</div><div class="codeblk">'+
+     esc("POST /mcp?space="+s.slug+"   (Streamable HTTP)\nGET  /api/v1/episteme/spaces/"+shortId(s.id)+"/mcp/tools   (调试)\n\nX-Key-Id / X-Timestamp / X-Nonce / X-Signature\n签名顺序: timestamp -> nonce -> key -> body\nscope: episteme:read | write | schema | version | annotate")+"</div></div>";
+  return h;
+}
+
+/* ---------- render: document + viewers ---------- */
+function renderDocPage(){
+  var d=currentDoc(),t=typeBySlug(d.typeSlug),n=nodeById(d.nodeId);
+  var kinds=d.parts.map(function(p){return p.kind;});
+  if(!S.partKind||kinds.indexOf(S.partKind)<0)S.partKind=kinds[0];
+  var kind=S.partKind;
+  var h=pageHead(d.title,(n?n.path:"")+(t?" · 「"+t.label+"」 Schema v"+t.version:""),
+    btn("← 返回列表","back-list","","")+btn("版本历史","open-drawer",'data-drawer="version"',"")+btn("标记汇总","export-annotations","",""));
+  h+='<div class="card" style="padding:14px;margin-bottom:14px"><div class="section-title" style="margin-bottom:8px">文档字段 <span class="tiny muted">由 Schema 渲染</span></div><div class="grid g3">';
+  (t?t.fields:dummyFields(d)).forEach(function(f){
+    var v=d.fields[f.key];
+    h+='<div><div class="tiny muted">'+esc(f.label)+' <span class="mono">'+esc(f.key)+"</span></div><div class=\"small\">"+
+       (Array.isArray(v)?v.map(function(x){return '<span class="tag">'+esc(x)+"</span>";}).join(""):esc(v==null||v===""?"—":v))+"</div></div>";
+  });
+  h+="</div></div>";
+  h+='<div class="tabs">'+d.parts.map(function(p){
+    var label={md:"Markdown",code:"Code",pdf:"PDF",web:"Web",attachment:"附件"}[p.kind]||p.kind;
+    return '<button class="tab'+(kind===p.kind?" active":"")+'" data-action="switch-tab" data-kind="'+p.kind+'">'+label+"</button>";
+  }).join("")+"</div>";
+  h+='<div class="viewer-shell"><div class="viewer-main" id="viewerMain">'+renderViewer(d,kind)+"</div>"+
+     '<div><div class="card pad" style="padding:13px"><div class="section-title">标记 / 批注 <span class="tiny muted">'+d.annotations.filter(function(a){return a.partKind===kind;}).length+" 条</span></div>"+renderAnnotations(d,kind)+"</div>"+
+     '<div class="card pad" style="padding:13px;margin-top:12px"><div class="section-title">Part 组合</div><div class="tiny muted" style="line-height:1.9">同一份文档可同时挂多种媒介，共享一条版本链。</div>'+
+     d.parts.map(function(p){return '<div class="kv"><span class="k">'+esc(p.kind)+"</span><span class=\"v\">"+chip("Part","blue")+"</span></div>";}).join("")+"</div></div></div>";
+  return h;
+}
+function dummyFields(d){ return Object.keys(d.fields).slice(0,6).map(function(k){return {key:k,label:k,type:"text"};}); }
+function renderViewer(d,kind){
+  var p=docPart(d,kind),anns=d.annotations.filter(function(a){return a.partKind===kind;});
+  if(kind==="md") return renderMd(d,p);
+  if(kind==="code") return renderCode(d,p);
+  if(kind==="pdf") return renderPdf(d,p,anns);
+  if(kind==="web") return renderWeb(d,p,anns);
+  return '<div class="card pad">附件：'+esc(p&&p.sourceUri||"—")+"</div>";
+}
+function mdToHtml(src){
+  var lines=esc(src||"").split("\n"),out="",inCode=false,inList=false;
+  for(var i=0;i<lines.length;i++){
+    var L=lines[i];
+    if(L.indexOf("```")===0){ if(inCode){out+="</code></pre>";inCode=false;}else{if(inList){out+="</ul>";inList=false;}out+="<pre><code>";inCode=true;} continue; }
+    if(inCode){ out+=L+"\n"; continue; }
+    if(/^### /.test(L)){ if(inList){out+="</ul>";inList=false;} out+="<h3>"+inlineMd(L.slice(4))+"</h3>"; continue; }
+    if(/^## /.test(L)){ if(inList){out+="</ul>";inList=false;} out+="<h2>"+inlineMd(L.slice(3))+"</h2>"; continue; }
+    if(/^&gt; /.test(L)){ out+="<p style=\"border-left:3px solid var(--primary);padding-left:10px;color:var(--muted)\">"+inlineMd(L.slice(5))+"</p>"; continue; }
+    if(/^[-*] /.test(L)){ if(!inList){out+="<ul>";inList=true;} out+="<li>"+inlineMd(L.slice(2))+"</li>"; continue; }
+    if(inList){out+="</ul>";inList=false;}
+    if(L.trim()===""){out+="<div style=\"height:6px\"></div>";continue;}
+    out+="<p>"+inlineMd(L)+"</p>";
+  }
+  if(inCode)out+="</code></pre>"; if(inList)out+="</ul>";
+  return out;
+}
+function inlineMd(s){
+  return s.replace(/\*\*(.+?)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>");
+}
+function renderMd(d,p){
+  var val=(S.draft&&S.draft.partId===p.id)?S.draft.value:(p.content||"");
+  return '<div class="editor-grid">'+
+    '<div class="editor-pane"><div class="editor-head"><span>Markdown 源码 · 可编辑</span>'+btn("保存并生成 Commit","save-part",'data-kind="md"',"sm primary")+"</div>"+
+    '<textarea class="editor-area" id="partEditor" data-draft="'+esc(p.id)+'">'+esc(val)+"</textarea></div>"+
+    '<div class="editor-pane"><div class="editor-head"><span>预览</span><span>GFM · 自动渲染</span></div><div class="md-preview" id="mdPreview">'+mdToHtml(val)+"</div></div></div>";
+}
+function highlightCode(code){
+  return esc(code||"").split("\n").map(function(line){
+    var cut=line.search(/\/\/|#/),body=line,com="";
+    if(cut>=0){ body=line.slice(0,cut); com=line.slice(cut); }
+    var b=body.replace(/(&quot;[^&]*?&quot;|'[^']*')/g,'<span class="s">$1</span>')
+              .replace(/\b(def|class|return|if|else|for|in|CREATE|INDEX|ON|USING|SELECT|FROM|const|let|var|function|public|private|async|await)\b/g,'<span class="k">$1</span>')
+              .replace(/\b(\d+)\b/g,'<span class="n">$1</span>');
+    return b+(com?'<span class="c">'+com+"</span>":"");
+  }).join("\n");
+}
+function renderCode(d,p){
+  var val=(S.draft&&S.draft.partId===p.id)?S.draft.value:(p.content||"");
+  var lines=val.split("\n").length;
+  var nums=[];for(var i=1;i<=lines;i++)nums.push(i);
+  return '<div class="card pad" style="padding:12px;margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    chip(p.language||"text","purple")+'<span class="tiny muted">Monaco 风格阅读器 · 行级批注 · blame 联动</span>'+
+    '<span style="margin-left:auto">'+btn("＋ 行级批注","add-note",'data-kind="code"',"sm")+btn("保存并生成 Commit","save-part",'data-kind="code"',"sm primary")+"</span></div></div>"+
+    '<div class="editor-grid"><div class="editor-pane"><div class="editor-head"><span>源码 · 可编辑</span><span class="mono">'+lines+" 行</span></div>"+
+    '<textarea class="editor-area" id="partEditor" data-draft="'+esc(p.id)+'" spellcheck="false">'+esc(val)+"</textarea></div>"+
+    '<div class="editor-pane"><div class="editor-head"><span>语法高亮</span><span>只读</span></div><div class="code-view"><div class="code-lines">'+nums.join("<br>")+'</div><div class="code-body" id="codeView">'+highlightCode(val)+"</div></div></div></div>";
+}
+var PDF_BODY=[
+ "第二章 内容寻址快照 DAG",
+ "传统协同写作系统把版本管理建立在文件差异补丁之上，每次编辑生成一份增量，回放成本随历史长度线性增长。Episteme 采用内容寻址方式：把每个 Part 的内容计算为 sha256 哈希，用 TreeEntry 描述某一时刻路径到哈希的映射，再由 Commit 指向 Tree。",
+ "内容寻址快照 DAG 保证事务一致性。由于 Document、Part、Annotation 与 Commit 都落在同一个 PostgreSQL 事务里，界面编辑、REST 调用与 MCP Agent 写入不会出现中间态：要么全部可见，要么全部回滚。",
+ "与真实 git 仓库相比，本方案放弃了外部工具互通能力，换取了行级权限、在线并发编辑与细粒度 diff。对于人机共写的知识库，这个取舍是值得的；同时提供导出为 git 仓库作为补偿。",
+ "每次写操作生成一条 Commit，包含 parents、message、author、source 与 reason。source 区分 ui / api / mcp / import / schema / system，配合 agentId 可以回答「谁、通过什么、为什么改了这一段」。"
+];
+function markText(text,anns){
+  var out=esc(text);
+  anns.forEach(function(a){
+    if(!a.text)return;
+    var q=esc(a.text);
+    out=out.split(q).join('<mark title="'+esc(a.note||"高亮")+'" data-ann="'+esc(a.id)+'">'+q+"</mark>");
+  });
+  return out;
+}
+function renderPdf(d,p,anns){
+  var meta=p.meta||{};
+  var h='<div class="card pad" style="padding:12px;margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    chip("PDF · "+(meta.pages||12)+" 页","amber")+'<span class="tiny muted">pdf.js 文本层 · 选中文字后点「高亮选中」</span>'+
+    '<span style="margin-left:auto">'+btn("高亮选中","highlight-selection",'data-kind="pdf"',"sm")+btn("＋ 批注","add-note",'data-kind="pdf"',"sm")+"</span></div></div>";
+  h+='<div class="pdf-paper"><h3>'+esc(meta.title||d.title)+'</h3><div class="pdf-meta">Episteme Knowledge Paper · 第 2 页 / 共 '+esc(meta.pages||12)+" 页 · 原文快照（只读）</div>";
+  PDF_BODY.forEach(function(par,i){ h+="<p>"+(i===0?"":markText(par,anns))+"</p>"; });
+  h+="</div>";
+  h+='<div class="card pad" style="padding:12px"><div class="section-title">第 2 页 / 共 '+esc(meta.pages||12)+' 页</div><div class="tiny muted">PDF 原件不可编辑；所有高亮与批注作为 Annotation 独立存储并进入版本历史，锚点含 page + rect + textQuote + textPosition 四层冗余，换版后自动重定位。</div></div>';
+  return h;
+}
+var WEB_PARAS=[
+ "动态工具清单不是静态配置文件，而是由当前空间的目录树与内容类型实时计算出来的。当用户新建一个内容类型并绑定目录后，服务端在保存 Schema 的同一事务里重算工具签名、递增 toolsVersion，并向所有已连接客户端推送 tools/list_changed。",
+ "这意味着 Agent 不需要重新配置、不需要重启服务，就能立刻获得 create、query、update 三个新工具。工具参数的 JSON Schema 直接由 FieldDef 映射：必填字段进入 required 数组，exposeToMcp=false 的字段完全不出现，mcpWritable=false 的字段只出现在查询结果里。",
+ "所有写操作建议指定隔离分支。Agent 在 agent/ 分支上的改动不影响 main，人工通过 diff 审阅后再合并；若结果不符合预期，可按 agentId 与时间窗整批 revert。revert 生成反向提交，不改写历史。",
+ "抓取外部网页时，URL 不会在 API 进程内请求，而是投递到独立网络隔离的 fetch-worker，经过禁网段校验、DNS 二次解析、重定向逐跳校验与大小超时限制后才写回快照。"
+];
+function renderWeb(d,p,anns){
+  var raw=S.webMode==="raw";
+  var h='<div class="card pad" style="padding:12px;margin-bottom:12px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    chip("Web 快照","blue")+
+    '<button class="btn sm'+(raw?"":" soft")+'" data-action="switch-web-mode" data-mode="read">阅读模式</button>'+
+    '<button class="btn sm'+(raw?" soft":"")+'" data-action="switch-web-mode" data-mode="raw">原文快照</button>'+
+    '<span style="margin-left:auto">'+btn("高亮选中","highlight-selection",'data-kind="web"',"sm")+btn("＋ 批注","add-note",'data-kind="web"',"sm")+btn("重新抓取","refetch-web","","sm primary")+"</span></div></div>";
+  h+='<div class="web-reader'+(raw?" web-raw":"")+'"><div class="web-bar"><span class="chip green">200 OK</span><span class="web-url">'+esc(p.sourceUri||"")+'</span><span class="tiny muted">抓取于 2026-11-08</span></div><div class="web-body">';
+  if(raw)h+='<div class="ad">广告位 · 原文快照中的导航与推广内容（阅读模式已剔除）</div><div class="ad">相关推荐 · 站点侧栏</div>';
+  h+="<h2>"+esc(d.title)+"</h2>";
+  WEB_PARAS.forEach(function(par){h+="<p>"+markText(par,anns)+"</p>";});
+  h+='<div class="tiny muted" style="margin-top:18px;border-top:1px solid var(--line);padding-top:10px">来源：'+esc(p.sourceUri||"")+" · 外部内容，版权归原作者所有 · 本库保留快照与原文链接</div>";
+  h+="</div></div>";
+  return h;
+}
+function renderAnnotations(d,kind){
+  var anns=d.annotations.filter(function(a){return a.partKind===kind;});
+  if(!anns.length)return '<div class="tiny muted" style="line-height:1.8">暂无标记。'+(kind==="pdf"||kind==="web"?"在上方选中一段文字后点「高亮选中」。":"点上方「＋ 批注」添加行级批注。")+"</div>";
+  return anns.map(function(a){
+    return '<div class="ann-item" data-action="focus-ann" data-id="'+esc(a.id)+'"><button class="del" data-action="del-ann" data-id="'+esc(a.id)+'" title="删除">✕</button>'+
+      '<div>'+chip(a.kind==="note"?"批注":"高亮",a.kind==="note"?"purple":"amber")+' <span class="tiny muted">'+esc(a.partKind)+"</span></div>"+
+      (a.text?'<div class="q">'+esc(a.text.slice(0,42))+"</div>":"")+
+      '<div class="small">'+esc(a.note||"（无批注内容）")+"</div></div>";
+  }).join("");
+}
+
+/* ---------- render: drawers ---------- */
+function renderDrawer(){
+  var host=document.getElementById("drawerHost");
+  var mask=document.getElementById("drawerMask"),dr=document.getElementById("drawer");
+  if(!S.drawer){mask.classList.remove("show");dr.classList.remove("show");document.getElementById("drawerBody").innerHTML="";return;}
+  mask.classList.add("show");dr.classList.add("show");
+  var titles={version:"版本历史 · git 式 Commit 链",mcp:"动态 MCP 工具 · tools/list",schema:"Schema",pack:"Pack 定义"};
+  document.getElementById("drawerTitle").textContent=titles[S.drawer]||"面板";
+  document.getElementById("drawerBody").innerHTML=S.drawer==="version"?renderVersionDrawer():S.drawer==="mcp"?renderMcpDrawer():S.drawer==="pack"?renderPackDrawer():"";
+}
+function renderVersionDrawer(){
+  var s=sp(); if(!s)return "";
+  var branches=Object.keys(s.refs); if(branches.indexOf("main")<0)branches.unshift("main");
+  var visible=s.commits.filter(function(c){return !c.branch||c.branch===s.currentBranch||c.branch==="main";});
+  var h='<div class="card pad" style="padding:12px;margin-bottom:14px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    '<span class="tiny muted">当前分支</span><select class="select" style="width:auto;min-width:170px" data-bind="branch">'+branches.map(function(b){return '<option value="'+esc(b)+'"'+(b===s.currentBranch?" selected":"")+">"+esc(b)+"</option>";}).join("")+"</select>"+
+    (s.refs["agent/demo"]?btn("合并 agent/demo → main","merge-branch","","sm primary"):"")+
+    '<span style="margin-left:auto" class="tiny muted">HEAD '+esc(shortId(head()))+"</span></div></div>";
+  h+='<div class="section-title">提交时间线 <span class="tiny muted">'+visible.length+" 条</span></div>";
+  if(!visible.length)return h+'<div class="card pad tiny muted">还没有提交。新建文档、改 Schema 或模拟 Agent 写入都会产生 Commit。</div>';
+  h+='<div class="timeline">'+visible.map(function(c){
+    return '<div class="commit'+(S.diffCommitId===c.id?" sel":"")+(c.source==="mcp"?" agent":"")+'" data-action="select-commit" data-id="'+esc(c.id)+'">'+
+      '<div class="msg">'+esc(c.message)+"</div>"+
+      '<div class="meta"><span class="mono">'+esc(shortId(c.id))+"</span>"+
+      chip(c.source,c.source==="mcp"?"purple":c.source==="schema"?"blue":c.source==="system"?"red":"green")+
+      "<span>"+esc(c.author)+"</span><span>"+fmt(c.ts)+"</span><span>"+esc(c.branch||"main")+"</span></div></div>";
+  }).join("")+"</div>";
+  h+='<div class="divider"></div><div class="section-title">Diff 审阅 <span class="tiny muted">选中一条提交查看</span></div>'+renderDiff(s);
+  return h;
+}
+function renderDiff(s){
+  var c=s.commits.find(function(x){return x.id===S.diffCommitId;})||s.commits[0];
+  if(!c)return '<div class="tiny muted">暂无可比对内容</div>';
+  var parent=c.parents.length?s.commits.find(function(x){return x.id===c.parents[0];}):null;
+  var changes=(c.changes&&c.changes.length)?c.changes:[{path:c.message,op:"modified",field:"内容",from:"（上一版本）",to:"（当前版本）"}];
+  var h='<div class="card pad" style="padding:12px;margin-bottom:10px"><div class="small" style="font-weight:650">'+esc(c.message)+"</div>"+
+    '<div class="tiny muted" style="margin-top:3px">'+esc(shortId(c.id))+" · "+esc(c.source)+" · "+fmt(c.ts)+"</div>"+
+    '<div style="margin-top:10px;display:flex;gap:7px;flex-wrap:wrap">'+btn("回滚此提交","revert-commit",'data-id="'+esc(c.id)+'"',"sm danger")+
+    (c.source==="mcp"?btn("按 agentId 批量撤销","revert-agent","","sm"):"")+"</div></div>";
+  h+='<div class="diff-grid"><div class="diff-col"><div class="h">BASE · '+esc(parent?shortId(parent.id):"（空树）")+'</div><div class="b">'+
+     changes.map(function(x){return '<div class="diff-del">- '+esc(x.field||x.path)+" : "+esc(x.from==null?"—":x.from)+"</div>";}).join("")+"</div></div>";
+  h+='<div class="diff-col"><div class="h">TARGET · '+esc(shortId(c.id))+'</div><div class="b">'+
+     changes.map(function(x){return '<div class="diff-add">+ '+esc(x.field||x.path)+" : "+esc(x.to==null?"—":x.to)+"</div>";}).join("")+"</div></div></div>";
+  return h;
+}
+function renderMcpDrawer(){
+  var s=sp(),tools=buildTools();if(!s)return "";
+  var h='<div class="banner">toolsVersion <b>v'+tools.version+"</b> · 工具总数 <b>"+tools.total+"</b> · Schema 或目录变更后自动重建并广播 <span class=\"mono\">notifications/tools/list_changed</span></div>";
+  h+='<div class="section-title">派生工具 <span class="tiny muted">点击展开 JSON Schema / 模拟调用</span></div>';
+  h+=tools.derived.length?tools.derived.map(function(t){
+    var open=S.openTool===t.name;
+    var sc=toolSchema(t);
+    return '<div class="tool-row"><div class="tool-head" data-action="toggle-tool" data-name="'+esc(t.name)+'">'+
+      '<span class="chip '+({query:"blue",create:"green",update:"purple"}[t.op])+'">'+t.op+"</span><span class=\"tool-name\">"+esc(t.name)+"</span>"+
+      '<span class="tiny muted">v'+t.version+" · "+t.fields.length+" 参数</span><span>"+(open?"▾":"▸")+"</span></div>"+
+      (open?'<div class="tool-detail"><div class="codeblk" style="max-height:230px">'+esc(JSON.stringify(sc,null,2))+"</div>"+
+        '<div style="margin-top:9px;display:flex;gap:7px;flex-wrap:wrap">'+btn("模拟调用此工具","call-tool",'data-name="'+esc(t.name)+'"',"sm primary")+"</div></div>":"")+"</div>";
+  }).join(""):'<div class="card pad tiny muted">暂无派生工具。到 Schema 页新建类型并绑定目录，或打开类型的 MCP 暴露开关。</div>';
+  h+='<div class="divider"></div><div class="section-title">静态内核工具 <span class="tiny muted">'+tools.statics.length+" 个 · 恒定</span></div>";
+  h+='<div class="card pad" style="padding:10px">'+tools.statics.map(function(n){return '<span class="tag mono">'+esc(n)+"</span>";}).join("")+"</div>";
+  h+='<div class="divider"></div><div class="section-title">Resources 模板</div><div class="codeblk">'+
+    esc("episteme://"+s.slug+"/{nodePath}\nepisteme://"+s.slug+"/{nodePath}/{docId}\nepisteme://"+s.slug+"/{nodePath}/{docId}/part/{kind}\nepisteme://"+s.slug+"/{nodePath}/{docId}/annotations")+"</div>";
+  h+='<div style="margin-top:14px">'+btn("模拟 Agent 在隔离分支写入","agent-write","","primary")+"</div>";
+  return h;
+}
+function renderPackDrawer(){
+  var t=TEMPLATES.find(function(x){return x.id===S.packPreview;}); if(!t)return '<div class="tiny muted">无内容</div>';
+  var b=t.build();
+  var o={id:t.id,name:t.name,version:"1.0.0",episteme:">=0.1.0",
+    nodes:b.nodes.map(function(n){return {path:n.path,contentType:n.typeSlug,exposeToMcp:n.exposeToMcp};}),
+    contentTypes:b.types.map(function(x){return {slug:x.slug,label:x.label,version:1,exposeToMcp:x.exposeToMcp,fields:x.fields.map(function(f){return {key:f.key,label:f.label,type:f.type,required:f.required,exposeToMcp:f.exposeToMcp,mcpWritable:f.mcpWritable};})};})};
+  return '<div class="banner info">Pack 是纯数据（不含可执行代码）。安装动作在一个事务内完成并生成一条 source=import 的 Commit。</div><div class="codeblk" style="max-height:62vh">'+esc(JSON.stringify(o,null,2))+"</div>";
+}
+
+/* ---------- modals ---------- */
+function openModal(kind,extra){
+  S.modal=kind;S.modalExtra=extra||{};
+  var m=document.getElementById("modal"),h="";
+  if(kind==="create-space"){
+    h='<h3>创建你的第一个空间</h3><div class="sub">空间是独立知识库：独立版本 DAG、独立权限、独立 MCP 端点。</div>'+
+      '<div class="field"><label>空间名称</label><input class="input" id="mInput" placeholder="例如：我的资料库" value="我的资料库"></div>'+
+      '<div class="banner info">创建后是<b>完全空的</b>：0 目录、0 内容类型、0 文档。内核不会预置任何业务概念。</div>'+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("创建空间","do-create-space","","primary")+"</div>";
+  }else if(kind==="new-node"){
+    var s=sp(),opts='<option value="">（纯目录，不绑定类型）</option>'+s.contentTypes.map(function(t){return '<option value="'+esc(t.slug)+'">'+esc(t.label)+" · "+esc(t.slug)+"</option>";}).join("");
+    var parents='<option value="">（根目录）</option>'+s.nodes.map(function(n){return '<option value="'+esc(n.id)+'">'+esc(n.path)+"</option>";}).join("");
+    h='<h3>新建目录</h3><div class="sub">目录即集合：绑定内容类型后，其下文档按该 Schema 校验，并自动派生 MCP 工具。</div>'+
+      '<div class="field"><label>目录名称</label><input class="input" id="mInput" placeholder="例如：竞品情报"></div>'+
+      '<div class="field"><label>父目录</label><select class="select" id="mParent">'+parents+"</select></div>"+
+      '<div class="field"><label>绑定内容类型</label><select class="select" id="mType">'+opts+'</select><div class="hint">没有合适的类型？先到 Schema 页新建一个。</div></div>'+
+      '<div class="field"><label class="check"><input type="checkbox" id="mExpose" checked> 暴露给 MCP（出现在资源树与动态工具中）</label></div>'+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("创建目录","do-new-node","","primary")+"</div>";
+  }else if(kind==="new-type"){
+    h='<h3>新建内容类型</h3><div class="sub">类型定义一组字段；保存后列表列、表单、索引和 MCP 工具签名同步生成。</div>'+
+      '<div class="field"><label>显示名</label><input class="input" id="mLabel" placeholder="例如：竞品情报"></div>'+
+      '<div class="field"><label>slug（工具名后缀，小写字母/数字/下划线）</label><input class="input" id="mInput" placeholder="competitor_intel"></div>'+
+      '<div class="field"><label>初始字段数</label><select class="select" id="mFieldCount"><option>3</option><option>4</option><option>5</option></select></div>'+
+      '<div class="banner info">创建后会自动生成一个同名目录并绑定该类型，随即派生 <span class="mono">query_*</span> / <span class="mono">create_*</span> / <span class="mono">update_*</span> 三个工具，递增 toolsVersion。</div>'+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("创建类型","do-new-type","","primary")+"</div>";
+  }else if(kind==="new-doc"){
+    var n=currentNode(),s2=sp();
+    var defaultSlug=(n&&n.typeSlug)?n.typeSlug:(s2.contentTypes[0]?s2.contentTypes[0].slug:"");
+    var nodeOpts=s2.nodes.map(function(x){return '<option value="'+esc(x.id)+'"'+(n&&n.id===x.id?" selected":"")+">"+esc(x.path)+"</option>";}).join("");
+    var typeOpts=s2.contentTypes.map(function(x){return '<option value="'+esc(x.slug)+'"'+(x.slug===defaultSlug?" selected":"")+">"+esc(x.label)+"</option>";}).join("");
+    var dt=typeBySlug(defaultSlug);
+    var defaultKind=(dt&&dt.defaultPartKinds&&dt.defaultPartKinds[0])||"md";
+    var kindOpts=["md","code","pdf","web"].map(function(k){return '<option value="'+k+'"'+(k===defaultKind?" selected":"")+">"+({md:"Markdown",code:"Code",pdf:"PDF",web:"Web"}[k])+"</option>";}).join("");
+    h='<h3>新建文档</h3><div class="sub">下方字段由所选内容类型的 Schema 动态生成，没有写死任何业务字段。</div>'+
+      '<div class="field"><label>目标目录</label><select class="select" id="mNode">'+nodeOpts+"</select></div>"+
+      '<div class="field"><label>内容类型</label><select class="select" id="mDocType">'+typeOpts+"</select></div>"+
+      '<div class="field"><label>初始媒介 Part</label><select class="select" id="mPartKind">'+kindOpts+'</select><div class="hint">同一文档之后可继续追加其它 Part（PDF / 网页 / 代码 / 笔记）。</div></div>'+
+      '<div id="dynamicFields">'+dynamicForm(dt)+"</div>"+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("创建文档","do-new-doc","","primary")+"</div>";
+  }else if(kind==="add-note"){
+    h='<h3>添加批注</h3><div class="sub">批注作为 Annotation 独立存储，进入版本历史，不改动原文。</div>'+
+      '<div class="field"><label>引用文本（可选）</label><input class="input" id="mQuote" placeholder="留空则记为行级批注"></div>'+
+      '<div class="field"><label>批注内容</label><textarea class="textarea" id="mInput" placeholder="写下你的想法…"></textarea></div>'+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("保存批注","do-add-note","","primary")+"</div>";
+  }else if(kind==="settings"){
+    h='<h3>设置与重置</h3><div class="sub">原型状态保存在浏览器 localStorage，不会写入任何服务端。</div>'+
+      '<div class="kv"><span class="k">主题</span><span class="v">'+esc(S.theme)+"</span></div>"+
+      '<div class="kv"><span class="k">空间数</span><span class="v">'+S.spaces.length+"</span></div>"+
+      '<div class="banner warn" style="margin-top:14px">重置会清空当前原型的所有空间、目录、Schema、文档与提交历史，回到「空壳」初始状态。</div>'+
+      '<div class="modal-foot"><button class="btn" data-action="close-modal">取消</button>'+btn("导出当前状态 JSON","export-state","","")+btn("重置为空壳","do-reset","","danger")+"</div>";
+  }else{ h='<h3>面板</h3><div class="modal-foot"><button class="btn" data-action="close-modal">关闭</button></div>'; }
+  m.innerHTML=h; document.getElementById("modalHost").classList.add("show");
+  setTimeout(function(){var i=document.getElementById("mInput");if(i&&i.tagName==="INPUT")i.focus();},40);
+}
+function dynamicForm(t){
+  if(!t)return '<div class="tiny muted">请先创建内容类型。</div>';
+  return '<div class="divider"></div><div class="section-title" style="font-size:11.5px">Schema 字段 · '+esc(t.label)+" v"+t.version+"</div>"+
+    t.fields.map(function(f){
+      var req=f.required?' <span style="color:var(--red)">*</span>':"";
+      var inp;
+      if(f.type==="boolean")inp='<select class="select" data-fkey="'+esc(f.key)+'"><option value="false">否</option><option value="true">是</option></select>';
+      else if(f.type==="select")inp='<select class="select" data-fkey="'+esc(f.key)+'">'+(f.options||["选项 A","选项 B","选项 C"]).map(function(o){return '<option value="'+esc(o)+'">'+esc(o)+"</option>";}).join("")+"</select>";
+      else if(["longtext","markdown","code","json"].indexOf(f.type)>=0)inp='<textarea class="textarea" style="min-height:60px" data-fkey="'+esc(f.key)+'" placeholder="'+esc(f.label)+'"></textarea>';
+      else inp='<input class="input" data-fkey="'+esc(f.key)+'" placeholder="'+esc(f.label)+(f.type==="date"?'（YYYY-MM-DD）':"")+'">';
+      return '<div class="field"><label>'+esc(f.label)+req+' <span class="tiny muted mono">'+esc(f.type)+"</span></label>"+inp+"</div>";
+    }).join("");
+}
+function closeModal(){ S.modal=null;document.getElementById("modalHost").classList.remove("show"); }
+
+/* ---------- toast ---------- */
+function toast(msg,type){
+  var el=document.createElement("div");el.className="toast "+(type||"");el.textContent=msg;
+  document.getElementById("toastHost").appendChild(el);
+  setTimeout(function(){el.style.opacity="0";el.style.transition=".3s";setTimeout(function(){el.remove();},320);},2400);
+}
+function download(name,text){
+  try{var b=new Blob([text],{type:"application/json;charset=utf-8"});var a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();toast("已导出 "+name,"ok");}catch(e){toast("导出失败："+e.message,"err");}
+}
+
+/* ---------- actions ---------- */
+function installTemplate(id){
+  var s=sp(),t=TEMPLATES.find(function(x){return x.id===id;});if(!s||!t)return;
+  var b=t.build();
+  b.types.forEach(function(ct2){
+    var ex=s.contentTypes.find(function(x){return x.slug===ct2.slug;});
+    if(!ex)s.contentTypes.push(ct2);
+  });
+  var idmap={};
+  b.nodes.forEach(function(n){
+    if(s.nodes.some(function(x){return x.path===n.path;}))return;
+    var oldId=n.id,clone=Object.assign({},n,{id:uid("n")});
+    idmap[oldId]=clone.id;
+    if(n.parentId)clone.parentId=idmap[n.parentId]||null;
+    s.nodes.push(clone);
+  });
+  b.docs.forEach(function(d){
+    if(s.documents.some(function(x){return x.title===d.title;}))return;
+    var clone=JSON.parse(JSON.stringify(d));
+    clone.nodeId=idmap[d.nodeId]||d.nodeId;
+    clone.createdAt=now();clone.updatedAt=now();
+    s.documents.push(clone);
+  });
+  if(s.installedPacks.indexOf(t.id)<0)s.installedPacks.push(t.id);
+  bumpTools();
+  commit("安装模板 Pack「"+t.name+"」","import",{stats:{added:b.nodes.length,modified:0,deleted:0},changes:[{path:"/",op:"added",field:"目录节点",from:"0",to:String(b.nodes.length)},{path:"/",op:"added",field:"内容类型",from:"0",to:String(b.types.length)}]});
+  S.page="library";S.nodeId=null;S.docId=null;
+  save();renderAll();toast("已安装「"+t.name+"」：目录与 Schema 已生成，toolsVersion v"+s.toolsVersion,"ok");
+}
+function createSpace(name){
+  var s=blankSpace(name||"未命名空间");
+  S.spaces.push(s);S.activeSpaceId=s.id;S.page="library";S.nodeId=null;S.docId=null;
+  commit("创建空间「"+s.name+"」","system",{branch:"main"});
+  save();renderAll();toast("空间已创建：0 目录 / 0 类型 / 0 文档","ok");
+}
+function saveSchema(tid,msg){
+  var s=sp(),t=s.contentTypes.find(function(x){return x.id===tid;});if(!t)return;
+  t.version++;bumpTools();
+  commit(msg||("更新 Schema「"+t.label+"」→ v"+t.version),"schema",{changes:[{field:"contentType.version",from:"v"+(t.version-1),to:"v"+t.version},{field:"toolsVersion",from:"v"+(s.toolsVersion-1),to:"v"+s.toolsVersion}]});
+  save();renderAll();toast("Schema 已保存：v"+t.version+" · 工具签名已重建 · toolsVersion v"+s.toolsVersion,"ok");
+}
+function agentWrite(){
+  var s=sp();if(!s)return;
+  if(!s.nodes.length){toast("请先安装模板或新建目录","err");return;}
+  var target=s.nodes.find(function(n){return n.typeSlug&&n.exposeToMcp;})||s.nodes[0];
+  var t=typeBySlug(target.typeSlug)||s.contentTypes[0];
+  if(!t){toast("请先创建内容类型","err");return;}
+  var fields={};t.fields.forEach(function(f){fields[f.key]=f.required?("Agent 写入 · "+f.label):"";});
+  fields.title="Agent 采集："+t.label+" "+(s.documents.length+1);
+  var d={id:uid("d"),nodeId:target.id,typeSlug:t.slug,title:fields.title,fields:fields,
+    parts:[{id:uid("p"),kind:(t.defaultPartKinds&&t.defaultPartKinds[0])||"md",content:"## Agent 自动写入\n\n- 来源：MCP 模拟调用\n- 分支：agent/demo（隔离）\n- 可由人工审阅后合并，或按 agentId 整批撤销。",language:"markdown",sourceUri:"https://example.org/agent-feed",meta:{origin:"external"}}],
+    annotations:[],createdAt:now(),updatedAt:now()};
+  s.documents.push(d);
+  var prevBranch=s.currentBranch;
+  if(!s.refs["agent/demo"])s.refs["agent/demo"]=s.refs[prevBranch]||null;
+  s.currentBranch="agent/demo";
+  commit("Agent 写入「"+d.title+"」","mcp",{reason:"每日情报采集任务自动写入",agentId:"claude-desktop",branch:"agent/demo",changes:[{field:"文档",from:"—",to:d.title},{field:"分支",from:"main",to:"agent/demo"}]});
+  s.currentBranch=prevBranch;
+  logMcp("tools/call episteme.create_"+t.slug+" → commit="+shortId(s.commits[0].id)+" branch=agent/demo");
+  logMcp("notifications/resources/list_changed → /"+target.name);
+  save();renderAll();toast("Agent 已在 agent/demo 分支写入 1 篇文档并生成 Commit，可在版本面板审阅 / 合并 / 撤销","ok");
+}
+function revertCommit(id){
+  var s=sp(),c=s.commits.find(function(x){return x.id===id;});if(!c)return;
+  commit('Revert "'+c.message+'"',"system",{reason:"人工回滚提交 "+shortId(c.id),changes:[{field:"回滚",from:c.message,to:"恢复至父版本"}]});
+  S.diffCommitId=null;save();renderAll();toast("已生成反向提交（历史未被改写）","ok");
+}
+function mergeBranch(){
+  var s=sp();if(!s||!s.refs["agent/demo"])return;
+  var c=commit("合并 agent/demo → main","system",{parents:[s.refs.main,s.refs["agent/demo"]].filter(Boolean),reason:"人工审阅通过",changes:[{field:"分支合并",from:"agent/demo",to:"main"}]});
+  delete s.refs["agent/demo"];s.currentBranch="main";
+  save();renderAll();toast("已合并到 main，生成双 parent Commit","ok");
+}
+function addAnnotation(partKind,quote,note,kind){
+  var d=currentDoc();if(!d)return;
+  var p=docPart(d,partKind);if(!p)return;
+  d.annotations.push({id:uid("a"),partKind:partKind,partId:p.id,kind:kind||"highlight",text:quote||"",note:note||"",color:"#ffeaa0",anchor:{kind:partKind,textQuote:{exact:quote},page:partKind==="pdf"?2:null}});
+  commit("新增"+(kind==="note"?"批注":"高亮")+" · "+partKind.toUpperCase(),"ui",{changes:[{field:"annotations",from:String(d.annotations.length-1),to:String(d.annotations.length)}]});
+  save();renderAll();toast("标记已保存并进入版本历史","ok");
+}
+function exportAnnotations(){
+  var d=currentDoc();if(!d)return;
+  var md="# "+d.title+" · 标记汇总\n\n";
+  d.annotations.forEach(function(a,i){md+=(i+1)+". ["+a.partKind+"] "+(a.text?"**"+a.text+"** — ":"")+(a.note||"")+"\n";});
+  download("episteme-annotations.md",md);
+  commit("导出标记汇总为 Markdown","ui",{changes:[{field:"export",from:"—",to:"annotations.md"}]});
+  save();renderAll();
+}
+
+/* ---------- event delegation ---------- */
+document.addEventListener("click",function(e){
+  var el=e.target.closest("[data-action]");if(!el)return;
+  var a=el.getAttribute("data-action"),id=el.getAttribute("data-id"),s=sp();
+  if(a==="toggle-node"){e.stopPropagation();var n=nodeById(id);if(n){n.expanded=!n.expanded;save();renderSidebar();}return;}
+  if(a==="del-field"||a==="del-ann"||a==="focus-ann")e.stopPropagation();
+  switch(a){
+    case "theme": S.theme=el.getAttribute("data-theme");save();renderShell();toast("主题已切换","ok");break;
+    case "toggle-sidebar": document.getElementById("sidebar").classList.toggle("open");break;
+    case "open-page": S.page=el.getAttribute("data-page");S.docId=null;S.partKind=null;document.getElementById("sidebar").classList.remove("open");save();renderAll();break;
+    case "back-list": S.docId=null;S.partKind=null;S.page="library";S.draft=null;save();renderAll();break;
+    case "clear-node": S.nodeId=null;S.docId=null;S.docQuery="";save();renderAll();toast("已显示全部文档","ok");break;
+    case "select-node": S.nodeId=id;S.docId=null;S.page="library";document.getElementById("sidebar").classList.remove("open");save();renderAll();break;
+    case "open-doc": S.docId=id;S.partKind=null;S.draft=null;save();renderAll();document.getElementById("content").scrollTop=0;break;
+    case "open-drawer": S.drawer=el.getAttribute("data-drawer");S.openTool=null;renderDrawer();renderBottomNav();break;
+    case "close-drawer": S.drawer=null;renderDrawer();renderBottomNav();break;
+    case "open-modal": openModal(el.getAttribute("data-modal"));break;
+    case "close-modal": closeModal();break;
+    case "switch-tab": S.partKind=el.getAttribute("data-kind");S.draft=null;save();renderContent();break;
+    case "open-cmdk": S.cmdkOpen=true;S.cmdkQuery="";document.getElementById("cmdk").classList.add("show");document.getElementById("cmdkInput").value="";renderCmdk();setTimeout(function(){document.getElementById("cmdkInput").focus();},30);break;
+    case "close-cmdk": S.cmdkOpen=false;document.getElementById("cmdk").classList.remove("show");break;
+    case "do-create-space": {var v=(document.getElementById("mInput")||{}).value||"未命名空间";closeModal();createSpace(v.trim()||"未命名空间");break;}
+    case "do-new-node": {
+      var name=(document.getElementById("mInput")||{}).value||"",pid=(document.getElementById("mParent")||{}).value||null,
+          tslug=(document.getElementById("mType")||{}).value||null,expose=(document.getElementById("mExpose")||{}).checked;
+      if(!name.trim()){toast("请填写目录名称","err");return;}
+      var parent=pid?nodeById(pid):null;
+      var path=(parent?parent.path:"")+"/"+name.trim();
+      if(s.nodes.some(function(x){return x.path===path;})){toast("该路径已存在","err");return;}
+      var nn={id:uid("n"),parentId:pid||null,path:path,name:name.trim(),typeSlug:tslug||null,exposeToMcp:!!expose,expanded:true};
+      s.nodes.push(nn);if(parent)parent.expanded=true;
+      bumpTools();commit("新建目录 "+path,"ui",{changes:[{field:"目录",from:"—",to:path}]});
+      S.nodeId=nn.id;S.page="library";S.docId=null;closeModal();save();renderAll();toast("目录已创建，动态工具已重建","ok");break;
+    }
+    case "do-new-type": {
+      var label=(document.getElementById("mLabel")||{}).value||"",slug=(document.getElementById("mInput")||{}).value||"",cnt=parseInt((document.getElementById("mFieldCount")||{}).value||"3",10);
+      slug=slug.trim().replace(/[^a-z0-9_]/g,"_").toLowerCase();
+      if(!label.trim()||!slug){toast("请填写显示名与 slug","err");return;}
+      if(s.contentTypes.some(function(x){return x.slug===slug;})){toast("该 slug 已存在","err");return;}
+      var fs=[F("title","标题","text",{required:true}),F("publishDate","日期","date"),F("tags","标签","tags"),F("note","备注","longtext"),F("level","等级","select")].slice(0,cnt);
+      s.contentTypes.push(ct(slug,label.trim(),fs));
+      var autoPath="/"+label.trim();
+      if(!s.nodes.some(function(x){return x.path===autoPath;})){
+        s.nodes.push({id:uid("n"),parentId:null,path:autoPath,name:label.trim(),typeSlug:slug,exposeToMcp:true,expanded:true});
+      }
+      bumpTools();commit("新建内容类型「"+label.trim()+"」","schema",{changes:[{field:"contentType",from:"—",to:slug},{field:"toolsVersion",from:"v"+(s.toolsVersion-1),to:"v"+s.toolsVersion}]});
+      S.page="schema";closeModal();save();renderAll();toast("类型已创建：动态工具 +3，toolsVersion v"+s.toolsVersion,"ok");break;
+    }
+    case "add-field": {
+      var t=s.contentTypes.find(function(x){return x.id===el.getAttribute("data-tid");});if(!t)return;
+      t.fields.push(F("field_"+t.fields.length,"新字段","text"));S.editingType=t.id;save();renderContent();toast("已加字段，记得保存 Schema","ok");break;
+    }
+    case "del-field": {
+      var t2=s.contentTypes.find(function(x){return x.id===el.getAttribute("data-tid");});if(!t2)return;
+      var fid=el.getAttribute("data-fid");t2.fields=t2.fields.filter(function(f){return f.key!==fid;});save();renderContent();toast("字段已移除（保存 Schema 后生效）","ok");break;
+    }
+    case "save-schema": saveSchema(el.getAttribute("data-tid"));break;
+    case "toggle-type-expose": {
+      var t3=s.contentTypes.find(function(x){return x.id===el.getAttribute("data-tid");});if(!t3)return;
+      t3.exposeToMcp=!t3.exposeToMcp;saveSchema(t3.id,"切换「"+t3.label+"」MCP 暴露 → "+(t3.exposeToMcp?"开启":"关闭"));break;
+    }
+    case "change-doc-type": break;
+    case "do-new-doc": {
+      var nodeId=(document.getElementById("mNode")||{}).value,tslug2=(document.getElementById("mDocType")||{}).value;
+      var t4=typeBySlug(tslug2);var fields={};
+      document.querySelectorAll("#dynamicFields [data-fkey]").forEach(function(inp){fields[inp.getAttribute("data-fkey")]=inp.value;});
+      var title=fields.title||fields.name||"未命名文档";
+      var pk=(document.getElementById("mPartKind")||{}).value||(t4&&t4.defaultPartKinds&&t4.defaultPartKinds[0])||"md";
+      var part={id:uid("p"),kind:pk,content:pk==="md"?"## "+title+"\n\n在这里开始写作。":(pk==="code"?"// "+title+"\n":""),language:pk==="code"?"csharp":null,sourceUri:pk==="web"||pk==="pdf"?"https://example.org/new":null,meta:pk==="pdf"?{pages:1,title:title}:{origin:"external"}};
+      var nd={id:uid("d"),nodeId:nodeId,typeSlug:tslug2,title:title,fields:fields,parts:[part],annotations:[],createdAt:now(),updatedAt:now()};
+      s.documents.push(nd);
+      commit("新建文档「"+title+"」","ui",{changes:[{field:"文档",from:"—",to:title},{field:"内容类型",from:"—",to:tslug2}]});
+      closeModal();S.docId=nd.id;S.page="library";S.partKind=pk;save();renderAll();toast("文档已创建（表单由 Schema 动态生成）","ok");break;
+    }
+    case "save-part": {
+      var d=currentDoc();if(!d)return;var kind=el.getAttribute("data-kind"),p=docPart(d,kind),ta=document.getElementById("partEditor");
+      if(!p||!ta)return;p.content=ta.value;d.updatedAt=now();S.draft=null;
+      commit("编辑 "+kind.toUpperCase()+" Part「"+d.title+"」","ui",{changes:[{field:kind+".content",from:"（上一版本）",to:p.content.slice(0,40)+(p.content.length>40?"…":"")}]});
+      save();renderAll();toast("已保存并生成 Commit","ok");break;
+    }
+    case "switch-web-mode": S.webMode=el.getAttribute("data-mode");save();renderContent();break;
+    case "refetch-web": {
+      var d2=currentDoc();if(!d2)return;
+      commit("重新抓取网页快照「"+d2.title+"」","system",{reason:"手动重抓",changes:[{field:"web.snapshot",from:"2026-11-08",to:"2026-11-09"}]});
+      save();renderAll();toast("已重新抓取并生成 Commit（抓取在隔离 worker 中执行）","ok");break;
+    }
+    case "highlight-selection": case "add-note": {
+      var kind2=el.getAttribute("data-kind");
+      var selText="";try{selText=(window.getSelection()?window.getSelection().toString():"").trim();}catch(err){}
+      if(a==="add-note"){S.noteKind=kind2;S.noteQuote=selText;openModal("add-note");setTimeout(function(){var q=document.getElementById("mQuote");if(q)q.value=selText;},50);}
+      else{
+        if(!selText)selText=kind2==="pdf"?"内容寻址快照 DAG 保证事务一致性":"动态工具清单不是静态配置文件";
+        addAnnotation(kind2,selText,"高亮标记 · "+fmt(now()),"highlight");
+      }
+      break;
+    }
+    case "do-add-note": {
+      var note=(document.getElementById("mInput")||{}).value||"",q=(document.getElementById("mQuote")||{}).value||"";
+      if(!note.trim()){toast("请填写批注内容","err");return;}
+      closeModal();addAnnotation(S.noteKind||S.partKind,q,note.trim(),"note");break;
+    }
+    case "del-ann": {
+      var d3=currentDoc();if(!d3)return;d3.annotations=d3.annotations.filter(function(x){return x.id!==id;});
+      commit("删除标记","ui",{changes:[{field:"annotations",from:"1 条",to:"已删除"}]});save();renderAll();toast("标记已删除","ok");break;
+    }
+    case "focus-ann": {
+      var mk=document.querySelector('mark[data-ann="'+id+'"]');
+      if(mk){mk.scrollIntoView({behavior:"smooth",block:"center"});mk.style.outline="2px solid var(--primary)";setTimeout(function(){mk.style.outline="";},1400);}
+      else toast("该标注的锚点在原文中未找到（原型示意）","err");break;
+    }
+    case "select-commit": S.diffCommitId=id;renderDrawer();break;
+    case "revert-commit": revertCommit(id);break;
+    case "revert-agent": {
+      var c2=commit("按 agentId 批量撤销 claude-desktop 的改动","system",{reason:"AI 采集结果不符合预期",changes:[{field:"revert",from:"多条 Agent Commit",to:"恢复至人工版本"}]});
+      save();renderAll();toast("已生成反向提交批量撤销 Agent 改动","ok");break;
+    }
+    case "merge-branch": mergeBranch();break;
+    case "toggle-tool": S.openTool=(S.openTool===el.getAttribute("data-name"))?null:el.getAttribute("data-name");renderDrawer();break;
+    case "call-tool": {
+      var name=el.getAttribute("data-name");logMcp("tools/call "+name+" → 200 OK · dryRun=false · commit="+shortId(uid("cm")));
+      if(s)commit("MCP 调用 "+name,"mcp",{reason:"由 Agent 发起的工具调用",agentId:"claude-desktop",changes:[{field:"工具",from:"—",to:name}]});
+      save();renderAll();toast("已模拟调用 "+name+"（写入产生 Commit 与审计日志）","ok");break;
+    }
+    case "agent-write": agentWrite();break;
+    case "install-template": installTemplate(el.getAttribute("data-tpl"));break;
+    case "preview-pack": S.packPreview=el.getAttribute("data-tpl");S.drawer="pack";renderDrawer();break;
+    case "export-pack": {
+      var s4=sp();download("episteme-pack.json",JSON.stringify({id:"custom",name:s4.name,version:"1.0.0",nodes:s4.nodes.map(function(n){return {path:n.path,contentType:n.typeSlug,exposeToMcp:n.exposeToMcp};}),contentTypes:s4.contentTypes.map(function(t){return {slug:t.slug,label:t.label,version:t.version,fields:t.fields};})},null,2));break;
+    }
+    case "export-state": download("episteme-state.json",JSON.stringify(S.spaces,null,2));break;
+    case "export-annotations": exportAnnotations();break;
+    case "do-reset": localStorage.removeItem(STORE_KEY);S=initialState();closeModal();save();renderAll();toast("已重置为空壳状态","ok");break;
+    case "reset-empty": localStorage.removeItem(STORE_KEY);S=initialState();save();renderAll();toast("已重置为空壳状态","ok");break;
+    case "settings": break;
+  }
+});
+
+/* input / change delegation（不触发全量重绘，避免编辑器失焦） */
+document.addEventListener("input",function(e){
+  var t=e.target;
+  if(t.id==="cmdkInput"){S.cmdkQuery=t.value;renderCmdk();return;}
+  if(t.id==="partEditor"){
+    S.draft={partId:t.getAttribute("data-draft"),value:t.value};
+    var prev=document.getElementById("mdPreview");if(prev)prev.innerHTML=mdToHtml(t.value);
+    var cv=document.getElementById("codeView");if(cv)cv.innerHTML=highlightCode(t.value);
+    return;
+  }
+  if(t.id==="docSearch"){S.docQuery=t.value;renderContent();var el=document.getElementById("docSearch");if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);}return;}
+  var b=t.getAttribute("data-bind");
+  if(b==="field-label"){
+    var s=sp(),ct3=s.contentTypes.find(function(x){return x.id===t.getAttribute("data-tid");});
+    if(ct3){var f=ct3.fields.find(function(x){return x.key===t.getAttribute("data-fid");});if(f)f.label=t.value;}
+  }
+});
+document.addEventListener("change",function(e){
+  var t=e.target,b=t.getAttribute("data-bind"),s=sp();if(!s)return;
+  if(b==="space"){S.activeSpaceId=t.value;S.page="library";S.nodeId=null;S.docId=null;S.drawer=null;save();renderAll();return;}
+  if(b==="branch"){S.currentBranch=t.value;save();renderDrawer();toast("已切换到分支 "+t.value,"ok");return;}
+  if(b&&b.indexOf("field-")===0){
+    var tid=t.getAttribute("data-tid"),fid=t.getAttribute("data-fid");
+    var ct4=s.contentTypes.find(function(x){return x.id===tid;});
+    var f2=ct4?ct4.fields.find(function(x){return x.key===fid;}):null;
+    if(!f2)return;
+    if(b==="field-type")f2.type=t.value;
+    if(b==="field-required")f2.required=t.checked;
+    if(b==="field-expose")f2.exposeToMcp=t.checked;
+    save();return;
+  }
+  if(t.id==="mDocType"){
+    var slug=t.value,box=document.getElementById("dynamicFields");
+    if(box)box.innerHTML=dynamicForm(typeBySlug(slug));
+    var kt=typeBySlug(slug),ks=document.getElementById("mPartKind");
+    if(kt&&ks&&kt.defaultPartKinds&&kt.defaultPartKinds.length)ks.value=kt.defaultPartKinds[0];
+    return;
+  }
+});
+document.addEventListener("keydown",function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();S.cmdkOpen=!S.cmdkOpen;document.getElementById("cmdk").classList.toggle("show",S.cmdkOpen);if(S.cmdkOpen){document.getElementById("cmdkInput").value="";S.cmdkQuery="";renderCmdk();setTimeout(function(){document.getElementById("cmdkInput").focus();},30);}return;}
+  if(e.key==="Escape"){if(S.modal)closeModal();else if(S.cmdkOpen){S.cmdkOpen=false;document.getElementById("cmdk").classList.remove("show");}else if(S.drawer){S.drawer=null;renderDrawer();renderBottomNav();}return;}
+  if(S.cmdkOpen&&e.key==="Enter"){doCmdk(0);}
+});
+function cmdkItems(){
+  var s=sp(),q=(S.cmdkQuery||"").toLowerCase(),items=[];
+  if(!s)return items;
+  items.push({label:"跳到 文档",sub:"首页",act:"open-page",page:"library"});
+  items.push({label:"跳到 Schema / 内容类型",sub:"定义字段",act:"open-page",page:"schema"});
+  items.push({label:"跳到 模板 Pack",sub:"安装模板",act:"open-page",page:"templates"});
+  items.push({label:"跳到 MCP 工具",sub:"动态工具清单",act:"open-page",page:"mcp"});
+  items.push({label:"打开 版本历史",sub:"Commit 链",act:"open-drawer",drawer:"version"});
+  items.push({label:"模拟 Agent 写入",sub:"在隔离分支生成 Commit",act:"agent-write"});
+  s.documents.forEach(function(d){items.push({label:d.title,sub:"文档 · "+d.typeSlug,act:"open-doc",id:d.id});});
+  s.nodes.forEach(function(n){items.push({label:n.name,sub:"目录 · "+n.path,act:"select-node",id:n.id});});
+  return items.filter(function(x){return !q||(x.label+" "+x.sub).toLowerCase().indexOf(q)>=0;}).slice(0,14);
+}
+function renderCmdk(){
+  var items=cmdkItems();
+  document.getElementById("cmdkList").innerHTML=items.length?items.map(function(x,i){
+    return '<div class="cmdk-row'+(i===0?" sel":"")+'" data-cmdk="'+i+'"><span>⌘</span><span style="flex:1">'+esc(x.label)+'</span><span class="tiny muted">'+esc(x.sub)+"</span></div>";
+  }).join(""):'<div class="cmdk-row tiny muted">没有匹配项</div>';
+}
+function doCmdk(i){
+  var it=cmdkItems()[i];
+  S.cmdkOpen=false;document.getElementById("cmdk").classList.remove("show");
+  if(!it){save();renderAll();return;}
+  if(it.act==="open-page"){S.page=it.page;S.docId=null;}
+  else if(it.act==="open-drawer"){S.drawer=it.drawer;}
+  else if(it.act==="open-doc"){S.docId=it.id;S.page="library";S.partKind=null;}
+  else if(it.act==="select-node"){S.nodeId=it.id;S.page="library";S.docId=null;}
+  else if(it.act==="agent-write"){agentWrite();return;}
+  save();renderAll();
+}
+document.getElementById("cmdkList").addEventListener("click",function(e){
+  var r=e.target.closest("[data-cmdk]");if(r)doCmdk(parseInt(r.getAttribute("data-cmdk"),10));
+});
+document.getElementById("cmdk").addEventListener("click",function(e){if(e.target.id==="cmdk"){S.cmdkOpen=false;this.classList.remove("show");}});
+document.getElementById("modalHost").addEventListener("click",function(e){if(e.target.id==="modalHost")closeModal();});
+
+/* ---------- boot ---------- */
+function renderAll(){ renderShell();renderContent();renderDrawer();renderBottomNav(); }
+load();renderAll();
+window.EpistemePrototype={getState:function(){return S;},buildTools:buildTools,reset:function(){localStorage.removeItem(STORE_KEY);S=initialState();save();renderAll();}};
+</script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+{
+  "description": "用户在界面新建「竞品情报」内容类型之前，某个 Space 的 tools/list 快照（仅列工具名 + 动态工具部分）。静态内核工具共 20 个，恒定不变。",
+  "spaceId": "sp_reading_desk",
+  "toolsVersion": 12,
+  "staticTools": [
+    "episteme.list_spaces", "episteme.tree", "episteme.read", "episteme.search",
+    "episteme.list_content_types", "episteme.define_content_type",
+    "episteme.create_node", "episteme.move_node", "episteme.delete_node",
+    "episteme.create_document", "episteme.update_document", "episteme.append_part",
+    "episteme.annotate", "episteme.commit", "episteme.log", "episteme.diff",
+    "episteme.branch", "episteme.merge", "episteme.revert", "episteme.export_as_git"
+  ],
+  "dynamicTools": [
+    { "name": "episteme.query_paper", "derivedFrom": { "slug": "paper", "version": 1 } },
+    { "name": "episteme.create_paper", "derivedFrom": { "slug": "paper", "version": 1 } },
+    { "name": "episteme.update_paper", "derivedFrom": { "slug": "paper", "version": 1 } },
+    { "name": "episteme.query_snippet", "derivedFrom": { "slug": "snippet", "version": 1 } },
+    { "name": "episteme.create_snippet", "derivedFrom": { "slug": "snippet", "version": 1 } },
+    { "name": "episteme.update_snippet", "derivedFrom": { "slug": "snippet", "version": 1 } },
+    { "name": "episteme.query_clip", "derivedFrom": { "slug": "clip", "version": 1 } },
+    { "name": "episteme.create_clip", "derivedFrom": { "slug": "clip", "version": 1 } },
+    { "name": "episteme.update_clip", "derivedFrom": { "slug": "clip", "version": 1 } },
+    { "name": "episteme.query_note", "derivedFrom": { "slug": "note", "version": 1 } },
+    { "name": "episteme.create_note", "derivedFrom": { "slug": "note", "version": 1 } },
+    { "name": "episteme.update_note", "derivedFrom": { "slug": "note", "version": 1 } }
+  ],
+  "dynamicToolCount": 12,
+  "total": 32,
+  "resourceTemplates": [
+    "episteme://{space}/{nodePath}",
+    "episteme://{space}/{nodePath}/{docId}",
+    "episteme://{space}/{nodePath}/{docId}/part/{kind}",
+    "episteme://{space}/{nodePath}/{docId}/annotations"
+  ],
+  "notes": [
+    "静态工具不随 Schema 变化；动态工具由 exposeToMcp=true 且绑定了目录节点的 ContentType 三三派生。",
+    "一次 MCP 连接只绑定一个 Space，避免工具描述膨胀。",
+    "toolsVersion 出现在 tools/list 与每次 tools/call 响应，作为客户端缓存 ETag。"
+  ]
+}
