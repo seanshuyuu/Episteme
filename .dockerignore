@@ -1,0 +1,14 @@
+# Keep the server image build context small: client build outputs and repo metadata
+# are irrelevant to `dotnet publish src/Episteme.Server`.
+.git/
+.gitignore
+**/bin/
+**/obj/
+**/node_modules/
+**/__pycache__/
+tests/
+docs/
+design/
+prototype/
+*.md
+*.log

@@ -85,6 +85,7 @@
           <button data-action="switch-tab" data-tab="reader">阅读器</button>
           <button data-action="switch-tab" data-tab="versions">版本</button>
           <button data-action="switch-tab" data-tab="mcp">MCP 工具</button>
+          <button data-action="switch-tab" data-tab="packs">模板</button>
         </nav>
 
         <div id="tab-docs" class="tab-body">
@@ -146,6 +147,23 @@
         <div id="tab-mcp" class="tab-body hidden">
           <div id="mcp-summary" class="summary"></div>
           <div id="tool-list"></div>
+        </div>
+
+        <div id="tab-packs" class="tab-body hidden">
+          <div class="subhead">内置模板 · Pack 是纯数据</div>
+          <p class="muted">模板声明目录树与内容类型，安装在一个事务内完成并产生一条 <code>source=import</code> 的提交。</p>
+          <div id="pack-list"></div>
+          <div id="pack-preview" class="summary"></div>
+          <div class="subhead">导出当前空间</div>
+          <div class="row">
+            <label><input id="pack-include-docs" type="checkbox"> 包含文档作为示例数据</label>
+            <button id="btn-export-pack" data-action="export-pack" class="ghost">导出为 Pack JSON</button>
+          </div>
+          <textarea id="pack-json" placeholder="导出的 Pack JSON 会出现在这里；也可粘贴自定义 Pack 后点「导入」" aria-label="Pack JSON"></textarea>
+          <div class="row">
+            <button id="btn-import-pack" data-action="import-pack" class="primary">导入到当前空间</button>
+            <span id="pack-hint" class="hint"></span>
+          </div>
         </div>
       </section>
     </main>

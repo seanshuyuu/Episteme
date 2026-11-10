@@ -166,6 +166,7 @@ public sealed partial class EpistemeService
             var replay = await FindIdempotentAsync(db, space.Id, ctx, ct);
             if (replay is not null)
             {
+                ctx.Replayed = true;
                 await tx.RollbackAsync(ct);
                 return replay;
             }

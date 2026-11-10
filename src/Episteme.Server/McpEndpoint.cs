@@ -21,7 +21,7 @@ public static class McpEndpoint
 
         app.MapGet("/mcp", () => Results.Json(new JsonObject
         {
-            ["name"] = "episteme", ["version"] = "0.3.0-p3",
+            ["name"] = "episteme", ["version"] = "0.4.0-p4p5",
             ["transport"] = "Streamable HTTP", ["protocolVersion"] = "2025-06-18",
             ["endpoints"] = new JsonObject { ["rpc"] = "POST /mcp", ["debugTools"] = "GET /mcp/tools?space={slug}" },
             ["note"] = "SSE 长连接与 stdio 本轮未实现；POST /mcp 为完整 JSON-RPC 通道"
@@ -65,7 +65,7 @@ public static class McpEndpoint
                             ["resources"] = new JsonObject { ["listChanged"] = true },
                             ["prompts"] = new JsonObject()
                         },
-                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = "0.3.0-p3" }
+                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = "0.4.0-p4p5" }
                     };
                     break;
 
@@ -163,7 +163,7 @@ public static class McpEndpoint
         var name = Jsonx.Plain(parameters["name"]);
         var args = parameters["arguments"] as JsonObject ?? new JsonObject();
         var spaceId = await Endpoints.ResolveSpaceId(http, svc, body, ct);
-        if (string.IsNullOrWhiteSpace(spaceId) && name != "episteme.list_spaces")
+        if (string.IsNullOrWhiteSpace(spaceId) && name != "episteme.list_spaces" && name != "episteme.list_packs")
             throw new BusinessException("SPACE_NOT_FOUND", "尚未创建空间", 404);
 
         var role = http.Request.Headers["X-Episteme-Role"].FirstOrDefault();
@@ -179,7 +179,10 @@ public static class McpEndpoint
             }),
             ["structuredContent"] = payload,
             ["isError"] = false,
-            ["toolsVersion"] = payload["toolsVersion"]?.DeepClone() ?? (await svc.GetSpaceAsync(spaceId, ct))["toolsVersion"]?.DeepClone()
+            ["toolsVersion"] = payload["toolsVersion"]?.DeepClone()
+                ?? (string.IsNullOrWhiteSpace(spaceId)
+                    ? JsonValue.Create(0)
+                    : (await svc.GetSpaceAsync(spaceId, ct))["toolsVersion"]?.DeepClone())
         };
     }
 
@@ -218,6 +221,9 @@ public static class McpEndpoint
                     Jsonx.Plain(args["partId"]), args, ct);
             case "episteme.export_notes":
                 return await svc.ExportNotesAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
+            case "episteme.list_packs": return await svc.ListPacksAsync(ct);
+            case "episteme.install_pack": return await svc.InstallPackAsync(spaceId, args, ctx, ct);
+            case "episteme.export_pack": return await svc.ExportPackAsync(spaceId, args, ct);
             case "episteme.commit":
             {
                 var log = await svc.LogAsync(spaceId, new JsonObject { ["limit"] = 1 }, ct);

@@ -1,0 +1,1212 @@
+{
+  "$schema": "https://episteme.local/schema/pack/v1",
+  "id": "workbench",
+  "name": "商业短篇创作工作台",
+  "version": "1.0.0",
+  "episteme": ">=0.1.0",
+  "description": "由现有 Workbench v3.2 降级而来的第一套模板：11 个固定素材模块变成 11 个用户可改的目录 + 内容类型。模块名与字段取自 src/Workbench.Core/Domain/ModuleCatalog.cs 与 docs/01-需求分析与功能模块.md。",
+  "author": "内置",
+  "license": "internal",
+  "source": "workbench-v3.2",
+  "sampleData": false,
+  "nodes": [
+    {
+      "path": "/M1-作品入库档案库",
+      "contentType": "work_archive",
+      "group": "创作资产库",
+      "icon": "archive",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M2-导语开篇钩子库",
+      "contentType": "opening_hook",
+      "group": "创作资产库",
+      "icon": "zap",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M3-赛道选题库",
+      "contentType": "track_topic",
+      "group": "创作资产库",
+      "icon": "compass",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M4-人设素材库",
+      "contentType": "character",
+      "group": "创作资产库",
+      "icon": "users",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M5-剧情结构节奏库",
+      "contentType": "plot_structure",
+      "group": "创作资产库",
+      "icon": "git-branch",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M6-拆文复盘库",
+      "contentType": "teardown",
+      "group": "创作资产库",
+      "icon": "scissors",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M7-金句对话库",
+      "contentType": "quote",
+      "group": "创作资产库",
+      "icon": "message",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M8-结局闭环模板库",
+      "contentType": "ending_template",
+      "group": "创作资产库",
+      "icon": "flag",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M9-平台过稿合规自查库",
+      "contentType": "compliance",
+      "group": "合规与素材",
+      "icon": "shield",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M10-原创冲突素材储备库",
+      "contentType": "conflict_material",
+      "group": "合规与素材",
+      "icon": "layers",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/M11-每日全网热点库",
+      "contentType": "hotspot",
+      "group": "每日热点",
+      "icon": "flame",
+      "defaultPartKinds": [
+        "web",
+        "md"
+      ]
+    },
+    {
+      "path": "/M11-每日全网热点库/每日",
+      "contentType": "hotspot",
+      "defaultPartKinds": [
+        "web",
+        "md"
+      ]
+    },
+    {
+      "path": "/M11-每日全网热点库/历史存档",
+      "contentType": "hotspot"
+    },
+    {
+      "path": "/M11-每日全网热点库/改编示范",
+      "contentType": "adaptation"
+    },
+    {
+      "path": "/M11-每日全网热点库/避雷清单",
+      "contentType": "compliance"
+    }
+  ],
+  "contentTypes": [
+    {
+      "slug": "work_archive",
+      "label": "作品入库档案",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "作品名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "platform",
+          "label": "首发平台",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "知乎",
+            "番茄",
+            "小程序",
+            "其他"
+          ]
+        },
+        {
+          "key": "track",
+          "label": "题材赛道",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "婚内打脸",
+            "婆媳家庭",
+            "真假千金",
+            "重生纠错",
+            "校园恩怨",
+            "职场逆袭",
+            "原生家庭",
+            "微悬疑吃瓜",
+            "都市猎奇",
+            "古风短虐"
+          ]
+        },
+        {
+          "key": "wordCount",
+          "label": "总字数",
+          "type": "number",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "validation": {
+            "min": 0,
+            "integer": true
+          }
+        },
+        {
+          "key": "sectionCount",
+          "label": "分节数量",
+          "type": "number",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "synopsis",
+          "label": "核心剧情梗",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "performance",
+          "label": "数据表现",
+          "type": "text",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "archiveKind",
+          "label": "档案类型",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "爆款范文",
+            "仿写稿",
+            "个人完稿",
+            "拆文稿"
+          ]
+        },
+        {
+          "key": "archivedAt",
+          "label": "入库时间",
+          "type": "date",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false
+        }
+      ]
+    },
+    {
+      "slug": "opening_hook",
+      "label": "导语 & 开篇钩子",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "模板名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "style",
+          "label": "开篇范式",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "知乎提问式",
+            "小程序悬念式",
+            "番茄冲突式"
+          ]
+        },
+        {
+          "key": "formula",
+          "label": "开篇 300 字留人公式",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "template",
+          "label": "首屏钩子模板",
+          "type": "markdown",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "prosCons",
+          "label": "开篇优缺点拆解",
+          "type": "longtext",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "pitfalls",
+          "label": "开篇避雷清单",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "track_topic",
+      "label": "赛道选题",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "选题名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "track",
+          "label": "赛道",
+          "type": "select",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "婚内打脸",
+            "婆媳家庭",
+            "真假千金",
+            "重生纠错",
+            "校园恩怨",
+            "职场逆袭",
+            "原生家庭",
+            "微悬疑吃瓜",
+            "都市猎奇",
+            "古风短虐"
+          ]
+        },
+        {
+          "key": "formula",
+          "label": "爆款公式",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "conflictTemplate",
+          "label": "核心冲突模板",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "emotionPain",
+          "label": "受众情绪痛点",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "character",
+      "label": "人设素材",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "人设名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "archetype",
+          "label": "原型",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "飒爽清醒女主",
+            "隐忍逆袭主角",
+            "伪善白月光",
+            "道德绑架长辈",
+            "凤凰男·扶弟魔",
+            "偏执男主",
+            "功能性配角"
+          ]
+        },
+        {
+          "key": "surface",
+          "label": "表层人设",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "depth",
+          "label": "深层人设",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "contrast",
+          "label": "反差设计",
+          "type": "longtext",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "pitfalls",
+          "label": "人设避雷点",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "plot_structure",
+      "label": "剧情结构 & 分节节奏",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "框架名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "wordTier",
+          "label": "字数档",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "8000",
+            "10000",
+            "12000"
+          ]
+        },
+        {
+          "key": "threeAct",
+          "label": "三幕式结构",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "sectionRhythm",
+          "label": "逐节节奏",
+          "type": "json",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "每节独立冲突 + 节末悬念"
+        },
+        {
+          "key": "emotionCurve",
+          "label": "情绪曲线",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "reversalRate",
+          "label": "反转频次公式",
+          "type": "text",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "teardown",
+      "label": "拆文复盘",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "拆解对象",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "mainHook",
+          "label": "核心大梗",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "subHooks",
+          "label": "辅助小梗",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "mainConflict",
+          "label": "主线冲突",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "hookDistribution",
+          "label": "钩子分布",
+          "type": "json",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "logicFlaws",
+          "label": "逻辑漏洞",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "viralAttribution",
+          "label": "爆火归因",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "rewritePlan",
+          "label": "对标仿写方案",
+          "type": "markdown",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "sourceDoc",
+          "label": "来源作品",
+          "type": "ref",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "ref": {
+            "targetType": "work_archive",
+            "symmetric": true
+          }
+        }
+      ]
+    },
+    {
+      "slug": "quote",
+      "label": "金句 & 对话",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "金句",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "category",
+          "label": "分类",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "开篇抓人",
+            "情绪拉扯",
+            "对峙打脸",
+            "反转点睛",
+            "结尾收口"
+          ]
+        },
+        {
+          "key": "emotion",
+          "label": "情绪标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "context",
+          "label": "适用场景",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "ending_template",
+      "label": "结局闭环模板",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "模板名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "endingType",
+          "label": "结局类型",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "爽文打脸",
+            "遗憾留白",
+            "双向救赎",
+            "悬疑真相"
+          ]
+        },
+        {
+          "key": "quickCloseRule",
+          "label": "极速收尾规范",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "pitfalls",
+          "label": "烂尾避雷清单",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "foreshadowChecklist",
+          "label": "伏笔全回收技巧",
+          "type": "longtext",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "compliance",
+      "label": "平台过稿 & 合规自查",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "规则名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "platform",
+          "label": "平台",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "知乎",
+            "番茄",
+            "小程序",
+            "通用"
+          ]
+        },
+        {
+          "key": "redLines",
+          "label": "审核红线 / 敏感禁忌",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "riskZone",
+          "label": "限流雷区",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "checklist",
+          "label": "成品自查清单",
+          "type": "json",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "complianceChecked",
+          "label": "合规校验结果",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false,
+          "options": [
+            "通过",
+            "需改写",
+            "阻断"
+          ],
+          "hint": "仅合规引擎可写，Agent 只读"
+        },
+        {
+          "key": "internalNote",
+          "label": "内部备注",
+          "type": "longtext",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": false,
+          "mcpWritable": false
+        }
+      ]
+    },
+    {
+      "slug": "conflict_material",
+      "label": "原创冲突素材",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "素材名",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "category",
+          "label": "分类",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "高频误会桥段",
+            "家庭矛盾",
+            "职场矛盾",
+            "邻里矛盾",
+            "心理细节",
+            "氛围场景",
+            "情绪拉扯片段"
+          ]
+        },
+        {
+          "key": "detail",
+          "label": "素材正文",
+          "type": "markdown",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "emotion",
+          "label": "情绪标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    },
+    {
+      "slug": "hotspot",
+      "label": "每日全网热点",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "web",
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "热点标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "rank",
+          "label": "榜单排名",
+          "type": "number",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "validation": {
+            "min": 1,
+            "max": 50,
+            "integer": true
+          }
+        },
+        {
+          "key": "source",
+          "label": "来源榜单",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "微博",
+            "知乎",
+            "头条民生"
+          ]
+        },
+        {
+          "key": "sourceUrl",
+          "label": "原文链接",
+          "type": "url",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "videoUrl",
+          "label": "原视频链接",
+          "type": "url",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "fullText",
+          "label": "新闻完整文字版",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "summary",
+          "label": "① 热点精简梗概",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "emotionTag",
+          "label": "② 赛道情绪标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "dramaticConflict",
+          "label": "③ 核心戏剧冲突",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "novelHook",
+          "label": "④ 可直接使用的小说核心梗",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "fitTrack",
+          "label": "⑤ 适配写作赛道",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "婚内打脸",
+            "婆媳家庭",
+            "真假千金",
+            "重生纠错",
+            "校园恩怨",
+            "职场逆袭",
+            "原生家庭",
+            "微悬疑吃瓜",
+            "都市猎奇",
+            "古风短虐"
+          ]
+        },
+        {
+          "key": "titleTemplates",
+          "label": "⑥ 3 个平台爆款标题模板",
+          "type": "json",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "blurredText",
+          "label": "事实虚化改编文本",
+          "type": "markdown",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "与 fullText 分栏展示，改编文本独立存储并标注来源"
+        },
+        {
+          "key": "complianceChecked",
+          "label": "合规校验",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false,
+          "options": [
+            "通过",
+            "需改写",
+            "阻断"
+          ]
+        },
+        {
+          "key": "collectedAt",
+          "label": "采集日期",
+          "type": "date",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false
+        }
+      ],
+      "views": [
+        {
+          "name": "今日 Top50",
+          "filter": {},
+          "sort": [
+            {
+              "field": "rank",
+              "desc": false
+            }
+          ],
+          "limit": 50
+        }
+      ]
+    },
+    {
+      "slug": "adaptation",
+      "label": "热点改编示范",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "示范标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "sourceHotspot",
+          "label": "来源热点",
+          "type": "ref",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "ref": {
+            "targetType": "hotspot",
+            "symmetric": true
+          }
+        },
+        {
+          "key": "blurredText",
+          "label": "事实虚化改编文本",
+          "type": "markdown",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "rules",
+          "label": "虚化手法",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ]
+    }
+  ],
+  "views": [
+    {
+      "name": "今日热点 Top50",
+      "node": "/M11-每日全网热点库/每日",
+      "sort": [
+        {
+          "field": "rank",
+          "desc": false
+        }
+      ],
+      "limit": 50
+    },
+    {
+      "name": "拆文复盘对话",
+      "type": "chat",
+      "prompts": [
+        "teardown_full"
+      ]
+    },
+    {
+      "name": "每日热点日报",
+      "type": "report",
+      "template": "daily_hotspots"
+    }
+  ],
+  "prompts": [
+    {
+      "id": "teardown_full",
+      "name": "口令 1 · 全自动拆文入库",
+      "template": "输入短篇全文 → 输出全维度拆文报告（M1–M10 字段化结论）+ 仿写公式 + 改写方案 → 自动归类写入 1–10 模块并生成 M6 报告"
+    },
+    {
+      "id": "daily_hotspots",
+      "name": "口令 2 · 每日热点日报",
+      "template": "采集 50 条有效热点 → 过滤时政/敏感/娱乐/广告 → 6 项强制转化 + 3 个标题模板 → 生成日报"
+    },
+    {
+      "id": "fact_blur",
+      "name": "事实虚化改编",
+      "template": "去真人真事、去可识别信息，仅保留戏剧冲突与人性梗，生成前后双重合规校验"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "daily_hotspots",
+      "cron": "0 0 7 * * ?",
+      "timezone": "Asia/Shanghai",
+      "type": "import",
+      "target": "/M11-每日全网热点库/每日",
+      "limit": 50,
+      "sources": [
+        "微博",
+        "知乎",
+        "头条民生"
+      ]
+    }
+  ],
+  "migration": {
+    "from": "workbench-v3.2",
+    "firstCommitMessage": "import from workbench v3.2",
+    "tables": {
+      "library_items": "Document(node=/M1..M10 对应目录, fields=原字段, parts=[md])",
+      "hotspots": "Document(node=/M11-每日全网热点库/每日/YYYY-MM-DD, fields, parts=[web(sourceUrl), md(blurredText)])",
+      "report_instances": "保留现有表（报告读指定 ref 快照）",
+      "subscriptions": "保留现有表（通用调度能力）",
+      "agent_tasks / agent_runs / api_keys / audit_logs": "保留现有表（内核能力）"
+    }
+  }
+}

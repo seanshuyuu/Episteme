@@ -1,0 +1,541 @@
+{
+  "$schema": "https://episteme.local/schema/pack/v1",
+  "id": "pack_reading-desk",
+  "name": "通用阅读台",
+  "version": "1.0.0",
+  "episteme": ">=0.1.0",
+  "description": "空壳内核的示例 Pack：一个论文 / 资料库，演示同一文档下挂 PDF 原文、Markdown 笔记、Web 参考快照与复现代码四种 Part。",
+  "sampleData": true,
+  "nodes": [
+    {
+      "path": "/论文库",
+      "contentType": "paper",
+      "icon": "file-text",
+      "defaultPartKinds": [
+        "pdf",
+        "md"
+      ]
+    },
+    {
+      "path": "/代码片段",
+      "contentType": "snippet",
+      "icon": "code",
+      "defaultPartKinds": [
+        "code"
+      ]
+    },
+    {
+      "path": "/网页剪藏",
+      "contentType": "clip",
+      "icon": "globe",
+      "defaultPartKinds": [
+        "web"
+      ]
+    },
+    {
+      "path": "/笔记",
+      "contentType": "note",
+      "icon": "pen",
+      "defaultPartKinds": [
+        "md"
+      ]
+    },
+    {
+      "path": "/归档",
+      "contentType": null,
+      "icon": "archive"
+    }
+  ],
+  "contentTypes": [
+    {
+      "slug": "paper",
+      "label": "论文",
+      "icon": "file-text",
+      "version": 1,
+      "exposeToMcp": true,
+      "mcpToolPrefix": "paper",
+      "primaryField": "title",
+      "titleTemplate": "{{title}}（{{year}}）",
+      "defaultPartKinds": [
+        "pdf",
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "validation": {
+            "maxLength": 300
+          }
+        },
+        {
+          "key": "authors",
+          "label": "作者",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "year",
+          "label": "发表年份",
+          "type": "number",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "validation": {
+            "min": 1900,
+            "max": 2100,
+            "integer": true
+          }
+        },
+        {
+          "key": "venue",
+          "label": "发表 venue",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "期刊",
+            "会议",
+            "预印本",
+            "技术报告"
+          ]
+        },
+        {
+          "key": "sourceUrl",
+          "label": "原文链接",
+          "type": "url",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "抓取须经 SSRF 白名单校验"
+        },
+        {
+          "key": "tags",
+          "label": "主题标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "rating",
+          "label": "精读评级",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "必读",
+            "选读",
+            "略读"
+          ]
+        },
+        {
+          "key": "reviewedBy",
+          "label": "人工复核结论",
+          "type": "text",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": false,
+          "hint": "Agent 只读，防止 AI 自行标记已复核"
+        },
+        {
+          "key": "internalCost",
+          "label": "内部成本标记",
+          "type": "number",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": false,
+          "mcpWritable": false
+        }
+      ],
+      "indexes": [
+        {
+          "name": "by_year_venue",
+          "fields": [
+            "year",
+            "venue"
+          ]
+        },
+        {
+          "name": "by_rating",
+          "fields": [
+            "rating"
+          ]
+        }
+      ],
+      "views": [
+        {
+          "name": "全部",
+          "filter": {},
+          "sort": [
+            {
+              "field": "updatedAt",
+              "desc": true
+            }
+          ]
+        },
+        {
+          "name": "今年必读",
+          "filter": {
+            "rating": "必读",
+            "year": 2026
+          },
+          "sort": [
+            {
+              "field": "year",
+              "desc": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "snippet",
+      "label": "代码片段",
+      "icon": "code",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "code"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "名称",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "language",
+          "label": "语言",
+          "type": "select",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "options": [
+            "csharp",
+            "python",
+            "typescript",
+            "rust",
+            "sql",
+            "other"
+          ]
+        },
+        {
+          "key": "purpose",
+          "label": "用途",
+          "type": "longtext",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "tags",
+          "label": "标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "fromPaper",
+          "label": "关联论文",
+          "type": "ref",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "ref": {
+            "targetType": "paper",
+            "symmetric": true
+          }
+        }
+      ],
+      "views": [
+        {
+          "name": "全部",
+          "filter": {},
+          "sort": [
+            {
+              "field": "updatedAt",
+              "desc": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "clip",
+      "label": "网页剪藏",
+      "icon": "globe",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "web"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "sourceUrl",
+          "label": "原文 URL",
+          "type": "url",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "fetchedAt",
+          "label": "抓取时间",
+          "type": "date",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false
+        },
+        {
+          "key": "httpStatus",
+          "label": "HTTP 状态",
+          "type": "number",
+          "required": false,
+          "indexed": false,
+          "exposeToMcp": true,
+          "mcpWritable": false
+        },
+        {
+          "key": "origin",
+          "label": "来源属性",
+          "type": "select",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": false,
+          "options": [
+            "external",
+            "internal"
+          ]
+        },
+        {
+          "key": "tags",
+          "label": "标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ],
+      "views": [
+        {
+          "name": "全部",
+          "filter": {},
+          "sort": [
+            {
+              "field": "fetchedAt",
+              "desc": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "note",
+      "label": "笔记",
+      "icon": "pen",
+      "version": 1,
+      "exposeToMcp": true,
+      "primaryField": "title",
+      "defaultPartKinds": [
+        "md"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "tags",
+          "label": "标签",
+          "type": "tags",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "related",
+          "label": "关联文档",
+          "type": "ref",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "ref": {
+            "symmetric": true
+          }
+        },
+        {
+          "key": "pinned",
+          "label": "置顶",
+          "type": "boolean",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "defaultValue": false
+        }
+      ],
+      "views": [
+        {
+          "name": "置顶",
+          "filter": {
+            "pinned": true
+          },
+          "sort": [
+            {
+              "field": "updatedAt",
+              "desc": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "sampleDocuments": [
+    {
+      "node": "/论文库",
+      "type": "paper",
+      "title": "内容寻址版本模型在协同写作中的应用",
+      "fields": {
+        "year": 2026,
+        "venue": "预印本",
+        "authors": [
+          "陈",
+          "李"
+        ],
+        "tags": [
+          "版本管理",
+          "MCP"
+        ],
+        "rating": "必读",
+        "sourceUrl": "https://example.org/paper.pdf"
+      },
+      "parts": [
+        {
+          "kind": "pdf",
+          "sourceUri": "https://example.org/paper.pdf",
+          "meta": {
+            "pages": 12,
+            "textLayer": true,
+            "origin": "external"
+          }
+        },
+        {
+          "kind": "md",
+          "content": "## 阅读笔记\n\n- 用 Tree 快照而非增量补丁，diff 更直观。\n- **待确认**：合并冲突策略。"
+        },
+        {
+          "kind": "web",
+          "sourceUri": "https://example.org/blog",
+          "meta": {
+            "origin": "external"
+          }
+        },
+        {
+          "kind": "code",
+          "language": "python",
+          "content": "def tree_hash(entries):\n    return sha256(canonical(entries))"
+        }
+      ],
+      "annotations": [
+        {
+          "partKind": "pdf",
+          "kind": "highlight",
+          "page": 4,
+          "text": "内容寻址快照 DAG",
+          "note": "这是与真 git 的核心差异"
+        },
+        {
+          "partKind": "web",
+          "kind": "note",
+          "text": "作者后续补充",
+          "note": "对照第 4 节看"
+        }
+      ]
+    },
+    {
+      "node": "/代码片段",
+      "type": "snippet",
+      "title": "PostgreSQL jsonb 表达式索引生成",
+      "fields": {
+        "language": "sql",
+        "purpose": "按动态字段建索引",
+        "tags": [
+          "postgres",
+          "schema"
+        ]
+      },
+      "parts": [
+        {
+          "kind": "code",
+          "language": "sql",
+          "content": "CREATE INDEX doc_year_idx ON documents ((fields->>'year'));"
+        }
+      ],
+      "annotations": [
+        {
+          "partKind": "code",
+          "kind": "note",
+          "line": 1,
+          "note": "大库需评估选择性"
+        }
+      ]
+    }
+  ],
+  "prompts": [],
+  "jobs": [
+    {
+      "id": "check_links",
+      "cron": "0 0 3 * * ?",
+      "type": "verify",
+      "target": "/网页剪藏"
+    }
+  ]
+}

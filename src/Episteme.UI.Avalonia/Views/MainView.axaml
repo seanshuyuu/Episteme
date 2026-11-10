@@ -1,0 +1,204 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Episteme.UI.Avalonia.ViewModels"
+             x:Class="Episteme.UI.Avalonia.Views.MainView"
+             x:DataType="vm:MainViewModel"
+             Background="{Binding AppBackground}"
+             Foreground="#1C2B26">
+  <Grid ColumnDefinitions="230,*,290" RowDefinitions="58,*">
+
+    <Border Grid.Row="0" Grid.ColumnSpan="3" Background="{Binding CardBackground}"
+            BorderBrush="{Binding BorderBrush}" BorderThickness="0,0,0,1">
+      <DockPanel Margin="18,0" LastChildFill="True">
+        <TextBlock Text="{Binding Title}" DockPanel.Dock="Left" FontSize="16"
+                   FontWeight="SemiBold" VerticalAlignment="Center"/>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                    HorizontalAlignment="Right">
+          <TextBlock Text="主题" FontSize="11" VerticalAlignment="Center"
+                     Foreground="{Binding MutedBrush}" Margin="0,0,6,0"/>
+          <Button Classes="theme" Content="浅绿" Command="{Binding ThemeCommand}" CommandParameter="mint"/>
+          <Button Classes="theme" Content="浅蓝" Command="{Binding ThemeCommand}" CommandParameter="sky"/>
+          <Button Classes="theme" Content="浅紫" Command="{Binding ThemeCommand}" CommandParameter="lilac"/>
+          <Button Classes="theme" Content="浅粉" Command="{Binding ThemeCommand}" CommandParameter="blush"/>
+          <Button Classes="theme" Content="刷新" Command="{Binding RefreshCommand}"/>
+        </StackPanel>
+        <TextBlock Text="{Binding Status}" FontSize="11" Margin="20,0"
+                   VerticalAlignment="Center" TextWrapping="Wrap"
+                   Foreground="{Binding MutedBrush}"/>
+      </DockPanel>
+    </Border>
+
+    <!-- 左：空间 + 动态目录树 -->
+    <Border Grid.Row="1" Grid.Column="0" Background="{Binding CardBackground}"
+            BorderBrush="{Binding BorderBrush}" BorderThickness="0,0,1,0">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Margin="12,12,12,6">
+          <TextBlock Text="空间" Classes="small" Foreground="{Binding MutedBrush}"/>
+          <ComboBox ItemsSource="{Binding Spaces}" SelectedItem="{Binding SelectedSpace}"
+                    HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:SpaceItem">
+                <TextBlock Text="{Binding Display}" FontSize="12"/>
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <TextBlock Text="动态目录" Classes="small" Margin="0,12,0,4"
+                     Foreground="{Binding MutedBrush}"/>
+        </StackPanel>
+        <ListBox ItemsSource="{Binding Nodes}" SelectedItem="{Binding SelectedNode}"
+                 Background="Transparent" BorderThickness="0" Margin="6,0,6,12">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NodeItem">
+              <TextBlock Text="{Binding Display}" FontSize="12" TextWrapping="Wrap"/>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </DockPanel>
+    </Border>
+
+    <!-- 中：文档 / 版本 / 模板 / 工具 -->
+    <TabControl Grid.Row="1" Grid.Column="1" Margin="10" Background="Transparent">
+
+      <TabItem Header="文档">
+        <ScrollViewer>
+          <StackPanel Margin="6,10">
+            <TextBlock Text="{Binding RenderLabel}" Classes="title" Margin="0,0,0,8"/>
+            <Border Classes="card" Background="{Binding CardBackground}"
+                    BorderBrush="{Binding BorderBrush}">
+              <StackPanel>
+                <TextBlock Text="标题" Classes="small" Foreground="{Binding MutedBrush}"/>
+                <TextBox Text="{Binding FormTitle, Mode=TwoWay}" PlaceholderText="文档标题"/>
+                <TextBlock Text="Schema 字段（由 /render 动态生成）" Classes="small"
+                           Margin="0,10,0,4" Foreground="{Binding MutedBrush}"/>
+                <ItemsControl ItemsSource="{Binding FormFields}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FieldInput">
+                      <StackPanel Margin="0,0,0,6">
+                        <TextBlock Text="{Binding DisplayLabel}" FontSize="11"/>
+                        <TextBox Text="{Binding Value, Mode=TwoWay}" PlaceholderText="{Binding Hint}"
+                                 FontSize="12"/>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="正文（Markdown Part）" Classes="small" Margin="0,6,0,4"
+                           Foreground="{Binding MutedBrush}"/>
+                <TextBox Text="{Binding FormBody, Mode=TwoWay}" AcceptsReturn="True"
+                         Height="76" PlaceholderText="Markdown 正文"/>
+                <Button Classes="action" Content="创建文档" Command="{Binding CreateDocCommand}"/>
+              </StackPanel>
+            </Border>
+            <TextBlock Text="文档列表" Classes="title" Margin="0,6,0,6"/>
+            <ListBox ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDoc}"
+                     MaxHeight="220" Background="Transparent" BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:DocItem">
+                  <TextBlock Text="{Binding Display}" FontSize="12" TextWrapping="Wrap"/>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Text="内容类型" Classes="title" Margin="0,10,0,6"/>
+            <ItemsControl ItemsSource="{Binding Types}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:TypeItem">
+                  <TextBlock Text="{Binding Display}" FontSize="11" Margin="0,0,0,3"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="版本">
+        <ScrollViewer>
+          <StackPanel Margin="6,10">
+            <TextBlock Text="类 git 版本历史（commits）" Classes="title" Margin="0,0,0,8"/>
+            <ListBox ItemsSource="{Binding Commits}" Background="Transparent" BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:CommitItem">
+                  <TextBlock Text="{Binding Display}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="模板">
+        <ScrollViewer>
+          <StackPanel Margin="6,10">
+            <TextBlock Text="声明式 Pack（纯数据，安装产生 import Commit）" Classes="title"
+                       Margin="0,0,0,8"/>
+            <ListBox ItemsSource="{Binding Packs}" SelectedItem="{Binding SelectedPack}"
+                     MaxHeight="140" Background="Transparent" BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:PackItem">
+                  <TextBlock Text="{Binding Display}" FontSize="12" TextWrapping="Wrap"/>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,8">
+              <Button Classes="action" Content="预览 dryRun"
+                      Command="{Binding PreviewPackCommand}" CommandParameter="{Binding SelectedPack}"/>
+              <Button Classes="action" Content="安装模板"
+                      Command="{Binding InstallPackCommand}" CommandParameter="{Binding SelectedPack}"/>
+              <Button Classes="action" Content="导出 Pack JSON"
+                      Command="{Binding ExportPackCommand}"/>
+            </StackPanel>
+            <TextBlock Text="Pack JSON（可编辑后导入到任意空间）" Classes="small"
+                       Foreground="{Binding MutedBrush}"/>
+            <TextBox Text="{Binding PackJson, Mode=TwoWay}" AcceptsReturn="True" Height="150"
+                     FontFamily="Consolas, Menlo, monospace" FontSize="11"/>
+            <Button Classes="action" Content="导入到当前空间" Margin="0,8,0,0"
+                    Command="{Binding ImportPackCommand}"/>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem Header="工具">
+        <ScrollViewer>
+          <StackPanel Margin="6,10">
+            <TextBlock Text="动态 MCP 工具" Classes="title" Margin="0,0,0,8"/>
+            <Border Classes="card" Background="{Binding CardBackground}"
+                    BorderBrush="{Binding BorderBrush}">
+              <StackPanel>
+                <TextBlock Text="{Binding McpResult}" FontSize="12" TextWrapping="Wrap"/>
+                <Button Classes="action" Content="调用 MCP" Command="{Binding McpCommand}"/>
+              </StackPanel>
+            </Border>
+            <ListBox ItemsSource="{Binding Tools}" Background="Transparent" BorderThickness="0">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ToolItem">
+                  <StackPanel Margin="0,0,0,5">
+                    <TextBlock Text="{Binding Name}" Classes="mono" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding Description}" FontSize="11" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+    </TabControl>
+
+    <!-- 右：详情 + 标注审阅 -->
+    <Border Grid.Row="1" Grid.Column="2" Background="{Binding CardBackground}"
+            BorderBrush="{Binding BorderBrush}" BorderThickness="1,0,0,0">
+      <ScrollViewer>
+        <StackPanel Margin="14,14,14,20">
+          <TextBlock Text="详情" Classes="title" Margin="0,0,0,8"/>
+          <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="Wrap"/>
+          <TextBlock Text="标注审阅" Classes="title" Margin="0,16,0,8"/>
+          <Button Classes="theme" Content="刷新标注" Command="{Binding ReviewCommand}"/>
+          <ItemsControl ItemsSource="{Binding Annotations}" Margin="0,8,0,0">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:AnnotationItem">
+                <TextBlock Text="{Binding Display}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,5"/>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
+</UserControl>

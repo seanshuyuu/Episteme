@@ -1,0 +1,136 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Episteme.UI.Avalonia.ViewModels"
+             x:Class="Episteme.UI.Avalonia.Views.MobileShell"
+             x:DataType="vm:MainViewModel"
+             Background="{Binding AppBackground}"
+             Foreground="#1C2B26">
+  <Grid RowDefinitions="52,*,48">
+    <Border Grid.Row="0" Background="{Binding CardBackground}"
+            BorderBrush="{Binding BorderBrush}" BorderThickness="0,0,0,1">
+      <DockPanel Margin="14,0">
+        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold"
+                   VerticalAlignment="Center" DockPanel.Dock="Left"/>
+        <Button DockPanel.Dock="Right" Classes="theme" Content="刷新"
+                Command="{Binding RefreshCommand}" HorizontalAlignment="Right"/>
+      </DockPanel>
+    </Border>
+
+    <ScrollViewer Grid.Row="1">
+      <StackPanel Margin="14,10,14,20">
+        <Border Classes="card" Background="{Binding CardBackground}"
+                BorderBrush="{Binding BorderBrush}">
+          <TextBlock Text="{Binding Status}" FontSize="11" TextWrapping="Wrap"/>
+        </Border>
+
+        <TextBlock Text="空间" Classes="small" Foreground="{Binding MutedBrush}"/>
+        <ComboBox ItemsSource="{Binding Spaces}" SelectedItem="{Binding SelectedSpace}"
+                  HorizontalAlignment="Stretch" Margin="0,0,0,8">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:SpaceItem">
+              <TextBlock Text="{Binding Display}" FontSize="12"/>
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <TextBlock Text="动态目录" Classes="title" Margin="0,4,0,4"/>
+        <ListBox ItemsSource="{Binding Nodes}" SelectedItem="{Binding SelectedNode}"
+                 MaxHeight="170" Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:NodeItem">
+              <TextBlock Text="{Binding Display}" FontSize="12"/>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <TextBlock Text="文档" Classes="title" Margin="0,10,0,4"/>
+        <ListBox ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDoc}"
+                 MaxHeight="170" Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:DocItem">
+              <TextBlock Text="{Binding Display}" FontSize="12" TextWrapping="Wrap"/>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+
+        <Border Classes="card" Background="{Binding CardBackground}"
+                BorderBrush="{Binding BorderBrush}" Margin="0,10,0,0">
+          <StackPanel>
+            <TextBlock Text="详情 / 标注审阅" Classes="title" Margin="0,0,0,6"/>
+            <TextBlock Text="{Binding Detail}" FontSize="11" TextWrapping="Wrap"/>
+            <Button Classes="theme" Content="刷新标注" Margin="0,8,0,6"
+                    Command="{Binding ReviewCommand}"/>
+            <ItemsControl ItemsSource="{Binding Annotations}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AnnotationItem">
+                  <TextBlock Text="{Binding Display}" FontSize="11" TextWrapping="Wrap"/>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <TextBlock Text="{Binding RenderLabel}" Classes="title" Margin="0,10,0,6"/>
+        <TextBox Text="{Binding FormTitle, Mode=TwoWay}" PlaceholderText="文档标题"/>
+        <ItemsControl ItemsSource="{Binding FormFields}" Margin="0,8,0,0">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:FieldInput">
+              <StackPanel Margin="0,0,0,6">
+                <TextBlock Text="{Binding DisplayLabel}" FontSize="11"/>
+                <TextBox Text="{Binding Value, Mode=TwoWay}" PlaceholderText="{Binding Hint}"/>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBox Text="{Binding FormBody, Mode=TwoWay}" AcceptsReturn="True" Height="70"
+                 PlaceholderText="Markdown 正文"/>
+        <Button Classes="action" Content="创建文档" Command="{Binding CreateDocCommand}"/>
+
+        <TextBlock Text="模板 Pack" Classes="title" Margin="0,14,0,6"/>
+        <ListBox ItemsSource="{Binding Packs}" SelectedItem="{Binding SelectedPack}"
+                 MaxHeight="120" Background="Transparent" BorderThickness="0">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:PackItem">
+              <TextBlock Text="{Binding Display}" FontSize="12" TextWrapping="Wrap"/>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <StackPanel Orientation="Horizontal" Margin="0,6,0,6">
+          <Button Classes="theme" Content="预览" Command="{Binding PreviewPackCommand}"
+                  CommandParameter="{Binding SelectedPack}"/>
+          <Button Classes="theme" Content="安装" Command="{Binding InstallPackCommand}"
+                  CommandParameter="{Binding SelectedPack}"/>
+          <Button Classes="theme" Content="导出" Command="{Binding ExportPackCommand}"/>
+        </StackPanel>
+        <TextBox Text="{Binding PackJson, Mode=TwoWay}" AcceptsReturn="True" Height="110"
+                 FontFamily="Consolas, Menlo, monospace" FontSize="11"/>
+        <Button Classes="action" Content="导入" Margin="0,6,0,0"
+                Command="{Binding ImportPackCommand}"/>
+
+        <TextBlock Text="动态 MCP" Classes="title" Margin="0,14,0,6"/>
+        <TextBlock Text="{Binding McpResult}" FontSize="11" TextWrapping="Wrap"/>
+        <Button Classes="theme" Content="调用 MCP" Margin="0,6,0,0"
+                Command="{Binding McpCommand}"/>
+
+        <TextBlock Text="版本历史" Classes="title" Margin="0,14,0,6"/>
+        <ItemsControl ItemsSource="{Binding Commits}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:CommitItem">
+              <TextBlock Text="{Binding Display}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+
+    <Border Grid.Row="2" Background="{Binding CardBackground}"
+            BorderBrush="{Binding BorderBrush}" BorderThickness="0,1,0,0">
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Button Classes="theme" Content="浅绿" Command="{Binding ThemeCommand}" CommandParameter="mint"/>
+        <Button Classes="theme" Content="浅蓝" Command="{Binding ThemeCommand}" CommandParameter="sky"/>
+        <Button Classes="theme" Content="浅紫" Command="{Binding ThemeCommand}" CommandParameter="lilac"/>
+        <Button Classes="theme" Content="浅粉" Command="{Binding ThemeCommand}" CommandParameter="blush"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

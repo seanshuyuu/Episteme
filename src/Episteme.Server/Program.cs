@@ -37,7 +37,7 @@ app.MapGet("/health", () => Results.Json(new
 {
     status = "ok",
     product = "Episteme",
-    version = "0.3.0-p3",
+    version = "0.4.0-p4p5",
     utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
 }));
 

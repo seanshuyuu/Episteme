@@ -42,7 +42,16 @@ public static class ToolRegistry
         T("branch", "创建或列出分支（需要 episteme:version scope）", ("name", "string", "分支名"), ("from", "string", "起点 commitId")),
         T("merge", "合并分支，返回冲突清单", ("from", "string", "来源分支")),
         T("revert", "反向提交，可按 agentId 批量撤销", ("commitId", "string", "目标提交"), ("agentId", "string", "批量撤销某 Agent"), ("since", "string", "起始时间")),
-        T("export_as_git", "导出为真实 git 仓库（本轮返回线性化提交清单）", ("ref", "string", "导出起点"))
+        T("export_as_git", "导出为真实 git 仓库（本轮返回线性化提交清单）", ("ref", "string", "导出起点")),
+        T("list_packs", "列出内置的声明式 Pack 模板（目录树 + 内容类型 + 可选示例数据）"),
+        T("install_pack", "安装 Pack 到当前空间：一次事务创建目录与 Schema，产生一条 source=import 的 Commit；支持 dryRun 预览、overwrite 覆盖、includeSamples 带示例数据，也可用 pack 内联 JSON 直接自定义模板",
+            ("packId", "string", "内置 Pack ID，如 workbench / reading-desk"),
+            ("pack", "object", "内联 Pack JSON（与 packId 二选一）"),
+            ("dryRun", "boolean", "只预览不写入"), ("overwrite", "boolean", "允许覆盖同名对象"),
+            ("includeSamples", "boolean", "同时导入示例文档")),
+        T("export_pack", "把当前空间的目录树与 Schema 导出为可复用的 Pack JSON",
+            ("includeDocuments", "boolean", "把文档一并导出为示例数据"),
+            ("name", "string", "模板名称"))
     };
 
     private static ToolDef T(string name, string description, params (string Name, string Type, string Desc)[] props)

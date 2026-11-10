@@ -14,6 +14,25 @@ public static class Endpoints
         api.MapGet("/viewers", async (HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.ViewersAsync(ct)));
 
+        // Pack catalog / templates (P4)
+        api.MapGet("/packs", async (HttpContext http, EpistemeService svc) =>
+            await Run(http, ct => svc.ListPacksAsync(ct)));
+
+        api.MapGet("/packs/{packId}", async (string packId, HttpContext http, EpistemeService svc) =>
+            await Run(http, ct => svc.GetPackAsync(packId, ct)));
+
+        api.MapPost("/spaces/{id}/packs/install",
+            async (string id, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.InstallPackAsync(id, body, Ctx(http, body, "api"), ct)));
+
+        api.MapPost("/spaces/{id}/packs/import",
+            async (string id, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.ImportPackAsync(id, body, Ctx(http, body, "api"), ct)));
+
+        api.MapPost("/spaces/{id}/packs/export",
+            async (string id, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.ExportPackAsync(id, body, ct)));
+
         // Spaces
         api.MapGet("/spaces", async (HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.ListSpacesAsync(ct)));

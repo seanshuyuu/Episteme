@@ -280,6 +280,59 @@ async function waitFor(fn, ms = 10000) {
   doc.querySelector('[data-tab="versions"]').click();
   check('阅读器接入后版本 Tab 仍可用', window.EpistemeApp.getState().tab === 'versions');
 
+  // ---------------- P4 Pack templates ----------------
+  console.log('---- P4 声明式 Pack 交互 ----');
+  doc.querySelector('[data-tab="packs"]').click();
+  check('模板 Tab 切换生效', window.EpistemeApp.getState().tab === 'packs',
+    window.EpistemeApp.getState().tab);
+  await window.EpistemeApp.loadPacks();
+  const packCards = doc.querySelectorAll('#pack-list .pack-card');
+  check('内置模板渲染为可点击卡片', packCards.length >= 2, packCards.length);
+  check('Pack 状态接口可读', window.EpistemeApp.getState().packCount >= 2,
+    window.EpistemeApp.getState().packCount);
+
+  const previewBtn = doc.querySelector('[data-action="preview-pack"]');
+  if (previewBtn) previewBtn.click();
+  await waitFor(() => !!window.EpistemeApp.getState().packPreview);
+  check('真实点击「预览」返回 dryRun 且不写库',
+    window.EpistemeApp.getState().packPreview.dryRun === true &&
+    window.EpistemeApp.getState().packPreview.commitId === null,
+    window.EpistemeApp.getState().packPreview);
+
+  const nodesBeforeInstall = window.EpistemeApp.getState().nodes.length;
+  const wbCard = Array.from(packCards)
+    .find((c) => c.getAttribute('data-pack-id') === 'workbench') || packCards[0];
+  const installBtn = wbCard && wbCard.querySelector('[data-action="install-pack"]');
+  if (installBtn) installBtn.click();
+  await waitFor(() => window.EpistemeApp.getState().nodes.length > nodesBeforeInstall + 5);
+  check('真实点击「安装」生成目录树',
+    window.EpistemeApp.getState().nodes.length >= nodesBeforeInstall + 10,
+    { before: nodesBeforeInstall, after: window.EpistemeApp.getState().nodes.length });
+
+  doc.getElementById('btn-export-pack').click();
+  await waitFor(() => (doc.getElementById('pack-json').value || '').length > 100);
+  check('真实点击「导出」生成 Pack JSON',
+    doc.getElementById('pack-json').value.indexOf('"nodes"') >= 0,
+    doc.getElementById('pack-json').value.length);
+  check('导出结果进入状态接口',
+    window.EpistemeApp.getState().packExportNodes >= 10,
+    window.EpistemeApp.getState().packExportNodes);
+
+  const custom = {
+    id: 'ui_custom', name: 'UI 自定义模板', version: '1.0.0',
+    nodes: [{ path: '/UI-自定义', contentType: 'ui_note' }],
+    contentTypes: [{ slug: 'ui_note', label: '便签',
+      fields: [{ key: 'title', label: '标题', type: 'text', required: true }] }]
+  };
+  doc.getElementById('pack-json').value = JSON.stringify(custom);
+  const nodesBeforeImport = window.EpistemeApp.getState().nodes.length;
+  doc.getElementById('btn-import-pack').click();
+  await waitFor(() => window.EpistemeApp.getState().nodes.length > nodesBeforeImport);
+  check('真实点击「导入」落地自定义目录与内容类型',
+    window.EpistemeApp.getState().nodes.length > nodesBeforeImport &&
+    window.EpistemeApp.getState().contentTypes.some((t) => t.slug === 'ui_note'),
+    { before: nodesBeforeImport, after: window.EpistemeApp.getState().nodes.length });
+
   console.log('\n== 结果: ' + pass + ' PASS / ' + fail + ' FAIL ==');
   process.exit(fail ? 1 : 0);
 })().catch((e) => {

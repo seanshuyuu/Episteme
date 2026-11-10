@@ -6,7 +6,7 @@
   var API = BASE + '/api/v1/episteme';
   var FIELD_TYPES = ['text', 'longtext', 'markdown', 'code', 'number', 'date', 'boolean',
     'select', 'multi_select', 'tags', 'url', 'ref', 'json', 'file', 'user'];
-  var TABS = ['docs', 'reader', 'versions', 'mcp'];
+  var TABS = ['docs', 'reader', 'versions', 'mcp', 'packs'];
 
   var state = {
     spaces: [], spaceId: null, spaceName: '', nodes: [], nodeId: null,
@@ -15,7 +15,8 @@
     selectedCommit: null, tab: 'docs', fields: [],
     viewers: null, activeDocId: null, reader: null, partIndex: 0,
     readerMode: 'source', webMode: 'read', page: 1, selectedLine: 0,
-    readerRef: '', readOnly: false
+    readerRef: '', readOnly: false,
+    packs: [], packPreview: null, packExport: null
   };
 
   function esc(s) {
@@ -86,7 +87,8 @@
       api('/spaces/' + id + '/documents?pageSize=50'),
       api('/spaces/' + id + '/commits?limit=30'),
       api('/spaces/' + id + '/mcp/tools'),
-      api('/viewers')
+      api('/viewers'),
+      api('/packs')
     ]);
     state.toolsVersion = results[0].toolsVersion || 0;
     $('tools-version').textContent = 'tools v' + state.toolsVersion;
@@ -96,7 +98,8 @@
     state.commits = results[4].items || [];
     state.tools = results[5];
     state.viewers = results[6];
-    renderNodes(); renderDocs(); renderCommits(); renderTools();
+    state.packs = results[7].items || [];
+    renderNodes(); renderDocs(); renderCommits(); renderTools(); renderPacks();
     if (state.nodeId) await selectNode(state.nodeId);
     else renderForm(null);
   }
@@ -264,6 +267,90 @@
         '<div class="params">参数 ' + keys.length + ' · 必填 ' + required.length +
         ' · ' + esc(keys.slice(0, 8).join(', ')) + (keys.length > 8 ? ' …' : '') + '</div></div>';
     }).join('');
+  }
+
+  // ---------- P4: declarative Pack templates ----------
+
+  function renderPacks() {
+    var box = $('pack-list');
+    if (!box) return;
+    if (!state.packs.length) { box.innerHTML = '<p class="muted">没有内置模板。</p>'; return; }
+    box.innerHTML = state.packs.map(function (p) {
+      return '<div class="card pack-card" data-pack-id="' + esc(p.id) + '">' +
+        '<div class="pack-title"><strong>' + esc(p.name) + '</strong>' +
+        '<span class="badge">v' + esc(p.version) + '</span></div>' +
+        '<p class="muted">' + esc(p.description) + '</p>' +
+        '<div class="pack-meta">' + p.nodeCount + ' 目录 · ' + p.contentTypeCount + ' 类型 · ' +
+        p.sampleDocumentCount + ' 示例 · ' + (p.valid ? '校验通过' : '校验失败') + '</div>' +
+        '<div class="row">' +
+        '<button data-action="preview-pack" data-pack-id="' + esc(p.id) + '" class="ghost">预览</button>' +
+        '<button data-action="install-pack" data-pack-id="' + esc(p.id) + '" class="primary">安装</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  async function loadPacks() {
+    var res = await api('/packs');
+    state.packs = res.items || [];
+    renderPacks();
+    return res;
+  }
+
+  async function previewPack(packId) {
+    if (!state.spaceId || !packId) return null;
+    var res = await api('/spaces/' + state.spaceId + '/packs/install', {
+      method: 'POST', body: JSON.stringify({ packId: packId, dryRun: true, source: 'ui' })
+    });
+    state.packPreview = res;
+    var box = $('pack-preview');
+    if (box) box.textContent = '预览 ' + packId + '：将创建 ' + res.wouldCreateNodes +
+      ' 个目录、' + res.wouldCreateContentTypes + ' 个内容类型；冲突 ' +
+      (res.conflicts ? res.conflicts.length : 0) + ' 项；未写入任何数据。';
+    hint('pack-hint', '预览完成，未写入任何数据', 'ok');
+    return res;
+  }
+
+  async function installPack(packId) {
+    if (!state.spaceId || !packId) return null;
+    var res = await api('/spaces/' + state.spaceId + '/packs/install', {
+      method: 'POST', body: JSON.stringify({ packId: packId, source: 'ui' })
+    });
+    hint('pack-hint', '已安装：' + res.createdNodes + ' 目录 / ' +
+      res.createdContentTypes + ' 类型 · Commit ' + res.commitId, 'ok');
+    await loadAll();
+    return res;
+  }
+
+  async function exportPack() {
+    if (!state.spaceId) return null;
+    var res = await api('/spaces/' + state.spaceId + '/packs/export', {
+      method: 'POST',
+      body: JSON.stringify({
+        includeDocuments: $('pack-include-docs') ? $('pack-include-docs').checked : false,
+        source: 'ui'
+      })
+    });
+    state.packExport = res;
+    if ($('pack-json')) $('pack-json').value = res.json || '';
+    hint('pack-hint', '已导出 ' + res.summary.nodeCount + ' 目录 / ' +
+      res.summary.contentTypeCount + ' 类型', 'ok');
+    return res;
+  }
+
+  async function importPack() {
+    if (!state.spaceId) return null;
+    var raw = val('pack-json');
+    if (!raw) { hint('pack-hint', '请先粘贴或导出 Pack JSON', 'error'); return null; }
+    var pack;
+    try { pack = JSON.parse(raw); }
+    catch (e) { hint('pack-hint', 'JSON 解析失败：' + e.message, 'error'); return null; }
+    var res = await api('/spaces/' + state.spaceId + '/packs/import', {
+      method: 'POST', body: JSON.stringify({ pack: pack, source: 'ui' })
+    });
+    hint('pack-hint', '已导入：' + res.createdNodes + ' 目录 / ' +
+      res.createdContentTypes + ' 类型 · Commit ' + res.commitId, 'ok');
+    await loadAll();
+    return res;
   }
 
   function switchTab(tab) {
@@ -811,12 +898,17 @@
             case 'export-notes': await exportNotes(); break;
             case 'append-part': await appendPart(); break;
             case 'show-part-form': show('part-form'); break;
+            case 'preview-pack': await previewPack(actionEl.getAttribute('data-pack-id')); break;
+            case 'install-pack': await installPack(actionEl.getAttribute('data-pack-id')); break;
+            case 'export-pack': await exportPack(); break;
+            case 'import-pack': await importPack(); break;
           }
         } catch (e) {
           hint('doc-hint', e.message, 'error');
           hint('type-hint', e.message, 'error');
           hint('empty-hint', e.message, 'error');
           hint('reader-hint', e.message, 'error');
+          hint('pack-hint', e.message, 'error');
         }
         return;
       }
@@ -868,7 +960,10 @@
         readerPartIndex: state.partIndex, readerPage: state.page,
         readerReadOnly: state.readOnly, readerRef: state.readerRef,
         annotationTotal: state.reader ? state.reader.annotationTotal : 0,
-        anchorLost: state.reader ? state.reader.anchorLost : 0
+        anchorLost: state.reader ? state.reader.anchorLost : 0,
+        packCount: state.packs.length, packPreview: state.packPreview,
+        packExportNodes: state.packExport && state.packExport.summary
+          ? state.packExport.summary.nodeCount : 0
       };
     },
     api: api, refresh: loadAll, loadSpaces: loadSpaces, createSpace: createSpace,
@@ -878,7 +973,9 @@
     loadViewers: loadViewers, openDocument: openDocument, selectPart: selectPart,
     switchReaderMode: switchReaderMode, changePage: changePage, selectLine: selectLine,
     savePart: savePart, addAnnotation: addAnnotation, exportNotes: exportNotes,
-    appendPart: appendPart, currentPart: currentPart
+    appendPart: appendPart, currentPart: currentPart,
+    loadPacks: loadPacks, previewPack: previewPack, installPack: installPack,
+    exportPack: exportPack, importPack: importPack
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

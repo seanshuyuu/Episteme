@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Episteme P1+P2+P3 REST / MCP 冒烟回归（零第三方依赖）。"""
+"""Episteme P1+P2+P3+P4 REST / MCP 冒烟回归（零第三方依赖）。"""
 import copy
 import json
 import sys
@@ -60,7 +60,7 @@ def mcp(method, params=None, role="owner", space=None):
                 {"X-Episteme-Role": role, "MCP-Protocol-Version": "2025-06-18"})
 
 
-print("== Episteme P1+P2+P3 REST / MCP 冒烟 ==")
+print("== Episteme P1+P2+P3+P4 REST / MCP 冒烟 ==")
 
 code, health = http("GET", BASE + "/health")
 check("健康检查 200", code == 200 and health.get("status") == "ok", health)
@@ -77,8 +77,8 @@ check("创建空间", code == 200 and bool(space.get("id")), space)
 sid = space.get("id", "")
 
 code, before = rest("GET", f"/spaces/{sid}/mcp/tools")
-check("初始 23 个静态工具（P3 新增 viewers / read_part / export_notes）",
-      code == 200 and before.get("total") == 23 and before.get("staticToolCount") == 23, before)
+check("初始 26 个静态工具（P4 新增 list_packs / install_pack / export_pack）",
+      code == 200 and before.get("total") == 26 and before.get("staticToolCount") == 26, before)
 
 definition = {
     "slug": "paper", "label": "论文", "version": 1, "exposeToMcp": True,
@@ -110,7 +110,7 @@ code, after = rest("GET", f"/spaces/{sid}/mcp/tools")
 names = [t["name"] for t in after.get("tools", [])]
 new_tools = ["episteme.query_paper", "episteme.create_paper", "episteme.update_paper"]
 check("Schema 改后 tools/list 同会话 +3",
-      code == 200 and after.get("total") == 26 and all(n in names for n in new_tools),
+      code == 200 and after.get("total") == 29 and all(n in names for n in new_tools),
       {"total": after.get("total"), "names": names[-5:]})
 check("toolsVersion 递增", after.get("toolsVersion", 0) > before.get("toolsVersion", 0), after)
 
@@ -427,6 +427,93 @@ code, anns3 = rest("GET", f"/spaces/{sid}/documents/{doc_id}/annotations")
 check("revert 后标注随父快照恢复（partId 重映射，不丢失）",
       code == 200 and rev3.get("newCommitId") and anns3.get("total", 0) >= 5,
       {"revert": rev3, "annotations": anns3.get("total")})
+
+# ---------------- P4: declarative Packs ----------------
+print("\n---- P4 声明式 Pack / 模板导入导出 ----")
+code, packs = rest("GET", "/packs")
+pack_items = packs.get("items", [])
+check("内置 Pack 目录列出 2 套且校验通过",
+      code == 200 and len(pack_items) == 2 and all(p.get("valid") for p in pack_items),
+      [(p.get("id"), p.get("valid")) for p in pack_items])
+wb_pack = next((p for p in pack_items if p.get("id") == "workbench"), {})
+check("workbench Pack 声明 15 目录 / 12 内容类型",
+      wb_pack.get("nodeCount") == 15 and wb_pack.get("contentTypeCount") == 12, wb_pack)
+
+pack_slug = "pack-" + time.strftime("%H%M%S") + "-a"
+code, pspace = rest("POST", "/spaces", {"name": "Pack 回归空间", "slug": pack_slug, "source": "api"})
+psid = pspace.get("id", "")
+check("创建 Pack 测试空间", code == 200 and bool(psid), pspace)
+
+code, ptree_before = rest("GET", f"/spaces/{psid}/tree")
+code, pdry = rest("POST", f"/spaces/{psid}/packs/install",
+                  {"packId": "workbench", "dryRun": True, "source": "api"})
+code, ptree_after_dry = rest("GET", f"/spaces/{psid}/tree")
+check("dryRun 预览不写入任何数据",
+      code == 200 and pdry.get("dryRun") is True and pdry.get("commitId") is None
+      and ptree_before.get("total") == 0 and ptree_after_dry.get("total") == 0,
+      {"dryRun": pdry, "before": ptree_before.get("total"), "after": ptree_after_dry.get("total")})
+
+code, pinst = rest("POST", f"/spaces/{psid}/packs/install",
+                   {"packId": "workbench", "source": "api", "idempotencyKey": "pack-once"})
+code, ptree = rest("GET", f"/spaces/{psid}/tree")
+code, ptypes = rest("GET", f"/spaces/{psid}/content-types")
+ppaths = [n.get("path", "") for n in ptree.get("items", [])]
+check("一次事务安装出 15 目录 / 12 内容类型",
+      code == 200 and pinst.get("createdNodes") == 15
+      and pinst.get("createdContentTypes") == 12
+      and ptree.get("total") == 15 and ptypes.get("total") == 12,
+      {"install": pinst, "tree": ptree.get("total"), "types": ptypes.get("total")})
+check("11 个 Workbench 模块目录全部生成",
+      all(any(f"M{i}-" in p for p in ppaths) for i in range(1, 12)), ppaths[:3])
+check("安装产生一条 source=import 的 Commit",
+      pinst.get("commitSource") == "import" and bool(pinst.get("commitId")), pinst)
+check("首次带幂等键写入不被误判为重放（IsReplay 修复）",
+      pinst.get("idempotentReplay") is False and pinst.get("createdNodes") == 15, pinst)
+
+code, pdup = rest("POST", f"/spaces/{psid}/packs/install", {"packId": "workbench", "source": "api"})
+check("重复安装被 409 PACK_CONFLICT 拦截",
+      code == 409 and pdup.get("code") == "PACK_CONFLICT", {"code": code, "body": pdup})
+code, preplay = rest("POST", f"/spaces/{psid}/packs/install",
+                     {"packId": "workbench", "source": "api", "idempotencyKey": "pack-once"})
+check("幂等重放返回原 Commit 且不再写入",
+      code == 200 and preplay.get("idempotentReplay") is True
+      and preplay.get("commitId") == pinst.get("commitId")
+      and preplay.get("createdNodes") == 0, preplay)
+
+code, pexp = rest("POST", f"/spaces/{psid}/packs/export", {"source": "api"})
+check("导出为合法 Pack JSON（目录 / 类型数一致）",
+      code == 200 and pexp.get("valid") is True
+      and pexp.get("summary", {}).get("nodeCount") == 15
+      and pexp.get("summary", {}).get("contentTypeCount") == 12, pexp.get("summary"))
+code, pspace2 = rest("POST", "/spaces",
+                     {"name": "Pack 导入空间", "slug": "pack-" + time.strftime("%H%M%S") + "-b", "source": "api"})
+psid2 = pspace2.get("id", "")
+code, pimp = rest("POST", f"/spaces/{psid2}/packs/import",
+                  {"pack": pexp.get("pack"), "source": "api"})
+code, ptree2 = rest("GET", f"/spaces/{psid2}/tree")
+check("导出结果可导入到另一个空间且目录一致",
+      code == 200 and pimp.get("createdNodes") == 15 and ptree2.get("total") == 15,
+      {"import": pimp, "tree": ptree2.get("total")})
+
+bad_pack = {"id": "BAD ID", "name": "非法模板",
+            "nodes": [{"path": "/x", "contentType": "missing"}], "contentTypes": []}
+code, pbad = rest("POST", f"/spaces/{psid2}/packs/import", {"pack": bad_pack, "source": "api"})
+check("非法 Pack（ID 非法 / 引用未声明类型）被 422 拒绝",
+      code == 422 and pbad.get("code") == "PACK_INVALID", {"code": code, "body": pbad})
+code, rpc_packs = mcp("tools/call", {"name": "episteme.list_packs", "arguments": {}}, space=pack_slug)
+check("MCP list_packs 返回内置模板",
+      rpc_packs.get("result", {}).get("structuredContent", {}).get("total", 0) == 2, rpc_packs)
+
+code, pspace3 = rest("POST", "/spaces",
+                     {"name": "示例 Pack 空间", "slug": "pack-" + time.strftime("%H%M%S") + "-c", "source": "api"})
+psid3 = pspace3.get("id", "")
+code, psamp = rest("POST", f"/spaces/{psid3}/packs/install",
+                   {"packId": "pack_reading-desk", "includeSamples": True, "source": "api"})
+code, pdocs = rest("GET", f"/spaces/{psid3}/documents")
+check("includeSamples 同时导入示例文档",
+      code == 200 and psamp.get("createdSampleDocuments", 0) >= 1
+      and pdocs.get("total", 0) >= 1,
+      {"install": psamp, "docs": pdocs.get("total")})
 
 print("\n== 结果: %d PASS / %d FAIL ==" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

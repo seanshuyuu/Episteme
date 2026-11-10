@@ -1,0 +1,12 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:Episteme.UI.Avalonia.Views"
+        xmlns:vm="using:Episteme.UI.Avalonia.ViewModels"
+        x:Class="Episteme.UI.Avalonia.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="1280" Height="800" MinWidth="940" MinHeight="560"
+        Title="Episteme · 知书 · 桌面端"
+        Background="{Binding AppBackground}"
+        Foreground="#1C2B26">
+    <views:MainView />
+</Window>

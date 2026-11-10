@@ -1,0 +1,7 @@
+<Solution>
+  <!-- 客户端独立解决方案：不参与 Episteme.Server 的 Docker 构建。
+       Android head 使用 net10.0-android，需要 android workload + Android SDK，单独构建。 -->
+  <Project Path="Episteme.UI.Avalonia/Episteme.UI.Avalonia.csproj" />
+  <Project Path="Episteme.Desktop/Episteme.Desktop.csproj" />
+  <Project Path="Episteme.Client.Probe/Episteme.Client.Probe.csproj" />
+</Solution>

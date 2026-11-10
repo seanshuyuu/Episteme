@@ -1,9 +1,9 @@
 # Episteme · 知书
 
-> 通用文档操作系统空壳：用户自定义目录与内容，动态 MCP 读写编辑，git 式版本管理，Markdown / Code / PDF / Web 四类阅读器。
-> 由「商业短篇创作工作台」抽象一层而来；工作台降级为本平台的**第一套模板（Pack）**。
+> 通用文档操作系统空壳：用户自定义目录与内容，动态 MCP 读写编辑，git 式版本管理，Markdown / Code / PDF / Web 四类阅读器，声明式 Pack 模板，Web / 桌面 / Android 三端骨架。
+> 由「商业短篇创作工作台」抽象一层而来；工作台已落地为本平台的**第一套内置模板（Pack）**。
 
-**当前阶段：v0.3 · P1 通用内核 + P2 版本 DAG / 动态 MCP + P3 四类阅读器均已落地为可运行实现（Docker 部署）**；v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07-P1P2实现与验收报告.md` 与 `docs/08-P3四类阅读器实现与验收报告.md`。
+**当前阶段：v0.4 · P1 通用内核 / P2 版本 DAG+动态 MCP / P3 四类阅读器 / P4 声明式 Pack / P5 三端骨架均已落地**；服务端为 Docker 部署，客户端为可编译源码骨架。v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07`、`docs/08` 与 `docs/09-P4P5实现与验收报告.md`。
 
 > **工作区清理（2026-11-10）**：按用户要求，旧「商业短篇创作工作台」的源码、文档、原型、部署、测试，以及 Docker 数据卷与镜像已全部清除；本工作区现仅保留 `episteme/` 与 `.workbuddy/`。完整备份与恢复步骤见 `/mnt/work/backups/workbench-cleanup-20261110/RESTORE.md`。
 >
@@ -25,14 +25,28 @@ docker compose --project-name episteme -f deploy/docker-compose.yml --env-file d
 - REST 前缀 `/api/v1/episteme`，MCP 为 `POST /mcp`，调试用 `GET /mcp/tools?space={slug}`。
 - 数据在具名卷 `episteme_episteme-data`；`docker compose ... down -v` 可回到全新空库。
 - P3 入口：`GET /api/v1/episteme/viewers` 返回五类媒介的统一契约；Web UI 点开文档进入「阅读」Tab，Markdown / Code / PDF / Web 四类 Part 可阅读、编辑与标记，标记与版本快照联动。
+- P4 入口：`GET /api/v1/episteme/packs` 列出 2 套内置模板；Web UI「模板」Tab 可预览 / 安装 / 导出 / 导入。安装为一个事务、一条 `source=import` Commit。
+- P5 客户端：`src/Episteme.Client.slnx`（Avalonia 12.1.5 共享壳 + Desktop + 无 GUI Probe）；`src/Episteme.Android/` 为独立 head（需 Android SDK，本轮未编译）。构建命令见下。
 
-回归（连续两次全绿，每轮前清空数据卷）：
+回归（连续两轮全绿，每轮前清空数据卷）：
 
 ```bash
-/home/lishawn/.workbuddy/binaries/python/versions/3.13.12/bin/python3 ./tests/api_smoke.py          # 66/66
+/home/lishawn/.workbuddy/binaries/python/versions/3.13.12/bin/python3 ./tests/api_smoke.py   # 81/81
 NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
-  /home/lishawn/.workbuddy/binaries/node/versions/22.22.2/bin/node ./tests/ui_smoke.js            # 34/34
+  /home/lishawn/.workbuddy/binaries/node/versions/22.22.2/bin/node ./tests/ui_smoke.js     # 42/42
 ```
+
+客户端层（容器内编译 + 无 GUI 冒烟；首次 NuGet 下载较慢，用缓存卷加速）：
+
+```bash
+docker run --rm --network host \
+  -v "$PWD":/src -v episteme-nuget-cache:/root/.nuget/packages -w /src \
+  mcr.microsoft.com/dotnet/sdk:10.0 bash -lc 'set -o pipefail; \
+    dotnet build src/Episteme.Client.slnx -c Release --nologo && \
+    dotnet run --project src/Episteme.Client.Probe/Episteme.Client.Probe.csproj -c Release --no-build'
+```
+
+结果为 **0 警告 0 错误 + Probe 20/20 PASS**。Android head 需 `dotnet workload install android` 与 Android SDK，本轮未编译验证；桌面 GUI 因容器无 X server 未实际开窗。
 
 ---
 
@@ -75,10 +89,14 @@ NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
 | `tests/ui_test.js` | 原型真实浏览器交互回归脚本 |
 | `docs/07-P1P2实现与验收报告.md` | P1+P2 实现：范围、架构、验收对照、修复缺陷、明确边界 |
 | `docs/08-P3四类阅读器实现与验收报告.md` | **P3 实现**：统一 Viewer 契约、稳健锚点四级回退、标注进版本、验收与简化边界 |
-| `src/Episteme.Core/` | 领域实体、Schema 引擎、内容寻址 diff、Viewer 契约/锚点引擎、MCP 工具派生（零 NuGet 依赖） |
+| `docs/09-P4P5实现与验收报告.md` | **P4/P5 实现**：Pack 契约、内置模板、三端骨架、验收对照、修复清单、诚实边界 |
+| `src/Episteme.Core/` | 领域实体、Schema 引擎、内容寻址 diff、Pack 校验、Viewer 契约/锚点引擎、MCP 工具派生（零 NuGet 依赖） |
 | `src/Episteme.Server/` | ASP.NET Core REST + MCP JSON-RPC + 四类阅读器 SPA + EF Core 持久化 |
+| `src/Episteme.Client.slnx` + `Episteme.UI.Avalonia` / `Desktop` / `Android` / `Client.Probe` | P5 三端骨架与无 GUI 客户端层冒烟 |
+| `src/Episteme.Server/wwwroot/packs/` | 2 套内置声明式 Pack JSON（workbench / reading-desk） |
 | `deploy/` | Dockerfile（restore 独立缓存层）、compose（restart: no）、端口绑定 .env |
-| `tests/api_smoke.py` / `tests/ui_smoke.js` | 66 项 REST/MCP 冒烟、34 项 jsdom 真实点击回归 |
+| `.dockerignore` | 排除客户端 bin/obj 与 .git，构建上下文 595 MB → 3.59 kB |
+| `tests/api_smoke.py` / `tests/ui_smoke.js` | 81 项 REST/MCP 冒烟、42 项 jsdom 真实点击回归 |
 
 ---
 
@@ -106,8 +124,13 @@ NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
 
 ---
 
-## 下一步（P4 及以后）
+## 下一步（P5 之后）
 
-P1 / P2 / P3 已落地；接下来优先补齐真实媒介能力（pdf.js、独立 `fetch-worker` + SSRF 白名单、Monaco/Readability）与锚点交互式重定位，再进入 P4 Workbench Pack 化与数据迁移 → P5 三端与模板生态。生产化补齐项（PostgreSQL、Redis、JWT/HMAC、Blazor 渲染器）与全部简化边界见 `docs/07-P1P2实现与验收报告.md §7` 和 `docs/08-P3四类阅读器实现与验收报告.md §8`。
+P1–P4 已落地为可运行实现，P5 为三端源码骨架（桌面编译通过、Android 未编译）。接下来优先：
 
-待拍板项仍见 `SPEC.md §11`。
+1. 真实媒介能力：pdf.js、独立 `fetch-worker` + SSRF 白名单、Monaco / Readability、锚点交互式重定位。
+2. 生产化：PostgreSQL、Redis / MinIO、JWT + HMAC-SHA256 + Nonce、SSE / stdio MCP。
+3. 三端补齐：Android SDK 下编译 APK 并真机验证；桌面 WebView 承载富阅读器。
+4. 模板生态：服务端模板目录与版本签名。
+
+全部简化边界见 `docs/07 §7`、`docs/08 §8`、`docs/09 §9`。待拍板项仍见 `SPEC.md §11`。

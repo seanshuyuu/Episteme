@@ -26,6 +26,8 @@ public sealed class WriteContext
     public string Action { get; set; } = "";
     /// <summary>P3: lets a write pre-compute its Commit id (annotations record it in their anchor).</summary>
     public string? ForcedCommitId { get; set; }
+    /// <summary>P4: set by PersistAsync only when an existing Commit was replayed.</summary>
+    public bool Replayed { get; set; }
 
     public static string RefName(string? branch) =>
         string.IsNullOrWhiteSpace(branch) ? "refs/heads/main"
@@ -797,6 +799,7 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         };
     }
 
-    private static bool IsReplay(Commit commit, WriteContext ctx) =>
-        !string.IsNullOrWhiteSpace(ctx.IdempotencyKey) && commit.IdempotencyKey == ctx.IdempotencyKey;
+    // Only PersistAsync can know whether the Commit existed before this call; comparing the
+    // idempotency key alone would mark the *first* write with a key as a replay too.
+    private static bool IsReplay(Commit commit, WriteContext ctx) => ctx.Replayed;
 }

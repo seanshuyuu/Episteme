@@ -198,6 +198,15 @@ button.ghost.active { background: var(--primarySoft); border-color: var(--primar
 .an-text { margin: 3px 0; }
 .an-meta { font-size: 10px; color: var(--muted); }
 
+/* P4 · Pack templates */
+.pack-card { margin-bottom: 10px; }
+.pack-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pack-card .badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; background: var(--surface2); color: var(--muted); }
+.pack-meta { font-size: 11px; color: var(--muted); margin: 6px 0; }
+#pack-preview { margin: 10px 0; }
+#pack-json { min-height: 120px; font-family: var(--font-mono, monospace); font-size: 11px; }
+#tab-packs label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
 @media (max-width: 1100px) { .workspace { grid-template-columns: 1fr 1fr; } .right-panel { grid-column: 1 / -1; } }
 @media (max-width: 768px) {
   .workspace { grid-template-columns: 1fr; padding: 10px; }
