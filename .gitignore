@@ -7,10 +7,16 @@ Thumbs.db
 
 # local runtime artifacts
 node_modules/
+bin/
+obj/
 *.log
+*.db
+*.db-shm
+*.db-wal
 .env
 .env.*
 !.env.example
+!deploy/.env
 
 # WorkBuddy session & memory data (never commit)
 .workbuddy/

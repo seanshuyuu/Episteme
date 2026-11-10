@@ -3,13 +3,35 @@
 > 通用文档操作系统空壳：用户自定义目录与内容，动态 MCP 读写编辑，git 式版本管理，Markdown / Code / PDF / Web 四类阅读器。
 > 由「商业短篇创作工作台」抽象一层而来；工作台降级为本平台的**第一套模板（Pack）**。
 
-**当前阶段：v0.1 规格 + 高保真交互原型，尚未有实现代码。**
+**当前阶段：v0.2 · P1 通用内核 + P2 版本 DAG / 动态 MCP 已落地为可运行实现（Docker 部署）**；v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07-P1P2实现与验收报告.md`。
 
 > **工作区清理（2026-11-10）**：按用户要求，旧「商业短篇创作工作台」的源码、文档、原型、部署、测试，以及 Docker 数据卷与镜像已全部清除；本工作区现仅保留 `episteme/` 与 `.workbuddy/`。完整备份与恢复步骤见 `/mnt/work/backups/workbench-cleanup-20261110/RESTORE.md`。
 >
 > 因此 `SPEC.md`、`docs/05`、`docs/06` 中关于「复用现有 Workbench 代码 / `Workbench.slnx` / 39 项接口冒烟 / 22 项交互回归 / `/api/v1` 零回归」的表述，现为**设计阶段的历史依据**，不再对应工作区内可执行的产物；P1 起按规格从零落地内核。四套主题令牌已从原 `design/tokens.json` 内置为 `episteme/design/tokens.json`，原型仍可独立打开、无需外部依赖。
 >
 > 清理后验证：jsdom 独立加载冒烟 **6/6 PASS**（0 外部资源引用、状态接口可用、真实点击可改变状态）、原型 JS 语法通过。完整 Playwright 28 项回归本轮因宿主 shell 的 4 GB 虚拟内存硬限制无法启动 Chromium（环境问题，非原型缺陷）；`tests/ui_report.md` 保留 11-09 的 28/28 历史结果。
+
+---
+
+## 运行实现版本（Docker）
+
+```bash
+cd episteme
+docker compose --project-name episteme -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+```
+
+- 浏览器打开 `http://127.0.0.1:5080/`；首次启动是零业务概念的空壳，只有「创建你的第一个空间」。
+- `deploy/.env` 已设 `EPISTEME_BIND_IP=0.0.0.0`，局域网可直接访问；`restart: "no"` 不开机自启。
+- REST 前缀 `/api/v1/episteme`，MCP 为 `POST /mcp`，调试用 `GET /mcp/tools?space={slug}`。
+- 数据在具名卷 `episteme_episteme-data`；`docker compose ... down -v` 可回到全新空库。
+
+回归（连续两次全绿）：
+
+```bash
+/home/lishawn/.workbuddy/binaries/python/versions/3.13.12/bin/python3 ./tests/api_smoke.py          # 37/37
+NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
+  /home/lishawn/.workbuddy/binaries/node/versions/22.22.2/bin/node ./tests/ui_smoke.js            # 16/16
+```
 
 ---
 
@@ -50,6 +72,11 @@
 | `design/mcp/call-examples.json` | 完整 Agent 协作流程、Resources 示例、错误码示例 |
 | `prototype/index.html` | 高保真单文件交互原型 |
 | `tests/ui_test.js` | 原型真实浏览器交互回归脚本 |
+| `docs/07-P1P2实现与验收报告.md` | **本轮实现**：范围、架构、验收对照、修复缺陷、明确边界 |
+| `src/Episteme.Core/` | 领域实体、Schema 引擎、内容寻址 diff、MCP 工具派生（零 NuGet 依赖） |
+| `src/Episteme.Server/` | ASP.NET Core REST + MCP JSON-RPC + 动态 SPA + EF Core 持久化 |
+| `deploy/` | Dockerfile、compose（restart: no）、端口绑定 .env |
+| `tests/api_smoke.py` / `tests/ui_smoke.js` | 37 项 REST/MCP 冒烟、16 项 jsdom 真实点击回归 |
 
 ---
 
@@ -77,9 +104,8 @@ NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
 
 ---
 
-## 下一步（需确认后进入 P1）
+## 下一步（P3 及以后）
 
-P1 通用内核 → P2 版本 + 动态 MCP → P3 四类阅读器 → P4 Workbench Pack 化与数据迁移 → P5 三端与模板生态。
-详见 `SPEC.md §8` 与 `docs/05 §6`。
+P1 / P2 本轮已落地；接下来是 P3 四类阅读器与隔离抓取 worker → P4 Workbench Pack 化与数据迁移 → P5 三端与模板生态。生产化补齐项（PostgreSQL、Redis、JWT/HMAC、Blazor 渲染器）与本轮全部简化边界见 `docs/07-P1P2实现与验收报告.md §7`。
 
-待拍板项见 `SPEC.md §11`，其中**弱口令 `author/demo1234` 建议在 P1 一并加固**。
+待拍板项仍见 `SPEC.md §11`。

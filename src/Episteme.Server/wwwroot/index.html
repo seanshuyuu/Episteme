@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episteme · 知书</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">ε</span>
+        <div class="brand-text"><strong>Episteme</strong><span>知书 · 通用文档内核</span></div>
+      </div>
+      <div class="topbar-meta">
+        <span id="space-name" class="chip">未选择空间</span>
+        <span id="tools-version" class="chip">tools v–</span>
+        <select id="theme-select" aria-label="主题">
+          <option value="mint">浅绿</option>
+          <option value="sky">浅蓝</option>
+          <option value="lilac">浅紫</option>
+          <option value="blush">浅粉</option>
+        </select>
+      </div>
+    </header>
+
+    <section id="empty-state" class="empty-state">
+      <div class="empty-card">
+        <div class="empty-icon">◇</div>
+        <h1>创建你的第一个空间</h1>
+        <p>这里没有预设的业务概念。空间、目录、内容类型由你定义；界面、REST 与 Agent 共用同一份 Schema，每次改动都可追溯、可回滚。</p>
+        <div class="form-row">
+          <input id="new-space-name" placeholder="空间名称" aria-label="空间名称">
+          <input id="new-space-slug" placeholder="标识（可留空）" aria-label="空间标识">
+        </div>
+        <button id="btn-create-space" data-action="create-space" class="primary">创建空间</button>
+        <p id="empty-hint" class="hint"></p>
+      </div>
+    </section>
+
+    <main id="workspace" class="workspace hidden">
+      <aside class="panel tree-panel">
+        <div class="panel-head">
+          <h2>目录</h2>
+          <button id="btn-new-node" data-action="new-node" class="ghost">+ 新建目录</button>
+        </div>
+        <div id="node-form" class="inline-form hidden">
+          <input id="new-node-path" placeholder="/路径" aria-label="目录路径">
+          <input id="new-node-type" placeholder="绑定类型 slug（可留空）" aria-label="绑定类型">
+          <button id="btn-save-node" data-action="save-node" class="primary">创建</button>
+        </div>
+        <div id="node-tree" class="tree"></div>
+      </aside>
+
+      <section class="panel schema-panel">
+        <div class="panel-head">
+          <h2 id="schema-title">内容类型</h2>
+          <button id="btn-new-type" data-action="new-type" class="ghost">+ 定义类型</button>
+        </div>
+
+        <div id="schema-builder" class="builder hidden">
+          <div class="form-row">
+            <input id="type-slug" placeholder="slug（a-z0-9_）" aria-label="类型 slug">
+            <input id="type-label" placeholder="显示名称" aria-label="显示名称">
+          </div>
+          <input id="type-node" class="full" placeholder="绑定目录，例：/竞品" aria-label="绑定目录">
+          <div class="subhead">字段 <button id="btn-add-field" data-action="add-field" class="link">+ 添加字段</button></div>
+          <div id="field-rows"></div>
+          <button id="btn-save-type" data-action="save-type" class="primary">保存类型</button>
+          <p id="type-hint" class="hint"></p>
+        </div>
+
+        <div id="render-view">
+          <div class="subhead" id="render-label">动态表单</div>
+          <div id="dynamic-form"></div>
+          <button id="btn-create-doc" data-action="create-document" class="primary">创建文档</button>
+          <p id="doc-hint" class="hint"></p>
+        </div>
+      </section>
+
+      <section class="panel right-panel">
+        <nav class="tabs">
+          <button data-action="switch-tab" data-tab="docs" class="active">文档</button>
+          <button data-action="switch-tab" data-tab="versions">版本</button>
+          <button data-action="switch-tab" data-tab="mcp">MCP 工具</button>
+        </nav>
+
+        <div id="tab-docs" class="tab-body">
+          <div class="row"><button id="btn-refresh-docs" data-action="refresh-docs" class="ghost">刷新</button></div>
+          <div id="doc-list"></div>
+        </div>
+
+        <div id="tab-versions" class="tab-body hidden">
+          <div class="row">
+            <button id="btn-refresh-commits" data-action="refresh-commits" class="ghost">刷新历史</button>
+            <button id="btn-revert" data-action="revert" class="ghost">撤销选中提交</button>
+          </div>
+          <div id="commit-list"></div>
+          <div id="diff-view"></div>
+        </div>
+
+        <div id="tab-mcp" class="tab-body hidden">
+          <div id="mcp-summary" class="summary"></div>
+          <div id="tool-list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

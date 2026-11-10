@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Episteme.Core/Episteme.Core.csproj" />
+  <Project Path="Episteme.Server/Episteme.Server.csproj" />
+</Solution>
