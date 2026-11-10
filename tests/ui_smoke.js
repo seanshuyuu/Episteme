@@ -34,8 +34,12 @@ function nodeFetch(url, options) {
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
+  var text;
+  try { text = JSON.stringify(detail === undefined ? null : detail); }
+  catch (e) { text = String(detail); }
+  if (!text) text = 'null';
   if (cond) { pass++; console.log('  PASS  ' + name); }
-  else { fail++; console.log('  FAIL  ' + name + ' :: ' + JSON.stringify(detail).slice(0, 300)); }
+  else { fail++; console.log('  FAIL  ' + name + ' :: ' + text.slice(0, 300)); }
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitFor(fn, ms = 10000) {
@@ -153,6 +157,128 @@ async function waitFor(fn, ms = 10000) {
   check('MCP 工具面板渲染工具卡片',
     doc.querySelectorAll('#tool-list .tool').length >= 20,
     doc.querySelectorAll('#tool-list .tool').length);
+
+  // ---------------- P3 四类阅读器 ----------------
+  console.log('---- P3 四类阅读器交互 ----');
+  const st4 = window.EpistemeApp.getState();
+  check('Viewer 契约由 /viewers 加载（四类 + 附件）', st4.viewerCount >= 5, st4.viewerCount);
+
+  const card = doc.querySelector('.doc-card');
+  if (card) {
+    card.click();
+    // activeDocId is set before the HTTP request; wait for the full open flow
+    // (viewer descriptors loaded + reader tab activated) instead of racing it.
+    await waitFor(() => {
+      const s = window.EpistemeApp.getState();
+      return s.tab === 'reader' && !!s.activeDocId && !!s.reader;
+    });
+  }
+  check('真实点击文档卡片打开阅读器 Tab',
+    window.EpistemeApp.getState().tab === 'reader' && !!window.EpistemeApp.getState().activeDocId,
+    window.EpistemeApp.getState().activeDocId);
+  check('阅读器渲染 Part tabs 与 Markdown 源码编辑器',
+    doc.querySelectorAll('#reader-part-tabs .part-tab').length >= 1 && !!doc.getElementById('part-editor'));
+
+  const preview = doc.querySelector('[data-action="reader-mode"][data-mode="preview"]');
+  if (preview) preview.click();
+  check('Markdown 源码 / 预览双模式切换',
+    window.EpistemeApp.getState().readerMode === 'preview' && !!doc.querySelector('.md-preview'),
+    window.EpistemeApp.getState().readerMode);
+  const mdSource = doc.querySelector('[data-action="reader-mode"][data-mode="source"]');
+  if (mdSource) mdSource.click();
+
+  doc.getElementById('ann-quote').value = '# 正文';
+  doc.getElementById('ann-text').value = 'UI 回归批注';
+  doc.getElementById('btn-add-annotation').click();
+  await waitFor(() => window.EpistemeApp.getState().annotationTotal >= 1);
+  check('真实点击「添加标记」写入带锚点的标注',
+    window.EpistemeApp.getState().annotationTotal >= 1,
+    window.EpistemeApp.getState().annotationTotal);
+  check('标注侧栏展示锚点解析结果',
+    doc.querySelectorAll('.annotation-card').length >= 1 &&
+    doc.querySelector('.annotation-card').textContent.indexOf('anchored') >= 0,
+    doc.querySelector('.annotation-card') && doc.querySelector('.annotation-card').textContent.slice(0, 120));
+
+  const extraParts = [
+    ['code', 'const x = 1;\nfunction demo() {\n  return 2;\n}'],
+    ['pdf', '第一页文本\f第二页文本'],
+    ['web', '<article><p>网页锚点句子</p></article>']
+  ];
+  for (const [kind, content] of extraParts) {
+    const showBtn = doc.querySelector('[data-action="show-part-form"]');
+    if (showBtn) showBtn.click();
+    doc.getElementById('new-part-kind').value = kind;
+    doc.getElementById('new-part-content').value = content;
+    const before = window.EpistemeApp.getState().readerPartCount;
+    doc.getElementById('btn-append-part').click();
+    await waitFor(() => window.EpistemeApp.getState().readerPartCount > before);
+  }
+  check('真实点击追加 code / pdf / web 三类 Part',
+    window.EpistemeApp.getState().readerPartCount >= 4,
+    window.EpistemeApp.getState().readerPartCount);
+
+  let ptabs = doc.querySelectorAll('[data-action="select-part"]');
+  if (ptabs[1]) ptabs[1].click();
+  check('切到 Code Part', window.EpistemeApp.getState().readerKind === 'code',
+    window.EpistemeApp.getState().readerKind);
+  const readMode = doc.querySelector('[data-action="reader-mode"][data-mode="read"]');
+  if (readMode) readMode.click();
+  const expectedCodeLines = extraParts[0][1].split('\n').length;
+  check('Code 阅读模式渲染行号与语法着色',
+    doc.querySelectorAll('.code-line').length === expectedCodeLines && !!doc.querySelector('.tok-kw'),
+    { lines: doc.querySelectorAll('.code-line').length, expected: expectedCodeLines,
+      keywords: doc.querySelectorAll('.tok-kw').length });
+  const firstLineNo = doc.querySelector('.line-no');
+  if (firstLineNo) firstLineNo.click();
+  check('点击行号自动填入锚点行号',
+    doc.getElementById('ann-line').value === '1', doc.getElementById('ann-line').value);
+
+  ptabs = doc.querySelectorAll('[data-action="select-part"]');
+  if (ptabs[2]) ptabs[2].click();
+  check('PDF 文本层渲染页卡与只读提示',
+    window.EpistemeApp.getState().readerKind === 'pdf' && !!doc.querySelector('.pdf-page') &&
+    doc.getElementById('reader-toolbar').textContent.indexOf('原件只读') >= 0,
+    doc.getElementById('reader-toolbar').textContent.slice(0, 120));
+  const nextPage = doc.querySelector('[data-action="reader-page"][data-step="1"]');
+  if (nextPage) nextPage.click();
+  check('PDF 翻页生效', window.EpistemeApp.getState().readerPage === 2,
+    window.EpistemeApp.getState().readerPage);
+
+  ptabs = doc.querySelectorAll('[data-action="select-part"]');
+  if (ptabs[3]) ptabs[3].click();
+  check('Web 正文模式显示外部内容标识',
+    window.EpistemeApp.getState().readerKind === 'web' && !!doc.querySelector('.web-origin') &&
+    !!doc.querySelector('.web-read'), window.EpistemeApp.getState().readerKind);
+  const plainMode = doc.querySelector('[data-action="reader-mode"][data-mode="plain"]');
+  if (plainMode) plainMode.click();
+  check('Web 三态之一：纯文本', window.EpistemeApp.getState().readerMode === 'plain' &&
+    !!doc.querySelector('.web-plain'));
+  const sourceMode = doc.querySelector('[data-action="reader-mode"][data-mode="source"]');
+  if (sourceMode) sourceMode.click();
+  check('Web 三态之二：原文快照', window.EpistemeApp.getState().readerMode === 'source' &&
+    !!doc.querySelector('.web-source'));
+
+  const partsBeforeExport = window.EpistemeApp.getState().readerPartCount;
+  doc.getElementById('btn-export-notes').click();
+  await waitFor(() => window.EpistemeApp.getState().readerPartCount > partsBeforeExport);
+  check('一键导出标注汇总生成新 md Part',
+    window.EpistemeApp.getState().readerPartCount > partsBeforeExport,
+    window.EpistemeApp.getState().readerPartCount);
+
+  ptabs = doc.querySelectorAll('[data-action="select-part"]');
+  if (ptabs[0]) ptabs[0].click();
+  const editor = doc.getElementById('part-editor');
+  if (editor) editor.value = '# 正文\n保存后的新行';
+  const commitsBeforeSave = window.EpistemeApp.getState().commits.length;
+  const saveBtn = doc.querySelector('[data-action="save-part"]');
+  if (saveBtn) saveBtn.click();
+  await waitFor(() => window.EpistemeApp.getState().commits.length > commitsBeforeSave);
+  check('Markdown 编辑保存产生新 Commit',
+    window.EpistemeApp.getState().commits.length > commitsBeforeSave,
+    window.EpistemeApp.getState().commits.length);
+
+  doc.querySelector('[data-tab="versions"]').click();
+  check('阅读器接入后版本 Tab 仍可用', window.EpistemeApp.getState().tab === 'versions');
 
   console.log('\n== 结果: ' + pass + ' PASS / ' + fail + ' FAIL ==');
   process.exit(fail ? 1 : 0);

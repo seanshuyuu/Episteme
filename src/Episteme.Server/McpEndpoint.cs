@@ -21,7 +21,7 @@ public static class McpEndpoint
 
         app.MapGet("/mcp", () => Results.Json(new JsonObject
         {
-            ["name"] = "episteme", ["version"] = "0.2.0-p1p2",
+            ["name"] = "episteme", ["version"] = "0.3.0-p3",
             ["transport"] = "Streamable HTTP", ["protocolVersion"] = "2025-06-18",
             ["endpoints"] = new JsonObject { ["rpc"] = "POST /mcp", ["debugTools"] = "GET /mcp/tools?space={slug}" },
             ["note"] = "SSE 长连接与 stdio 本轮未实现；POST /mcp 为完整 JSON-RPC 通道"
@@ -65,7 +65,7 @@ public static class McpEndpoint
                             ["resources"] = new JsonObject { ["listChanged"] = true },
                             ["prompts"] = new JsonObject()
                         },
-                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = "0.2.0-p1p2" }
+                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = "0.3.0-p3" }
                     };
                     break;
 
@@ -211,6 +211,13 @@ public static class McpEndpoint
                 return await svc.AppendPartAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
             case "episteme.annotate":
                 return await svc.AddAnnotationAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
+            case "episteme.viewers":
+                return await svc.ViewersAsync(ct);
+            case "episteme.read_part":
+                return await svc.ReadPartAsync(spaceId, Jsonx.Plain(args["docId"]),
+                    Jsonx.Plain(args["partId"]), args, ct);
+            case "episteme.export_notes":
+                return await svc.ExportNotesAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
             case "episteme.commit":
             {
                 var log = await svc.LogAsync(spaceId, new JsonObject { ["limit"] = 1 }, ct);

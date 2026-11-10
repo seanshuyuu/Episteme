@@ -82,6 +82,7 @@
       <section class="panel right-panel">
         <nav class="tabs">
           <button data-action="switch-tab" data-tab="docs" class="active">文档</button>
+          <button data-action="switch-tab" data-tab="reader">阅读器</button>
           <button data-action="switch-tab" data-tab="versions">版本</button>
           <button data-action="switch-tab" data-tab="mcp">MCP 工具</button>
         </nav>
@@ -89,6 +90,48 @@
         <div id="tab-docs" class="tab-body">
           <div class="row"><button id="btn-refresh-docs" data-action="refresh-docs" class="ghost">刷新</button></div>
           <div id="doc-list"></div>
+        </div>
+
+        <div id="tab-reader" class="tab-body hidden">
+          <div id="reader-head" class="reader-head"></div>
+          <div id="reader-part-tabs" class="part-tabs"></div>
+          <div id="reader-toolbar" class="reader-toolbar"></div>
+          <div id="reader-stage" class="reader-stage"></div>
+          <div id="part-form" class="inline-form hidden">
+            <div class="form-row">
+              <select id="new-part-kind" aria-label="媒介类型">
+                <option value="md">Markdown</option>
+                <option value="code">代码</option>
+                <option value="pdf">PDF 文本层</option>
+                <option value="web">网页快照</option>
+              </select>
+              <input id="new-part-source" placeholder="原文 URL（web / pdf 可选）" aria-label="原文链接">
+            </div>
+            <textarea id="new-part-content" placeholder="内容；PDF 用字面 \\f 分页，或直接每行一段" aria-label="Part 内容"></textarea>
+            <button id="btn-append-part" data-action="append-part" class="primary">添加 Part</button>
+          </div>
+          <div class="subhead">标记 · 锚点 <button id="btn-export-notes" data-action="export-notes" class="link">导出为笔记</button></div>
+          <div id="annotation-form" class="annotation-form">
+            <div class="form-row">
+              <select id="ann-kind" aria-label="标记类型">
+                <option value="highlight">高亮</option>
+                <option value="underline">下划线</option>
+                <option value="note">批注</option>
+                <option value="area">区域</option>
+                <option value="bookmark">书签</option>
+              </select>
+              <input id="ann-quote" placeholder="选中文本 / 引用原文" aria-label="引用原文">
+            </div>
+            <div class="form-row">
+              <input id="ann-line" type="number" min="1" placeholder="行号（code / md）" aria-label="行号">
+              <input id="ann-page" type="number" min="1" placeholder="页码（pdf）" aria-label="页码">
+              <input id="ann-dom" placeholder="domPath（web）" aria-label="DOM 路径">
+            </div>
+            <textarea id="ann-text" placeholder="批注内容（可选）" aria-label="批注内容"></textarea>
+            <button id="btn-add-annotation" data-action="add-annotation" class="primary">添加标记</button>
+            <p id="reader-hint" class="hint"></p>
+          </div>
+          <div id="reader-annotations" class="annotation-list"></div>
         </div>
 
         <div id="tab-versions" class="tab-body hidden">

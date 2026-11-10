@@ -1,4 +1,4 @@
-/* Episteme · 知书 — schema-driven SPA. No build step, no dependencies. */
+/* Episteme · 知书 — schema-driven SPA + four first-class Viewers. No build step, no dependencies. */
 (function () {
   'use strict';
 
@@ -6,12 +6,16 @@
   var API = BASE + '/api/v1/episteme';
   var FIELD_TYPES = ['text', 'longtext', 'markdown', 'code', 'number', 'date', 'boolean',
     'select', 'multi_select', 'tags', 'url', 'ref', 'json', 'file', 'user'];
+  var TABS = ['docs', 'reader', 'versions', 'mcp'];
 
   var state = {
     spaces: [], spaceId: null, spaceName: '', nodes: [], nodeId: null,
     contentTypes: [], render: null, documents: [], commits: [],
     tools: null, toolsVersion: 0, tokens: null, theme: 'mint',
-    selectedCommit: null, tab: 'docs', fields: []
+    selectedCommit: null, tab: 'docs', fields: [],
+    viewers: null, activeDocId: null, reader: null, partIndex: 0,
+    readerMode: 'source', webMode: 'read', page: 1, selectedLine: 0,
+    readerRef: '', readOnly: false
   };
 
   function esc(s) {
@@ -81,7 +85,8 @@
       api('/spaces/' + id + '/content-types'),
       api('/spaces/' + id + '/documents?pageSize=50'),
       api('/spaces/' + id + '/commits?limit=30'),
-      api('/spaces/' + id + '/mcp/tools')
+      api('/spaces/' + id + '/mcp/tools'),
+      api('/viewers')
     ]);
     state.toolsVersion = results[0].toolsVersion || 0;
     $('tools-version').textContent = 'tools v' + state.toolsVersion;
@@ -90,9 +95,15 @@
     state.documents = results[3].items || [];
     state.commits = results[4].items || [];
     state.tools = results[5];
+    state.viewers = results[6];
     renderNodes(); renderDocs(); renderCommits(); renderTools();
     if (state.nodeId) await selectNode(state.nodeId);
     else renderForm(null);
+  }
+
+  async function loadViewers() {
+    state.viewers = await api('/viewers');
+    return state.viewers;
   }
 
   async function loadTools() {
@@ -197,9 +208,10 @@
       var summary = Object.keys(d.fields || {}).slice(0, 4).map(function (k) {
         return esc(k) + ': ' + esc(typeof d.fields[k] === 'object' ? JSON.stringify(d.fields[k]) : d.fields[k]);
       }).join(' · ');
-      return '<div class="card"><div class="title">' + esc(d.title) + '</div>' +
+      return '<div class="card doc-card" data-action="open-reader" data-doc-id="' + esc(d.id) + '">' +
+        '<div class="title">' + esc(d.title) + '</div>' +
         '<div class="meta"><span class="badge">' + esc(d.branch || 'main') + '</span>' +
-        esc(summary || (d.parts || []).length + ' 个 Part') + '</div></div>';
+        esc(summary || (d.parts || []).length + ' 个 Part') + ' · 点击打开阅读器</div></div>';
     }).join('');
   }
 
@@ -230,6 +242,11 @@
         rows += '<div class="diff-line ' + (l.change === 'added' ? 'added' : 'removed') + '">' +
           (l.change === 'added' ? '+ ' : '- ') + esc(l.text) + '</div>';
       });
+      (it.annotations || []).forEach(function (a) {
+        rows += '<div class="diff-line ' + (a.change === 'added' ? 'added' : 'removed') + '">' +
+          (a.change === 'added' ? '+ ' : a.change === 'removed' ? '- ' : '~ ') +
+          '标记 ' + esc(a.kind) + ' · ' + esc(a.text || a.id) + '</div>';
+      });
       return rows + '</div>';
     }).join('');
   }
@@ -251,13 +268,385 @@
 
   function switchTab(tab) {
     state.tab = tab;
-    ['docs', 'versions', 'mcp'].forEach(function (name) {
+    TABS.forEach(function (name) {
       var el = $('tab-' + name);
       if (el) el.classList.toggle('hidden', name !== tab);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.tabs button'), function (b) {
       b.classList.toggle('active', b.getAttribute('data-tab') === tab);
     });
+  }
+
+  // ---------- P3: four Viewers ----------
+
+  function currentPart() {
+    if (!state.reader || !state.reader.items || !state.reader.items.length) return null;
+    return state.reader.items[Math.min(state.partIndex, state.reader.items.length - 1)] || null;
+  }
+
+  function defaultMode(kind) {
+    if (kind === 'web') return 'read';
+    if (kind === 'pdf') return 'text';
+    return 'source';
+  }
+
+  async function openDocument(docId, ref) {
+    if (!state.spaceId || !docId) { hint('reader-hint', '请先选择一个文档', 'error'); return null; }
+    state.activeDocId = docId;
+    state.readerRef = ref || '';
+    var q = state.readerRef ? '?ref=' + encodeURIComponent(state.readerRef) : '';
+    var data = await api('/spaces/' + state.spaceId + '/documents/' + docId + '/viewers' + q);
+    state.reader = data;
+    state.readOnly = !!data.readOnly;
+    if (state.partIndex >= (data.items || []).length) state.partIndex = 0;
+    state.page = 1;
+    state.selectedLine = 0;
+    var p = currentPart();
+    state.readerMode = p ? defaultMode(p.kind) : 'source';
+    switchTab('reader');
+    renderReader();
+    return data;
+  }
+
+  function renderReader() {
+    var r = state.reader;
+    if (!r) {
+      $('reader-head').innerHTML = '<p class="muted">在「文档」页点开一份文档，即可用四类阅读器查看、编辑与标记。</p>';
+      $('reader-part-tabs').innerHTML = '';
+      $('reader-toolbar').innerHTML = '';
+      $('reader-stage').innerHTML = '';
+      $('reader-annotations').innerHTML = '';
+      return;
+    }
+    var opts = '<option value="">当前工作区 · main</option>' + (state.commits || []).map(function (c) {
+      return '<option value="' + esc(c.id) + '"' + (c.id === state.readerRef ? ' selected' : '') + '>' +
+        esc(c.message) + ' · ' + esc((c.createdAt || '').slice(0, 16).replace('T', ' ')) + '</option>';
+    }).join('');
+    $('reader-head').innerHTML = '<div class="reader-title"><strong>' + esc(r.title || '文档') + '</strong>' +
+      '<span class="badge">' + esc(r.ref) + '</span>' +
+      (r.readOnly ? '<span class="badge warn">只读快照</span>' : '') +
+      '<span class="muted">' + esc(r.total) + ' 个 Part · ' + esc(r.annotationTotal) + ' 条标记' +
+      (r.anchorLost > 0 ? ' · <em>' + esc(r.anchorLost) + ' 条需重定位</em>' : '') + '</span></div>' +
+      '<select id="reader-ref-select" aria-label="版本">' + opts + '</select>';
+    var refSelect = $('reader-ref-select');
+    if (refSelect) refSelect.addEventListener('change', function (e) {
+      openDocument(state.activeDocId, e.target.value).catch(function (err) {
+        hint('reader-hint', err.message, 'error');
+      });
+    });
+
+    $('reader-part-tabs').innerHTML = (r.items || []).map(function (p, i) {
+      return '<button data-action="select-part" data-index="' + i + '" class="part-tab' +
+        (i === state.partIndex ? ' active' : '') + '">' + esc(p.viewer.label) + ' ' + (i + 1) +
+        (p.annotationCount ? ' <span class="badge">' + esc(p.annotationCount) + '</span>' : '') + '</button>';
+    }).join('');
+
+    var p = currentPart();
+    if (!p) {
+      $('reader-toolbar').innerHTML = '';
+      $('reader-stage').innerHTML = '<p class="muted">该文档还没有 Part。</p>';
+    } else {
+      var caps = p.viewer.capabilities || {};
+      var modes = [];
+      if (p.kind === 'md') modes = [['source', '源码'], ['preview', '预览']];
+      else if (p.kind === 'code') modes = [['source', '编辑'], ['read', '阅读']];
+      else if (p.kind === 'web') modes = [['read', '正文'], ['plain', '纯文本'], ['source', '原文快照']];
+      var modeHtml = modes.map(function (m) {
+        return '<button data-action="reader-mode" data-mode="' + m[0] + '" class="ghost' +
+          (state.readerMode === m[0] ? ' active' : '') + '">' + m[1] + '</button>';
+      }).join('');
+      $('reader-toolbar').innerHTML = '<div class="toolbar-left">' + modeHtml +
+        (p.kind === 'pdf' ? '<button data-action="reader-page" data-step="-1" class="ghost">上一页</button>' +
+          '<span class="chip" id="page-chip">第 ' + state.page + ' / ' + partPages(p) + ' 页</span>' +
+          '<button data-action="reader-page" data-step="1" class="ghost">下一页</button>' : '') +
+        '</div><div class="toolbar-right">' +
+        '<span class="chip">' + (caps.editable ? '可编辑' : '原件只读') + ' · 可标注</span>' +
+        (!state.readOnly && caps.editable ? '<button data-action="save-part" class="primary">保存</button>' : '') +
+        (!state.readOnly ? '<button data-action="show-part-form" class="ghost">+ Part</button>' : '') +
+        '</div>';
+      renderStage(p);
+    }
+    renderAnnotations();
+  }
+
+  function partPages(p) {
+    var pages = String(p.content || '').split('\f');
+    return pages.length;
+  }
+
+  function plainText(html) {
+    return String(html || '')
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  function inlineMd(line) {
+    var h = esc(line);
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" rel="noopener noreferrer" target="_blank">$1</a>');
+    return h;
+  }
+
+  function markdownToHtml(md) {
+    var lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+    var out = [], inCode = false;
+    lines.forEach(function (raw) {
+      if (/^```/.test(raw)) {
+        out.push(inCode ? '</code></pre>' : '<pre><code>');
+        inCode = !inCode;
+        return;
+      }
+      if (inCode) { out.push(esc(raw) + '\n'); return; }
+      var line = raw;
+      var m = /^(#{1,4})\s+(.*)$/.exec(line);
+      if (m) { var n = m[1].length; out.push('<h' + n + '>' + inlineMd(m[2]) + '</h' + n + '>'); return; }
+      if (/^\s*[-*]\s+\[[ xX]\]/.test(line)) {
+        out.push('<div class="md-task">' + inlineMd(line.replace(/^\s*[-*]\s+/, '')) + '</div>'); return;
+      }
+      if (/^\s*[-*]\s+/.test(line)) { out.push('<li>' + inlineMd(line.replace(/^\s*[-*]\s+/, '')) + '</li>'); return; }
+      if (/^&gt;|^\>/.test(line)) { out.push('<blockquote>' + inlineMd(line.replace(/^\>\s?/, '')) + '</blockquote>'); return; }
+      if (/^\s*$/.test(line)) { out.push(''); return; }
+      out.push('<p>' + inlineMd(line) + '</p>');
+    });
+    if (inCode) out.push('</code></pre>');
+    return out.join('\n');
+  }
+
+  function highlightCode(line) {
+    var h = esc(line);
+    h = h.replace(/(&quot;[^&]*?&quot;|'[^']*')/g, '<span class="tok-str">$1</span>');
+    h = h.replace(/\b(function|const|let|var|return|if|else|for|while|class|public|private|async|await|new|import|from|def|self|None|True|False|using|namespace)\b/g,
+      '<span class="tok-kw">$1</span>');
+    h = h.replace(/\b(\d+)\b/g, '<span class="tok-num">$1</span>');
+    return h;
+  }
+
+  function codeLinesHtml(content, clickable) {
+    return '<div class="code-lines">' + String(content || '').replace(/\r\n/g, '\n').split('\n')
+      .map(function (line, i) {
+        return '<div class="code-line">' +
+          '<button class="line-no" data-action="select-line" data-line="' + (i + 1) + '">' + (i + 1) + '</button>' +
+          '<code>' + highlightCode(line) + '</code></div>';
+      }).join('') + '</div>';
+  }
+
+  function renderStage(p) {
+    var box = $('reader-stage');
+    var content = p.content || '';
+    var editable = p.viewer.capabilities && p.viewer.capabilities.editable;
+    var allowEdit = editable && !state.readOnly && state.readerMode === 'source';
+    var html = '';
+
+    if (p.kind === 'md') {
+      html = state.readerMode === 'preview'
+        ? '<div class="md-preview">' + markdownToHtml(content) + '</div>'
+        : '<textarea id="part-editor" class="part-editor" spellcheck="false"' +
+          (allowEdit ? '' : ' readonly') + '>' + esc(content) + '</textarea>';
+    } else if (p.kind === 'code') {
+      html = state.readerMode === 'read'
+        ? codeLinesHtml(content, true)
+        : '<textarea id="part-editor" class="part-editor code-editor" spellcheck="false"' +
+          (allowEdit ? '' : ' readonly') + '>' + esc(content) + '</textarea>';
+    } else if (p.kind === 'pdf') {
+      var pages = content.split('\f');
+      var page = Math.min(Math.max(1, state.page), pages.length);
+      var lines = (pages[page - 1] || '').replace(/\r\n/g, '\n').split('\n');
+      html = '<div class="pdf-note">PDF 原件只读 · 文本层模式（' + esc(p.stats.pages) + ' 页）· 改动以标记存储</div>' +
+        '<div class="pdf-page" data-page="' + page + '">' +
+        '<div class="pdf-page-head">第 ' + page + ' 页 · 点击文本行可生成区域锚点</div>' +
+        lines.map(function (line, i) {
+          return '<div class="pdf-line" data-action="select-line" data-line="' + (i + 1) + '">' +
+            '<span class="pdf-line-no">' + (i + 1) + '</span>' + esc(line) + '</div>';
+        }).join('') + '</div>';
+    } else if (p.kind === 'web') {
+      var text = plainText(content);
+      html = '<div class="web-origin">外部内容 · 原文链接：' +
+        (p.sourceUri ? '<a href="' + esc(p.sourceUri) + '" rel="noopener noreferrer" target="_blank">' + esc(p.sourceUri) + '</a>'
+          : '未记录') + ' · 快照不执行脚本</div>';
+      if (state.readerMode === 'source') {
+        html += '<pre class="web-source">' + esc(content) + '</pre>';
+      } else if (state.readerMode === 'plain') {
+        html += '<pre class="web-plain">' + esc(text) + '</pre>';
+      } else {
+        html += '<div class="web-read">' + text.split(/(?<=[。！？.!?])\s+/).map(function (para) {
+          return '<p>' + esc(para) + '</p>';
+        }).join('') + '</div>';
+      }
+    } else {
+      html = '<div class="attachment"><strong>' + esc(p.viewer.label) + '</strong>' +
+        '<pre>' + esc(JSON.stringify(p.meta || {}, null, 2)) + '</pre></div>';
+    }
+    box.innerHTML = html;
+  }
+
+  function renderAnnotations() {
+    var box = $('reader-annotations');
+    var rows = [];
+    (state.reader && state.reader.items || []).forEach(function (p) {
+      (p.annotations || []).forEach(function (a) {
+        rows.push({ part: p, a: a });
+      });
+    });
+    if (!rows.length) { box.innerHTML = '<p class="muted">还没有标记。选中文字 / 点行号后填写上方表单即可添加。</p>'; return; }
+    box.innerHTML = rows.map(function (row) {
+      var a = row.a, res = a.resolution || {}, anchor = a.anchor || {};
+      var quote = anchor.textQuote ? anchor.textQuote.exact : '';
+      var status = res.status || a.status || 'anchored';
+      var cls = status === 'lost' ? 'badge warn' : 'badge';
+      return '<div class="annotation-card">' +
+        '<div class="an-head"><span class="' + cls + '">' + esc(a.kind) + '</span>' +
+        '<span class="muted">' + esc(row.part.viewer.label) + ' · ' + esc(status) +
+        (res.strategy ? ' / ' + esc(res.strategy) : '') + '</span></div>' +
+        (quote ? '<div class="an-quote">「' + esc(String(quote).slice(0, 120)) + '」</div>' : '') +
+        (a.text ? '<div class="an-text">' + esc(a.text) + '</div>' : '') +
+        '<div class="an-meta">' + esc(a.author) +
+        (anchor.page ? ' · p.' + esc(anchor.page) : '') +
+        (anchor.line ? ' · L' + esc(anchor.line) : '') +
+        (anchor.commitId ? ' · ' + esc(String(anchor.commitId).slice(0, 14)) : '') + '</div></div>';
+    }).join('');
+  }
+
+  function buildAnchor(p) {
+    var a = { kind: p.kind };
+    var quote = val('ann-quote');
+    var line = Number(val('ann-line')) || state.selectedLine || 0;
+    var page = Number(val('ann-page')) || state.page || 1;
+    if (p.kind === 'code') {
+      a.line = line || 1;
+      if (quote) a.textQuote = { exact: quote };
+    } else if (p.kind === 'pdf') {
+      a.page = page;
+      a.rect = { x: 72, y: 96 + (state.selectedLine || 1) * 14, w: 240, h: 14 };
+      if (quote) a.textQuote = { exact: quote };
+      if (p.stats && p.stats.fingerprint) a.pdfFingerprint = p.stats.fingerprint;
+    } else if (p.kind === 'web') {
+      a.domPath = val('ann-dom') || 'article/p[1]';
+      if (quote) a.textQuote = { exact: quote };
+    } else {
+      if (quote) a.textQuote = { exact: quote };
+      else a.blockIndex = 0;
+      if (line > 0) a.line = line;
+    }
+    return a;
+  }
+
+  function selectLine(line) {
+    var p = currentPart();
+    if (!p) return null;
+    state.selectedLine = line;
+    var lineInput = $('ann-line'), pageInput = $('ann-page'), quoteInput = $('ann-quote');
+    if (p.kind === 'pdf') {
+      var pages = String(p.content || '').split('\f');
+      var current = (pages[Math.min(state.page, pages.length) - 1] || '').replace(/\r\n/g, '\n').split('\n');
+      if (quoteInput && current[line - 1]) quoteInput.value = current[line - 1].trim();
+      if (pageInput) pageInput.value = String(state.page);
+      hint('reader-hint', '已定位第 ' + state.page + ' 页第 ' + line + ' 行，可补充批注后添加标记', 'ok');
+    } else {
+      var lines = String(p.content || '').replace(/\r\n/g, '\n').split('\n');
+      if (quoteInput && lines[line - 1]) quoteInput.value = lines[line - 1].trim();
+      if (lineInput) lineInput.value = String(line);
+      hint('reader-hint', '已选中第 ' + line + ' 行，可补充批注后添加标记', 'ok');
+    }
+    return line;
+  }
+
+  function changePage(step) {
+    var p = currentPart();
+    if (!p || p.kind !== 'pdf') return state.page;
+    var max = partPages(p);
+    state.page = Math.min(Math.max(1, state.page + step), max);
+    state.selectedLine = 0;
+    renderStage(p);
+    var chip = $('page-chip');
+    if (chip) chip.textContent = '第 ' + state.page + ' / ' + max + ' 页';
+    return state.page;
+  }
+
+  function switchReaderMode(mode) {
+    state.readerMode = mode;
+    var p = currentPart();
+    if (p) renderStage(p);
+    Array.prototype.forEach.call(document.querySelectorAll('[data-action="reader-mode"]'), function (b) {
+      b.classList.toggle('active', b.getAttribute('data-mode') === mode);
+    });
+    return mode;
+  }
+
+  function selectPart(index) {
+    state.partIndex = Number(index) || 0;
+    state.page = 1;
+    state.selectedLine = 0;
+    var p = currentPart();
+    state.readerMode = p ? defaultMode(p.kind) : 'source';
+    renderReader();
+    return state.partIndex;
+  }
+
+  async function savePart() {
+    var p = currentPart(), ed = $('part-editor');
+    if (!p || !ed) { hint('reader-hint', '当前 Part 没有可编辑内容', 'error'); return null; }
+    if (state.readOnly) { hint('reader-hint', '只读历史快照不能编辑；可切换到当前工作区', 'error'); return null; }
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
+      '/parts/' + p.partId, {
+      method: 'PUT', body: JSON.stringify({ content: ed.value, source: 'ui' })
+    });
+    hint('reader-hint', '已保存，Commit ' + res.commitId, 'ok');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
+  async function addAnnotation() {
+    var p = currentPart();
+    if (!p) { hint('reader-hint', '请先打开一个文档 Part', 'error'); return null; }
+    var body = {
+      partId: p.partId, kind: val('ann-kind') || 'highlight',
+      text: val('ann-text'), anchor: buildAnchor(p), source: 'ui'
+    };
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId + '/annotations', {
+      method: 'POST', body: JSON.stringify(body)
+    });
+    var status = res.resolution && res.resolution.status;
+    hint('reader-hint', '标记已写入版本快照 · Commit ' + res.commitId +
+      (status ? ' · 锚点 ' + status : ''), 'ok');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
+  async function exportNotes() {
+    if (!state.activeDocId) { hint('reader-hint', '请先打开一个文档', 'error'); return null; }
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
+      '/exports/notes', { method: 'POST', body: JSON.stringify({ source: 'ui' }) });
+    hint('reader-hint', '已导出 ' + res.annotationCount + ' 条标记为一个新 Part', 'ok');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
+  async function appendPart() {
+    if (!state.activeDocId) { hint('reader-hint', '请先打开一个文档', 'error'); return null; }
+    var kind = val('new-part-kind') || 'md';
+    var content = $('new-part-content') ? $('new-part-content').value : '';
+    content = content.replace(/\\f/g, '\f');
+    var body = { kind: kind, content: content, source: 'ui' };
+    var uri = val('new-part-source');
+    if (uri) body.sourceUri = uri;
+    if (kind === 'code') body.language = 'csharp';
+    if (kind === 'web') body.meta = { httpStatus: 200, extractor: 'readability-lite' };
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId + '/parts', {
+      method: 'POST', body: JSON.stringify(body)
+    });
+    hint('reader-hint', '已添加 ' + kind + ' Part · Commit ' + res.commitId, 'ok');
+    hide('part-form');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
   }
 
   // ---------- actions ----------
@@ -412,11 +801,22 @@
             case 'refresh-commits': await loadAll(); break;
             case 'revert': await revert(); break;
             case 'switch-tab': switchTab(actionEl.getAttribute('data-tab')); break;
+            case 'open-reader': await openDocument(actionEl.getAttribute('data-doc-id')); break;
+            case 'select-part': selectPart(actionEl.getAttribute('data-index')); break;
+            case 'reader-mode': switchReaderMode(actionEl.getAttribute('data-mode')); break;
+            case 'reader-page': changePage(Number(actionEl.getAttribute('data-step'))); break;
+            case 'select-line': selectLine(Number(actionEl.getAttribute('data-line'))); break;
+            case 'save-part': await savePart(); break;
+            case 'add-annotation': await addAnnotation(); break;
+            case 'export-notes': await exportNotes(); break;
+            case 'append-part': await appendPart(); break;
+            case 'show-part-form': show('part-form'); break;
           }
         } catch (e) {
           hint('doc-hint', e.message, 'error');
           hint('type-hint', e.message, 'error');
           hint('empty-hint', e.message, 'error');
+          hint('reader-hint', e.message, 'error');
         }
         return;
       }
@@ -428,6 +828,14 @@
 
     var theme = $('theme-select');
     if (theme) theme.addEventListener('change', function (e) { applyTheme(e.target.value); });
+
+    // In a real browser, selecting text pre-fills the quote input for md / web / pdf.
+    document.addEventListener('mouseup', function () {
+      if (!window.getSelection) return;
+      var sel = window.getSelection();
+      var quote = sel ? String(sel.toString() || '').trim() : '';
+      if (quote.length > 0 && quote.length < 500 && $('ann-quote')) $('ann-quote').value = quote;
+    });
   }
 
   async function init() {
@@ -444,6 +852,7 @@
 
   window.EpistemeApp = {
     getState: function () {
+      var p = currentPart();
       return {
         spaces: state.spaces.slice(), spaceId: state.spaceId, spaceName: state.spaceName,
         nodes: state.nodes.slice(), nodeId: state.nodeId,
@@ -451,13 +860,25 @@
         commits: state.commits.slice(), toolsVersion: state.toolsVersion,
         toolCount: state.tools ? state.tools.total : 0,
         renderColumns: state.render && state.render.columns ? state.render.columns.length : 0,
-        theme: state.theme, tab: state.tab, selectedCommit: state.selectedCommit
+        theme: state.theme, tab: state.tab, selectedCommit: state.selectedCommit,
+        viewerCount: state.viewers ? state.viewers.total : 0,
+        activeDocId: state.activeDocId, reader: state.reader,
+        readerPartCount: state.reader ? state.reader.total : 0,
+        readerKind: p ? p.kind : null, readerMode: state.readerMode,
+        readerPartIndex: state.partIndex, readerPage: state.page,
+        readerReadOnly: state.readOnly, readerRef: state.readerRef,
+        annotationTotal: state.reader ? state.reader.annotationTotal : 0,
+        anchorLost: state.reader ? state.reader.anchorLost : 0
       };
     },
     api: api, refresh: loadAll, loadSpaces: loadSpaces, createSpace: createSpace,
     createNode: createNode, addField: addField, saveType: saveType,
     createDocument: createDocument, selectNode: selectNode,
-    loadTools: loadTools, revert: revert, switchTab: switchTab, applyTheme: applyTheme
+    loadTools: loadTools, revert: revert, switchTab: switchTab, applyTheme: applyTheme,
+    loadViewers: loadViewers, openDocument: openDocument, selectPart: selectPart,
+    switchReaderMode: switchReaderMode, changePage: changePage, selectLine: selectLine,
+    savePart: savePart, addAnnotation: addAnnotation, exportNotes: exportNotes,
+    appendPart: appendPart, currentPart: currentPart
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

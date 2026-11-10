@@ -78,6 +78,16 @@ public sealed class LineChange
     public string Text { get; set; } = "";
 }
 
+public sealed class AnnotationChange
+{
+    public string Change { get; set; } = "";
+    public string Id { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public string? Text { get; set; }
+    public string? Before { get; set; }
+    public string? After { get; set; }
+}
+
 public sealed class DiffItem
 {
     public string Path { get; set; } = "";
@@ -85,6 +95,8 @@ public sealed class DiffItem
     public string? Title { get; set; }
     public List<FieldChange> Fields { get; set; } = new();
     public List<LineChange> Lines { get; set; } = new();
+    /// <summary>P3: annotations are part of the immutable snapshot, so they diff too.</summary>
+    public List<AnnotationChange> Annotations { get; set; } = new();
 }
 
 public static class DiffService
@@ -136,19 +148,71 @@ public static class DiffService
             var (added, removed) = LineDiff(TextOf(oldSnapshot), TextOf(newSnapshot));
             item.Lines.AddRange(removed.Select(t => new LineChange { Change = "removed", Text = t }));
             item.Lines.AddRange(added.Select(t => new LineChange { Change = "added", Text = t }));
+            item.Annotations.AddRange(AnnotationDiff(oldSnapshot, newSnapshot));
             items.Add(item);
         }
         return items;
     }
 
+    /// <summary>All four media kinds contribute their readable text to the line diff.</summary>
     private static string TextOf(JsonObject snapshot)
     {
         var sb = new StringBuilder();
         if (snapshot["parts"] is JsonArray parts)
             foreach (var p in parts)
-                if (p is JsonObject po && Jsonx.Plain(po["kind"]) is "md" or "code")
-                    sb.AppendLine(Jsonx.Plain(po["content"]));
+                if (p is JsonObject po)
+                {
+                    var kind = Jsonx.Plain(po["kind"]);
+                    var text = PartContent.ReaderText(kind, Jsonx.Plain(po["content"]));
+                    sb.AppendLine(text.Replace('\f', '\n'));
+                }
         return sb.ToString();
+    }
+
+    private static Dictionary<string, JsonObject> AnnotationMap(JsonObject snapshot)
+    {
+        var map = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
+        if (snapshot["annotations"] is JsonArray arr)
+            foreach (var node in arr.OfType<JsonObject>())
+            {
+                var id = Jsonx.Plain(node["id"]);
+                if (!string.IsNullOrWhiteSpace(id)) map[id] = node;
+            }
+        return map;
+    }
+
+    private static List<AnnotationChange> AnnotationDiff(JsonObject before, JsonObject after)
+    {
+        var oldMap = AnnotationMap(before);
+        var newMap = AnnotationMap(after);
+        var changes = new List<AnnotationChange>();
+        foreach (var id in oldMap.Keys.Union(newMap.Keys, StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal))
+        {
+            oldMap.TryGetValue(id, out var o);
+            newMap.TryGetValue(id, out var n);
+            if (o is null && n is not null)
+                changes.Add(new AnnotationChange
+                {
+                    Change = "added", Id = id, Kind = Jsonx.Plain(n["kind"]), Text = Jsonx.Plain(n["text"])
+                });
+            else if (o is not null && n is null)
+                changes.Add(new AnnotationChange
+                {
+                    Change = "removed", Id = id, Kind = Jsonx.Plain(o["kind"]), Text = Jsonx.Plain(o["text"])
+                });
+            else if (o is not null && n is not null)
+            {
+                var b = Canonical.Normalize(o);
+                var a = Canonical.Normalize(n);
+                if (b != a)
+                    changes.Add(new AnnotationChange
+                    {
+                        Change = "modified", Id = id, Kind = Jsonx.Plain(n["kind"]),
+                        Text = Jsonx.Plain(n["text"]), Before = b, After = a
+                    });
+            }
+        }
+        return changes;
     }
 
     /// <summary>LCS based line diff. Small enough for document sized content.</summary>

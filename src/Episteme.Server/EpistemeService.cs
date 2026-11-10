@@ -24,6 +24,8 @@ public sealed class WriteContext
     public string? ExpectParent { get; set; }
     public bool DryRun { get; set; }
     public string Action { get; set; } = "";
+    /// <summary>P3: lets a write pre-compute its Commit id (annotations record it in their anchor).</summary>
+    public string? ForcedCommitId { get; set; }
 
     public static string RefName(string? branch) =>
         string.IsNullOrWhiteSpace(branch) ? "refs/heads/main"
@@ -566,14 +568,15 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         foreach (var p in parts)
         {
             if (p is not JsonObject po) continue;
+            var content = po["content"] is null ? "" : Jsonx.Plain(po["content"]);
+            var (kind, mime, meta, blobHash) = NormalizePart(po, content, "md");
             doc.Parts.Add(new Part
             {
                 Id = Ids.New("pt"), DocumentId = doc.Id, Ord = ord++,
-                Kind = S(po, "kind", "md"), Content = po["content"] is null ? null : Jsonx.Plain(po["content"]),
+                Kind = kind, Content = content, Mime = mime, BlobHash = blobHash,
                 SourceUri = po["sourceUri"] is null ? null : Jsonx.Plain(po["sourceUri"]),
                 Language = po["language"] is null ? null : Jsonx.Plain(po["language"]),
-                Mime = po["mime"] is null ? null : Jsonx.Plain(po["mime"]),
-                MetaJson = (po["meta"] as JsonObject ?? new JsonObject()).ToJsonString()
+                MetaJson = meta.ToJsonString()
             });
         }
         db.Documents.Add(doc);
@@ -638,13 +641,15 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         var doc = await db.Documents.Include(d => d.Parts)
             .FirstOrDefaultAsync(d => d.SpaceId == spaceId && d.Id == docId, ct)
             ?? throw new BusinessException("DOCUMENT_NOT_FOUND", "文档不存在", 404);
+        var content = args["content"] is null ? "" : Jsonx.Plain(args["content"]);
+        var (kind, mime, meta, blobHash) = NormalizePart(args, content, "md");
         var part = new Part
         {
             Id = Ids.New("pt"), DocumentId = docId, Ord = doc.Parts.Count == 0 ? 0 : doc.Parts.Max(p => p.Ord) + 1,
-            Kind = S(args, "kind", "md"), Content = args["content"] is null ? null : Jsonx.Plain(args["content"]),
+            Kind = kind, Content = content, Mime = mime, BlobHash = blobHash,
             SourceUri = args["sourceUri"] is null ? null : Jsonx.Plain(args["sourceUri"]),
             Language = args["language"] is null ? null : Jsonx.Plain(args["language"]),
-            MetaJson = (args["meta"] as JsonObject ?? new JsonObject()).ToJsonString()
+            MetaJson = meta.ToJsonString()
         };
         doc.Parts.Add(part);
         doc.UpdatedAt = DateTime.UtcNow;
@@ -659,27 +664,58 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         var space = await RequireSpace(db, spaceId, ct);
         var part = await db.Parts.FirstOrDefaultAsync(p => p.Id == partId && p.DocumentId == docId, ct)
                    ?? throw new BusinessException("PART_NOT_FOUND", "Part 不存在", 404);
-        if (args["content"] is not null) part.Content = Jsonx.Plain(args["content"]);
+        if (part.Kind == "pdf" && args["content"] is not null)
+            throw new BusinessException("PART_NOT_EDITABLE",
+                "PDF 原件只读；所有修改请以标注形式记录，或新建一份重抓快照", 409);
+        var content = args["content"] is null ? part.Content : Jsonx.Plain(args["content"]);
+        var (kind, mime, meta, blobHash) = NormalizePart(args, content, part.Kind, Jsonx.Node(part.MetaJson));
+        part.Kind = kind;
+        part.Content = content;
+        part.Mime = mime;
+        part.BlobHash = blobHash;
+        part.MetaJson = meta.ToJsonString();
         if (args["sourceUri"] is not null) part.SourceUri = Jsonx.Plain(args["sourceUri"]);
         if (args["language"] is not null) part.Language = Jsonx.Plain(args["language"]);
-        var commit = await PersistAsync(db, space, ctx, $"编辑 {part.Kind} Part", ct);
-        return new JsonObject { ["partId"] = part.Id, ["commitId"] = commit.Id };
+        var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == docId, ct);
+        if (doc is not null) doc.UpdatedAt = DateTime.UtcNow;
+        var changed = args["content"] is not null ? "编辑" : "更新元数据";
+        var commit = await PersistAsync(db, space, ctx, $"{changed} {part.Kind} Part", ct);
+        return new JsonObject
+        {
+            ["partId"] = part.Id, ["kind"] = part.Kind, ["commitId"] = commit.Id,
+            ["blobHash"] = part.BlobHash, ["meta"] = Jsonx.Node(part.MetaJson).DeepClone(),
+            ["idempotentReplay"] = IsReplay(commit, ctx)
+        };
     }
 
     public async Task<JsonObject> ListAnnotationsAsync(string spaceId, string docId, CancellationToken ct)
     {
         await using var db = await Db(ct);
-        var partIds = await db.Parts.Where(p => p.DocumentId == docId).Select(p => p.Id).ToListAsync(ct);
-        var rows = await db.Annotations.Where(a => partIds.Contains(a.PartId)).ToListAsync(ct);
+        await RequireSpace(db, spaceId, ct);
+        var parts = await db.Parts.Where(p => p.DocumentId == docId).ToListAsync(ct);
+        var byId = parts.ToDictionary(p => p.Id, p => p, StringComparer.Ordinal);
+        var partIds = parts.Select(p => p.Id).ToList();
+        var rows = partIds.Count == 0
+            ? new List<Annotation>()
+            : await db.Annotations.Where(a => partIds.Contains(a.PartId)).ToListAsync(ct);
         var arr = new JsonArray();
-        foreach (var a in rows)
-            arr.Add(new JsonObject
-            {
-                ["id"] = a.Id, ["partId"] = a.PartId, ["kind"] = a.Kind,
-                ["anchor"] = Jsonx.Node(a.AnchorJson).DeepClone(), ["text"] = a.Text,
-                ["color"] = a.Color, ["author"] = a.Author, ["createdAt"] = a.CreatedAt
-            });
-        return new JsonObject { ["items"] = arr, ["total"] = arr.Count };
+        var lost = 0;
+        foreach (var a in rows.OrderBy(x => x.CreatedAt))
+        {
+            var part = byId.GetValueOrDefault(a.PartId);
+            var anchor = Jsonx.Node(a.AnchorJson);
+            var resolution = AnchorEngine.Resolve(anchor, part?.Content);
+            if (Jsonx.Plain(resolution["status"]) == "lost") lost++;
+            var node = AnnotationNode(a, part?.Kind ?? "attachment", resolution);
+            node["commitId"] = Jsonx.Plain(anchor["commitId"]);
+            node["status"] = Jsonx.Plain(resolution["status"]);
+            arr.Add(node);
+        }
+        return new JsonObject
+        {
+            ["items"] = arr, ["total"] = arr.Count, ["anchorLost"] = lost,
+            ["note"] = lost > 0 ? "存在需要重新定位的标记，已在 UI 标记而不会静默丢弃" : "全部锚点可定位"
+        };
     }
 
     public async Task<JsonObject> AddAnnotationAsync(string spaceId, string docId, JsonObject args, WriteContext ctx, CancellationToken ct)
@@ -687,18 +723,44 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         RequireRole(ctx, "owner", "editor", "agent");
         await using var db = await Db(ct);
         var space = await RequireSpace(db, spaceId, ct);
-        var part = await db.Parts.FirstOrDefaultAsync(p => p.DocumentId == docId, ct)
-                   ?? throw new BusinessException("PART_NOT_FOUND", "该文档尚无 Part", 404);
+        var requestedPartId = S(args, "partId");
+        var part = string.IsNullOrWhiteSpace(requestedPartId)
+            ? await db.Parts.Where(p => p.DocumentId == docId).OrderBy(p => p.Ord).FirstOrDefaultAsync(ct)
+            : await db.Parts.FirstOrDefaultAsync(p => p.Id == requestedPartId && p.DocumentId == docId, ct);
+        if (part is null)
+            throw new BusinessException("PART_NOT_FOUND", "未找到目标 Part（检查 partId 或先创建 Part）", 404);
+
+        var annKind = S(args, "kind", "highlight");
+        if (!AnchorEngine.AnnotationKinds.Contains(annKind, StringComparer.Ordinal))
+            throw new BusinessException("ANNOTATION_KIND_INVALID",
+                $"未知标记类型 {annKind}；可用：{string.Join(", ", AnchorEngine.AnnotationKinds)}", 422);
+
+        var input = (args["anchor"] as JsonObject ?? new JsonObject()).DeepClone() as JsonObject ?? new JsonObject();
+        if (input["kind"] is null) input["kind"] = part.Kind;
+        var (anchor, errors) = AnchorEngine.Normalize(
+            part.Kind, input, part.Content, Jsonx.Node(part.MetaJson));
+        if (errors.Count > 0)
+            throw new BusinessException("ANCHOR_INVALID", string.Join("；", errors), 422);
+
+        // Pre-compute the Commit id so the anchor and the immutable snapshot agree.
+        ctx.ForcedCommitId = Ids.New("cm");
+        anchor["commitId"] = ctx.ForcedCommitId;
         var ann = new Annotation
         {
-            Id = Ids.New("an"), PartId = part.Id, Kind = S(args, "kind", "highlight"),
-            AnchorJson = (args["anchor"] as JsonObject ?? new JsonObject()).ToJsonString(),
-            Text = S(args, "text"), Color = args["color"] is null ? null : Jsonx.Plain(args["color"]),
+            Id = Ids.New("an"), PartId = part.Id, Kind = annKind,
+            AnchorJson = anchor.ToJsonString(), Text = S(args, "text"),
+            Color = args["color"] is null ? null : Jsonx.Plain(args["color"]),
             Author = ctx.Actor
         };
         db.Annotations.Add(ann);
-        var commit = await PersistAsync(db, space, ctx, $"新增 {ann.Kind} 标记", ct);
-        return new JsonObject { ["annotationId"] = ann.Id, ["commitId"] = commit.Id };
+        var commit = await PersistAsync(db, space, ctx, $"新增 {ann.Kind} 标记（{part.Kind}）", ct);
+        return new JsonObject
+        {
+            ["annotationId"] = ann.Id, ["partId"] = part.Id, ["partKind"] = part.Kind,
+            ["anchor"] = anchor, ["commitId"] = commit.Id,
+            ["resolution"] = AnchorEngine.Resolve(anchor, part.Content),
+            ["idempotentReplay"] = IsReplay(commit, ctx)
+        };
     }
 
     public async Task<JsonObject> SearchAsync(string spaceId, JsonObject query, CancellationToken ct)

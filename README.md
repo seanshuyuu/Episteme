@@ -3,7 +3,7 @@
 > 通用文档操作系统空壳：用户自定义目录与内容，动态 MCP 读写编辑，git 式版本管理，Markdown / Code / PDF / Web 四类阅读器。
 > 由「商业短篇创作工作台」抽象一层而来；工作台降级为本平台的**第一套模板（Pack）**。
 
-**当前阶段：v0.2 · P1 通用内核 + P2 版本 DAG / 动态 MCP 已落地为可运行实现（Docker 部署）**；v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07-P1P2实现与验收报告.md`。
+**当前阶段：v0.3 · P1 通用内核 + P2 版本 DAG / 动态 MCP + P3 四类阅读器均已落地为可运行实现（Docker 部署）**；v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07-P1P2实现与验收报告.md` 与 `docs/08-P3四类阅读器实现与验收报告.md`。
 
 > **工作区清理（2026-11-10）**：按用户要求，旧「商业短篇创作工作台」的源码、文档、原型、部署、测试，以及 Docker 数据卷与镜像已全部清除；本工作区现仅保留 `episteme/` 与 `.workbuddy/`。完整备份与恢复步骤见 `/mnt/work/backups/workbench-cleanup-20261110/RESTORE.md`。
 >
@@ -24,13 +24,14 @@ docker compose --project-name episteme -f deploy/docker-compose.yml --env-file d
 - `deploy/.env` 已设 `EPISTEME_BIND_IP=0.0.0.0`，局域网可直接访问；`restart: "no"` 不开机自启。
 - REST 前缀 `/api/v1/episteme`，MCP 为 `POST /mcp`，调试用 `GET /mcp/tools?space={slug}`。
 - 数据在具名卷 `episteme_episteme-data`；`docker compose ... down -v` 可回到全新空库。
+- P3 入口：`GET /api/v1/episteme/viewers` 返回五类媒介的统一契约；Web UI 点开文档进入「阅读」Tab，Markdown / Code / PDF / Web 四类 Part 可阅读、编辑与标记，标记与版本快照联动。
 
-回归（连续两次全绿）：
+回归（连续两次全绿，每轮前清空数据卷）：
 
 ```bash
-/home/lishawn/.workbuddy/binaries/python/versions/3.13.12/bin/python3 ./tests/api_smoke.py          # 37/37
+/home/lishawn/.workbuddy/binaries/python/versions/3.13.12/bin/python3 ./tests/api_smoke.py          # 66/66
 NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
-  /home/lishawn/.workbuddy/binaries/node/versions/22.22.2/bin/node ./tests/ui_smoke.js            # 16/16
+  /home/lishawn/.workbuddy/binaries/node/versions/22.22.2/bin/node ./tests/ui_smoke.js            # 34/34
 ```
 
 ---
@@ -72,11 +73,12 @@ NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
 | `design/mcp/call-examples.json` | 完整 Agent 协作流程、Resources 示例、错误码示例 |
 | `prototype/index.html` | 高保真单文件交互原型 |
 | `tests/ui_test.js` | 原型真实浏览器交互回归脚本 |
-| `docs/07-P1P2实现与验收报告.md` | **本轮实现**：范围、架构、验收对照、修复缺陷、明确边界 |
-| `src/Episteme.Core/` | 领域实体、Schema 引擎、内容寻址 diff、MCP 工具派生（零 NuGet 依赖） |
-| `src/Episteme.Server/` | ASP.NET Core REST + MCP JSON-RPC + 动态 SPA + EF Core 持久化 |
-| `deploy/` | Dockerfile、compose（restart: no）、端口绑定 .env |
-| `tests/api_smoke.py` / `tests/ui_smoke.js` | 37 项 REST/MCP 冒烟、16 项 jsdom 真实点击回归 |
+| `docs/07-P1P2实现与验收报告.md` | P1+P2 实现：范围、架构、验收对照、修复缺陷、明确边界 |
+| `docs/08-P3四类阅读器实现与验收报告.md` | **P3 实现**：统一 Viewer 契约、稳健锚点四级回退、标注进版本、验收与简化边界 |
+| `src/Episteme.Core/` | 领域实体、Schema 引擎、内容寻址 diff、Viewer 契约/锚点引擎、MCP 工具派生（零 NuGet 依赖） |
+| `src/Episteme.Server/` | ASP.NET Core REST + MCP JSON-RPC + 四类阅读器 SPA + EF Core 持久化 |
+| `deploy/` | Dockerfile（restore 独立缓存层）、compose（restart: no）、端口绑定 .env |
+| `tests/api_smoke.py` / `tests/ui_smoke.js` | 66 项 REST/MCP 冒烟、34 项 jsdom 真实点击回归 |
 
 ---
 
@@ -104,8 +106,8 @@ NODE_PATH=/home/lishawn/.workbuddy/binaries/node/workspace/node_modules \
 
 ---
 
-## 下一步（P3 及以后）
+## 下一步（P4 及以后）
 
-P1 / P2 本轮已落地；接下来是 P3 四类阅读器与隔离抓取 worker → P4 Workbench Pack 化与数据迁移 → P5 三端与模板生态。生产化补齐项（PostgreSQL、Redis、JWT/HMAC、Blazor 渲染器）与本轮全部简化边界见 `docs/07-P1P2实现与验收报告.md §7`。
+P1 / P2 / P3 已落地；接下来优先补齐真实媒介能力（pdf.js、独立 `fetch-worker` + SSRF 白名单、Monaco/Readability）与锚点交互式重定位，再进入 P4 Workbench Pack 化与数据迁移 → P5 三端与模板生态。生产化补齐项（PostgreSQL、Redis、JWT/HMAC、Blazor 渲染器）与全部简化边界见 `docs/07-P1P2实现与验收报告.md §7` 和 `docs/08-P3四类阅读器实现与验收报告.md §8`。
 
 待拍板项仍见 `SPEC.md §11`。

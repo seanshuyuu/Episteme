@@ -9,6 +9,8 @@ Thumbs.db
 node_modules/
 bin/
 obj/
+__pycache__/
+*.pyc
 *.log
 *.db
 *.db-shm

@@ -10,6 +10,10 @@ public static class Endpoints
     {
         var api = app.MapGroup("/api/v1/episteme");
 
+        // Viewer contracts (P3)
+        api.MapGet("/viewers", async (HttpContext http, EpistemeService svc) =>
+            await Run(http, ct => svc.ViewersAsync(ct)));
+
         // Spaces
         api.MapGet("/spaces", async (HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.ListSpacesAsync(ct)));
@@ -102,6 +106,22 @@ public static class Endpoints
         api.MapPut("/spaces/{id}/documents/{docId}/parts/{partId}",
             async (string id, string docId, string partId, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
                 await Run(http, ct => svc.UpdatePartAsync(id, docId, partId, body, Ctx(http, body), ct)));
+
+        // P3: viewer descriptors, per-Part reading and annotation export
+        api.MapGet("/spaces/{id}/documents/{docId}/viewers",
+            async (string id, string docId, HttpContext http, EpistemeService svc) =>
+                await Run(http, ct => svc.DocumentViewersAsync(id, docId, QueryJson(http.Request), ct)));
+
+        api.MapGet("/spaces/{id}/documents/{docId}/parts/{partId}",
+            async (string id, string docId, string partId, HttpContext http, EpistemeService svc) =>
+                await Run(http, ct => svc.ReadPartAsync(id, docId, partId, QueryJson(http.Request), ct)));
+
+        api.MapPost("/spaces/{id}/documents/{docId}/exports/notes",
+            async (string id, string docId, HttpContext http, EpistemeService svc, [FromBody] JsonObject? body) =>
+            {
+                var args = body ?? new JsonObject();
+                return await Run(http, ct => svc.ExportNotesAsync(id, docId, args, Ctx(http, args), ct));
+            });
 
         api.MapGet("/spaces/{id}/documents/{docId}/annotations",
             async (string id, string docId, HttpContext http, EpistemeService svc) =>

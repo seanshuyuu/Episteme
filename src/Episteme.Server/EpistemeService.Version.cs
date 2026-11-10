@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Episteme.Core;
@@ -8,7 +9,8 @@ namespace Episteme.Server;
 /// <summary>P2: content-addressed DAG, version operations and dynamic MCP tool discovery.</summary>
 public sealed partial class EpistemeService
 {
-    private static JsonObject SnapshotOf(Document doc, string nodePath, string typeSlug)
+    private static JsonObject SnapshotOf(
+        Document doc, string nodePath, string typeSlug, IEnumerable<Annotation> annotations)
     {
         var parts = new JsonArray();
         foreach (var p in doc.Parts.OrderBy(p => p.Ord))
@@ -19,11 +21,14 @@ public sealed partial class EpistemeService
                 ["language"] = p.Language, ["mime"] = p.Mime,
                 ["meta"] = Jsonx.Node(p.MetaJson).DeepClone()
             });
+        var partIds = doc.Parts.Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
         return new JsonObject
         {
             ["id"] = doc.Id, ["nodePath"] = nodePath, ["typeSlug"] = typeSlug,
             ["title"] = doc.Title, ["fields"] = Jsonx.Node(doc.FieldsJson).DeepClone(),
             ["tags"] = Jsonx.Array(doc.TagsJson).DeepClone(), ["parts"] = parts,
+            // P3: annotations are versioned content, not side-table metadata.
+            ["annotations"] = AnnotationSnapshot(annotations.Where(a => partIds.Contains(a.PartId))),
             ["updatedAt"] = doc.UpdatedAt
         };
     }
@@ -33,6 +38,10 @@ public sealed partial class EpistemeService
     {
         var docs = await db.Documents.Include(d => d.Parts)
             .Where(d => d.SpaceId == spaceId && d.Branch == branch).ToListAsync(ct);
+        var allPartIds = docs.SelectMany(d => d.Parts).Select(p => p.Id).ToList();
+        var annotations = allPartIds.Count == 0
+            ? new List<Annotation>()
+            : await db.Annotations.Where(a => allPartIds.Contains(a.PartId)).ToListAsync(ct);
         var nodeIds = docs.Select(d => d.NodeId).Distinct().ToList();
         var nodes = await db.Nodes.Where(n => nodeIds.Contains(n.Id)).ToDictionaryAsync(n => n.Id, ct);
         var typeIds = docs.Select(d => d.ContentTypeId).Distinct().ToList();
@@ -44,7 +53,7 @@ public sealed partial class EpistemeService
         {
             var nodePath = nodes.GetValueOrDefault(doc.NodeId)?.Path ?? "/";
             var typeSlug = types.GetValueOrDefault(doc.ContentTypeId)?.Slug ?? "";
-            var canonical = Canonical.Normalize(SnapshotOf(doc, nodePath, typeSlug));
+            var canonical = Canonical.Normalize(SnapshotOf(doc, nodePath, typeSlug, annotations));
             var hash = Canonical.Hash(canonical);
             if (seenBlobs.Add(hash) && !await db.Blobs.AnyAsync(b => b.Hash == hash, ct))
                 db.Blobs.Add(new Blob
@@ -127,7 +136,7 @@ public sealed partial class EpistemeService
 
         var commit = new Commit
         {
-            Id = Ids.New("cm"), SpaceId = space.Id, ParentsJson = parents.ToJsonString(),
+            Id = ctx.ForcedCommitId ?? Ids.New("cm"), SpaceId = space.Id, ParentsJson = parents.ToJsonString(),
             TreeHash = treeHash, Message = message,
             AuthorType = ctx.Source == "mcp" ? "agent" : "user",
             AuthorId = ctx.Actor, AuthorName = ctx.Actor, Source = ctx.Source,
@@ -441,18 +450,50 @@ public sealed partial class EpistemeService
                 TagsJson = (snapshot["tags"] as JsonArray ?? new JsonArray()).ToJsonString()
             };
             var ord = 0;
+            var partMap = new Dictionary<string, string>(StringComparer.Ordinal);
             if (snapshot["parts"] is JsonArray parts)
                 foreach (var p in parts)
                     if (p is JsonObject po)
-                        doc.Parts.Add(new Part
+                    {
+                        var rebuilt = new Part
                         {
                             Id = Ids.New("pt"), DocumentId = doc.Id, Ord = ord++,
                             Kind = Jsonx.Plain(po["kind"]), Content = po["content"] is null ? null : Jsonx.Plain(po["content"]),
                             SourceUri = po["sourceUri"] is null ? null : Jsonx.Plain(po["sourceUri"]),
                             Language = po["language"] is null ? null : Jsonx.Plain(po["language"]),
+                            Mime = po["mime"] is null ? null : Jsonx.Plain(po["mime"]),
                             MetaJson = (po["meta"] as JsonObject ?? new JsonObject()).ToJsonString()
-                        });
+                        };
+                        doc.Parts.Add(rebuilt);
+                        partMap[Jsonx.Plain(po["id"])] = rebuilt.Id;
+                    }
             db.Documents.Add(doc);
+
+            // Restore the annotations that belonged to the parent snapshot. Rebuilt Parts get
+            // fresh ids, so remap partId; an unresolvable one is flagged, never dropped.
+            if (snapshot["annotations"] is JsonArray restoredAnns)
+                foreach (var a in restoredAnns.OfType<JsonObject>())
+                {
+                    var oldPartId = Jsonx.Plain(a["partId"]);
+                    var mapped = partMap.TryGetValue(oldPartId, out var id);
+                    var targetPartId = mapped ? id : (doc.Parts.FirstOrDefault()?.Id ?? "");
+                    var anchor = a["anchor"] is JsonObject an ? (JsonObject)an.DeepClone() : new JsonObject();
+                    if (!mapped)
+                    {
+                        anchor["status"] = "lost";
+                        anchor["code"] = "ANNOTATION_ANCHOR_LOST";
+                    }
+                    var created = DateTime.TryParse(Jsonx.Plain(a["createdAt"]), CultureInfo.InvariantCulture,
+                        DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var parsed)
+                        ? parsed : DateTime.UtcNow;
+                    db.Annotations.Add(new Annotation
+                    {
+                        Id = Jsonx.Plain(a["id"]), PartId = targetPartId ?? "",
+                        Kind = Jsonx.Plain(a["kind"]), AnchorJson = anchor.ToJsonString(),
+                        Text = Jsonx.Plain(a["text"]), Color = a["color"] is null ? null : Jsonx.Plain(a["color"]),
+                        Author = Jsonx.Plain(a["author"]), CreatedAt = created
+                    });
+                }
             restored++;
         }
 
