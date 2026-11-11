@@ -10,8 +10,45 @@ services:
     environment:
       TZ: Asia/Shanghai
       EPISTEME_DATA_DIR: /app/data
+      EPISTEME_FETCH_WORKER_URL: http://fetch-worker:8090
+      EPISTEME_FETCH_TOKEN: ${EPISTEME_FETCH_TOKEN:-}
+      EPISTEME_FETCH_ALLOWLIST: ${EPISTEME_FETCH_ALLOWLIST:-}
+      EPISTEME_AUTH_MODE: ${EPISTEME_AUTH_MODE:-legacy}
+      EPISTEME_AUTH_SECRET: ${EPISTEME_AUTH_SECRET:-}
+      EPISTEME_DB_PROVIDER: ${EPISTEME_DB_PROVIDER:-sqlite}
+      EPISTEME_PG_CONNECTION: ${EPISTEME_PG_CONNECTION:-}
+      EPISTEME_RATE_LIMIT: ${EPISTEME_RATE_LIMIT:-600}
+      EPISTEME_SIGNATURE_SKEW: ${EPISTEME_SIGNATURE_SKEW:-300}
     volumes:
       - episteme-data:/app/data
 
+  # Isolated egress worker: no published port, reachable only from the compose network.
+  fetch-worker:
+    build:
+      context: ..
+      dockerfile: worker/Dockerfile
+    image: episteme-fetch-worker:latest
+    restart: "no"
+    environment:
+      TZ: Asia/Shanghai
+      EPISTEME_FETCH_TOKEN: ${EPISTEME_FETCH_TOKEN:-}
+      EPISTEME_FETCH_ALLOWLIST: ${EPISTEME_FETCH_ALLOWLIST:-}
+    expose:
+      - "8090"
+
+  # Opt-in production database: docker compose --profile postgres up -d
+  postgres:
+    image: ${POSTGRES_IMAGE:-public.ecr.aws/docker/library/postgres:17-alpine}
+    profiles: ["postgres"]
+    restart: "no"
+    environment:
+      POSTGRES_DB: ${EPISTEME_PG_DB:-episteme}
+      POSTGRES_USER: ${EPISTEME_PG_USER:-episteme}
+      POSTGRES_PASSWORD: ${EPISTEME_PG_PASSWORD:-episteme-local}
+      TZ: Asia/Shanghai
+    volumes:
+      - episteme-pg-data:/var/lib/postgresql/data
+
 volumes:
   episteme-data:
+  episteme-pg-data:

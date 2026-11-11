@@ -207,6 +207,30 @@ button.ghost.active { background: var(--primarySoft); border-color: var(--primar
 #pack-json { min-height: 120px; font-family: var(--font-mono, monospace); font-size: 11px; }
 #tab-packs label { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
 
+/* v0.5 · real media engines (Monaco / pdf.js / Readability) */
+.monaco-host { width: 100%; height: 420px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.pdf-render-bar { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.pdf-canvas-wrap { background: var(--surface2); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; text-align: center; }
+#pdf-canvas { max-width: 100%; background: #fff; box-shadow: 0 2px 12px rgba(0, 0, 0, .12); }
+.pdf-blob-ref { font-size: 10px; color: var(--muted); margin-top: 8px; white-space: pre-wrap; word-break: break-all; }
+.web-article { line-height: 1.75; font-size: 13px; }
+.web-article h1, .web-article h2, .web-article h3 { margin: 14px 0 6px; }
+.web-article p { margin: 8px 0; }
+.web-article img { max-width: 100%; height: auto; }
+.web-article pre, .web-article blockquote { background: var(--surface2); padding: 8px 10px; border-radius: 6px; overflow: auto; }
+.web-article a { color: var(--primaryDeep); }
+mark.anchor-hit { background: var(--primarySoft); color: var(--primaryDeep); border-radius: 3px; padding: 0 2px; }
+.an-actions { margin-top: 6px; }
+.an-actions button { font-size: 11px; padding: 3px 8px; }
+.file-label { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+#fetch-html { min-height: 60px; font-family: var(--font-mono, monospace); font-size: 11px; }
+#media-hint { margin-top: 6px; }
+.space-select { max-width: 210px; font-size: 11px; padding: 5px 8px; }
+.space-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 20px;
+  border-bottom: 1px solid var(--line); background: var(--surface2); }
+.space-form input { max-width: 220px; }
+.space-form .hint { flex-basis: 100%; }
+
 @media (max-width: 1100px) { .workspace { grid-template-columns: 1fr 1fr; } .right-panel { grid-column: 1 / -1; } }
 @media (max-width: 768px) {
   .workspace { grid-template-columns: 1fr; padding: 10px; }

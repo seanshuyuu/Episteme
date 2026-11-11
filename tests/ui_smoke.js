@@ -76,14 +76,37 @@ async function waitFor(fn, ms = 10000) {
     doc.documentElement.style.getPropertyValue('--primary'));
 
   let st = window.EpistemeApp.getState();
-  if (!st.spaceId) {
-    doc.getElementById('new-space-name').value = 'UI 回归空间';
-    doc.getElementById('btn-create-space').click();
-    await waitFor(() => !!window.EpistemeApp.getState().spaceId);
-    st = window.EpistemeApp.getState();
-    check('真实点击「创建空间」生效', !!st.spaceId, st);
-  } else {
-    check('已存在可用空间', !!st.spaceId, st.spaceId);
+  const spacesAtStart = st.spaces.length;
+  // Always bootstrap a dedicated empty space. The suite must be deterministic even when
+  // it runs against a database already populated by the REST/MCP regression (which also
+  // hits the 30-entry commit log cap).
+  doc.getElementById('btn-new-space').click();
+  check('随时可打开新建空间表单',
+    !doc.getElementById('space-form').classList.contains('hidden'));
+  const uiSpaceName = 'UI 回归空间 ' + String(Date.now()).slice(-8);
+  doc.getElementById('space-new-name').value = uiSpaceName;
+  doc.getElementById('space-new-slug').value = 'ui_suite_' + String(Date.now()).slice(-8);
+  doc.getElementById('btn-create-space-inline').click();
+  await waitFor(() => window.EpistemeApp.getState().spaceName === uiSpaceName);
+  st = window.EpistemeApp.getState();
+  check('创建空间后自动切到新空间', st.spaceName === uiSpaceName && !!st.spaceId, st.spaceName);
+  check('空间列表随创建增长', st.spaces.length === spacesAtStart + 1,
+    { before: spacesAtStart, after: st.spaces.length });
+  const spaceSelect = doc.getElementById('space-select');
+  check('空间切换器列出全部空间并选中当前空间',
+    spaceSelect.options.length === st.spaces.length && spaceSelect.value === st.spaceId,
+    { options: spaceSelect.options.length, spaces: st.spaces.length });
+  if (spacesAtStart > 0) {
+    const ownId = st.spaceId;
+    const other = st.spaces.find((s) => s.id !== ownId);
+    await window.EpistemeApp.switchSpace(other.id);
+    check('可切换到既有空间', window.EpistemeApp.getState().spaceId === other.id,
+      window.EpistemeApp.getState().spaceId);
+    await window.EpistemeApp.switchSpace(ownId);
+    check('切回本次空间且阅读器状态隔离',
+      window.EpistemeApp.getState().spaceId === ownId &&
+      window.EpistemeApp.getState().activeDocId === null,
+      window.EpistemeApp.getState().spaceName);
   }
 
   const theme = doc.getElementById('theme-select');
@@ -135,7 +158,7 @@ async function waitFor(fn, ms = 10000) {
   const stateAfterSelect = window.EpistemeApp.getState();
   check('render 描述返回列数', stateAfterSelect.renderColumns >= 1, stateAfterSelect.renderColumns);
 
-  const commitsBefore = window.EpistemeApp.getState().commits.length;
+  const headBeforeCreate = window.EpistemeApp.getState().headCommitId;
   const titleInput = doc.querySelector('#dynamic-form [data-key="__title"]');
   const nameInput = doc.querySelector('#dynamic-form [data-key="name"]');
   const mdInput = doc.querySelector('#dynamic-form [data-key="__md"]');
@@ -144,11 +167,11 @@ async function waitFor(fn, ms = 10000) {
     nameInput.value = 'UI 回归文档';
     mdInput.value = '# 正文';
     doc.getElementById('btn-create-doc').click();
-    await waitFor(() => window.EpistemeApp.getState().commits.length > commitsBefore);
+    await waitFor(() => window.EpistemeApp.getState().headCommitId !== headBeforeCreate);
   }
   check('真实点击「创建文档」产生 Commit',
-    window.EpistemeApp.getState().commits.length > commitsBefore,
-    { before: commitsBefore, after: window.EpistemeApp.getState().commits.length });
+    window.EpistemeApp.getState().headCommitId !== headBeforeCreate,
+    { before: headBeforeCreate, after: window.EpistemeApp.getState().headCommitId });
 
   doc.querySelector('[data-tab="versions"]').click();
   check('版本历史有提交', window.EpistemeApp.getState().commits.length > 0);
@@ -267,15 +290,23 @@ async function waitFor(fn, ms = 10000) {
 
   ptabs = doc.querySelectorAll('[data-action="select-part"]');
   if (ptabs[0]) ptabs[0].click();
+  await waitFor(() => !!doc.getElementById('part-editor'));
   const editor = doc.getElementById('part-editor');
   if (editor) editor.value = '# 正文\n保存后的新行';
-  const commitsBeforeSave = window.EpistemeApp.getState().commits.length;
+  const headBeforeSave = window.EpistemeApp.getState().headCommitId;
   const saveBtn = doc.querySelector('[data-action="save-part"]');
   if (saveBtn) saveBtn.click();
-  await waitFor(() => window.EpistemeApp.getState().commits.length > commitsBeforeSave);
+  await waitFor(() => window.EpistemeApp.getState().headCommitId !== headBeforeSave);
+  const readerState = window.EpistemeApp.getState();
   check('Markdown 编辑保存产生新 Commit',
-    window.EpistemeApp.getState().commits.length > commitsBeforeSave,
-    window.EpistemeApp.getState().commits.length);
+    readerState.headCommitId !== headBeforeSave,
+    { head: readerState.headCommitId, before: headBeforeSave,
+      commits: readerState.commits.length,
+      kind: readerState.readerKind, mode: readerState.readerMode,
+      readOnly: readerState.readerReadOnly, saveBtn: !!saveBtn,
+      editor: !!editor, editorValue: editor ? editor.value : null,
+      hint: doc.getElementById('reader-hint')
+        ? doc.getElementById('reader-hint').textContent.slice(0, 200) : '' });
 
   doc.querySelector('[data-tab="versions"]').click();
   check('阅读器接入后版本 Tab 仍可用', window.EpistemeApp.getState().tab === 'versions');

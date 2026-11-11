@@ -4,4 +4,5 @@
   <Project Path="Episteme.UI.Avalonia/Episteme.UI.Avalonia.csproj" />
   <Project Path="Episteme.Desktop/Episteme.Desktop.csproj" />
   <Project Path="Episteme.Client.Probe/Episteme.Client.Probe.csproj" />
+  <Project Path="Episteme.McpStdio/Episteme.McpStdio.csproj" />
 </Solution>

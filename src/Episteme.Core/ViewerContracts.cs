@@ -172,6 +172,14 @@ public static class ViewerRegistry
                 ["snapshotInCommit"] = true
             },
             ["anchor"] = anchor,
+            ["renderers"] = kind switch
+            {
+                "md" => new JsonArray("markdown-preview", "textarea"),
+                "code" => new JsonArray("monaco", "textarea-fallback", "code-lines"),
+                "pdf" => new JsonArray("pdfjs-canvas", "text-layer"),
+                "web" => new JsonArray("readability", "plain-text", "source-snapshot"),
+                _ => new JsonArray("metadata")
+            },
             ["mime"] = kind switch
             {
                 "md" => "text/markdown", "code" => "text/plain",
@@ -180,9 +188,9 @@ public static class ViewerRegistry
             ["note"] = kind switch
             {
                 "md" => "源码 / 预览双模式；行内批注锚定 textQuote",
-                "code" => "行号 + 轻量语法高亮；点行号加注，与 blame 联动",
-                "pdf" => "文本层按 \\f 分页；原件只读，改动只以标注存储",
-                "web" => "正文 / 原文快照 / 纯文本三态；不执行脚本、不跟随登录态",
+                "code" => "Monaco 编辑器（不可用时降级 textarea）；行号 + 语法高亮，与 blame 联动",
+                "pdf" => "二进制原件由本地 pdf.js 渲染到 canvas；文本层 Part 保留 \\f 分页；原件只读",
+                "web" => "fetch-worker + Readability 抽正文并白名单清洗；正文 / 纯文本 / 源码三态，不执行脚本",
                 _ => "未识别媒介降级为附件元信息预览"
             }
         };

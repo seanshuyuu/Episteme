@@ -203,6 +203,46 @@ public static class Endpoints
         api.MapGet("/spaces/{id}/audit", async (string id, HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.AuditListAsync(id, ct)));
 
+        // v0.5 polish: capabilities + real media ingestion + interactive anchor rebind
+        api.MapGet("/capabilities", () => Results.Json(EpistemeConfig.Describe()));
+
+        api.MapGet("/fetch-worker/health", async (HttpContext http) =>
+        {
+            var health = await EpistemeService.WorkerHealthAsync(http.RequestAborted);
+            return Results.Json(health);
+        });
+
+        api.MapPost("/spaces/{id}/documents/{docId}/parts/web",
+            async (string id, string docId, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.FetchWebAsync(id, docId, body, Ctx(http, body, "api"), ct)));
+
+        api.MapPost("/spaces/{id}/documents/{docId}/parts/pdf",
+            async (string id, string docId, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.UploadPdfAsync(id, docId, body, Ctx(http, body, "api"), ct)));
+
+        api.MapGet("/spaces/{id}/documents/{docId}/parts/{partId}/binary",
+            async (string id, string docId, string partId, HttpContext http, EpistemeService svc) =>
+            {
+                try
+                {
+                    var bytes = await svc.PdfBinaryAsync(id, docId, partId, http.RequestAborted);
+                    return Results.File(bytes, "application/pdf", enableRangeProcessing: true);
+                }
+                catch (BusinessException ex)
+                {
+                    return Results.Json(new JsonObject
+                    {
+                        ["code"] = ex.Code, ["message"] = ex.Message, ["traceId"] = http.TraceIdentifier
+                    }, statusCode: ex.Status);
+                }
+            });
+
+        api.MapPut("/spaces/{id}/documents/{docId}/annotations/{annotationId}",
+            async (string id, string docId, string annotationId, HttpContext http,
+                   EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.RebindAnnotationAsync(id, docId, annotationId, body,
+                    Ctx(http, body, "api"), ct)));
+
         return app;
     }
 

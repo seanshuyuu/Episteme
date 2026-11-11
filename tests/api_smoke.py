@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Episteme P1+P2+P3+P4 REST / MCP 冒烟回归（零第三方依赖）。"""
+import base64
 import copy
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -77,8 +79,8 @@ check("创建空间", code == 200 and bool(space.get("id")), space)
 sid = space.get("id", "")
 
 code, before = rest("GET", f"/spaces/{sid}/mcp/tools")
-check("初始 26 个静态工具（P4 新增 list_packs / install_pack / export_pack）",
-      code == 200 and before.get("total") == 26 and before.get("staticToolCount") == 26, before)
+check("初始 30 个静态工具（P4 Pack 3 个 + v0.5 capabilities / fetch_web / upload_pdf_base64 / rebind_annotation）",
+      code == 200 and before.get("total") == 30 and before.get("staticToolCount") == 30, before)
 
 definition = {
     "slug": "paper", "label": "论文", "version": 1, "exposeToMcp": True,
@@ -110,7 +112,7 @@ code, after = rest("GET", f"/spaces/{sid}/mcp/tools")
 names = [t["name"] for t in after.get("tools", [])]
 new_tools = ["episteme.query_paper", "episteme.create_paper", "episteme.update_paper"]
 check("Schema 改后 tools/list 同会话 +3",
-      code == 200 and after.get("total") == 29 and all(n in names for n in new_tools),
+      code == 200 and after.get("total") == 33 and all(n in names for n in new_tools),
       {"total": after.get("total"), "names": names[-5:]})
 check("toolsVersion 递增", after.get("toolsVersion", 0) > before.get("toolsVersion", 0), after)
 
@@ -514,6 +516,205 @@ check("includeSamples 同时导入示例文档",
       code == 200 and psamp.get("createdSampleDocuments", 0) >= 1
       and pdocs.get("total", 0) >= 1,
       {"install": psamp, "docs": pdocs.get("total")})
+
+print("\n---- v0.5 真实媒介 / fetch-worker / 传输 ----")
+
+code, caps = rest("GET", "/capabilities")
+check("capabilities 声明版本、真实渲染器与生产开关",
+      code == 200 and str(caps.get("version", "")).startswith("0.5")
+      and "pdf.js" in caps.get("renderers", {}).get("pdf", "")
+      and "Monaco" in caps.get("renderers", {}).get("code", "")
+      and "sse" in caps.get("transports", []), caps)
+check("health 暴露 authMode / dbProvider",
+      str(health.get("authMode")) == "legacy" and str(health.get("dbProvider")) == "sqlite", health)
+
+code, whealth = rest("GET", "/fetch-worker/health")
+check("独立 fetch-worker 仅经 compose 内网可达",
+      code == 200 and whealth.get("status") == "ok"
+      and whealth.get("worker", {}).get("extractor") == "mozilla-readability", whealth)
+
+for label, path in (("pdf.js 本地打包", "/vendor/pdfjs/pdf.min.mjs"),
+                    ("pdf.js worker 本地打包", "/vendor/pdfjs/pdf.worker.min.mjs"),
+                    ("Monaco loader 本地打包", "/vendor/monaco/vs/loader.js")):
+    c, _body = http("GET", BASE + path)
+    check(label + " 可离线加载", c == 200, c)
+
+snapshot = ("<!doctype html><html><head><title>知书 · 抓取验收</title><style>.x{}</style></head>"
+            "<body><nav>导航噪声</nav><article><h1>真实阅读器</h1>"
+            "<p>第一段正文，用于验证 Readability 抽取与白名单清洗。</p>"
+            "<p>第二段含 <a href=\"/next\">相对链接</a> 与 <strong>加粗</strong>。</p>"
+            "<script>alert('xss')</script><img src=\"javascript:alert(1)\" onerror=\"alert(2)\">"
+            "<a href=\"http://127.0.0.1:5080/admin\">内网链接</a></article></body></html>")
+code, fetched = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/web",
+                     {"html": snapshot, "sourceUri": "https://example.com/post/1", "source": "api"})
+check("离线 HTML 快照经 Readability 抽取并生成 web Part",
+      code == 200 and fetched.get("extractor") == "mozilla-readability"
+      and fetched.get("mode") == "offline-snapshot" and fetched.get("sanitized") is True
+      and fetched.get("htmlLength", 0) > 40, fetched)
+code, fetched_view = rest("GET", f"/spaces/{sid}/documents/{doc_id}/viewers")
+new_web = next((p for p in fetched_view.get("items", [])
+                if p.get("partId") == fetched.get("partId")), {})
+clean = new_web.get("content", "")
+check("抽取结果不含 script / 事件属性 / javascript: / 内网链接",
+      "<script" not in clean.lower() and "onerror" not in clean.lower()
+      and "javascript:" not in clean.lower() and "127.0.0.1" not in clean
+      and "第一段正文" in clean, clean[:240])
+check("相对链接绝对化且 meta 记录 extractor / finalUrl",
+      "https://example.com/next" in clean
+      and new_web.get("meta", {}).get("extractor") == "mozilla-readability",
+      new_web.get("meta", {}))
+
+ssrf_targets = [
+    ("环回地址", "http://127.0.0.1:5080/health"),
+    ("云元数据", "http://169.254.169.254/latest/meta-data/"),
+    ("内网域名", "http://localhost/"),
+    ("非标准端口", "http://example.com:8080/admin"),
+    ("非 http 协议", "file:///etc/passwd"),
+    ("私有网段", "http://192.168.1.1/"),
+]
+ssrf_ok = True
+ssrf_detail = []
+for label, target in ssrf_targets:
+    c, body = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/web",
+                   {"url": target, "source": "api"})
+    blocked = c in (400, 422) and body.get("code") == "SSRF_BLOCKED"
+    ssrf_ok = ssrf_ok and blocked
+    ssrf_detail.append({"target": target, "status": c, "code": body.get("code")})
+check("SSRF 六类攻击面全部被 fetch-worker 拒绝", ssrf_ok, ssrf_detail)
+
+c, allow = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/web",
+                {"url": "https://example.com/", "allowedHosts": ["wikipedia.org"], "source": "api"})
+check("单次抓取域名白名单可进一步收紧", c in (400, 422)
+      and allow.get("code") == "SSRF_BLOCKED", {"status": c, "body": allow})
+
+code, refetched = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/web",
+                       {"html": snapshot.replace("第一段正文", "重抓后的正文"),
+                        "replacePartId": fetched.get("partId"), "source": "api"})
+check("重抓覆盖同一 web Part 而不新增 Part",
+      code == 200 and refetched.get("partId") == fetched.get("partId"), refetched)
+
+pdf_bytes = (b"%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+             b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+             b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj\n"
+             b"trailer << /Root 1 0 R >>\n%%EOF\n")
+code, uploaded = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/pdf",
+                      {"base64": base64.b64encode(pdf_bytes).decode("ascii"),
+                       "name": "acceptance.pdf", "source": "api"})
+check("真实 PDF 二进制写入内容寻址 blob 仓库",
+      code == 200 and uploaded.get("pdfFormat") == "binary"
+      and uploaded.get("byteLength") == len(pdf_bytes)
+      and str(uploaded.get("blobHash", "")).startswith("sha256:"), uploaded)
+
+
+def raw_get(path):
+    """Read a binary endpoint without the JSON-oriented rest() helper."""
+    import http.client
+    conn = http.client.HTTPConnection("127.0.0.1", 5080, timeout=6)
+    conn.request("GET", path, headers={"X-Episteme-Role": "owner"})
+    resp = conn.getresponse()
+    payload = resp.read()
+    result = (resp.status, resp.getheader("Content-Type", ""), payload)
+    conn.close()
+    return result
+
+
+bstatus, bctype, bbody = raw_get(uploaded.get("binaryUrl", "/"))
+check("PDF 原件可由 /binary 端点按 application/pdf 读回",
+      bstatus == 200 and "application/pdf" in bctype and bbody.startswith(b"%PDF-"),
+      {"status": bstatus, "type": bctype, "head": bbody[:8]})
+
+code, bad_pdf = rest("POST", f"/spaces/{sid}/documents/{doc_id}/parts/pdf",
+                     {"base64": base64.b64encode(b"not a pdf").decode("ascii"), "source": "api"})
+check("非 %PDF- 文件头被拒绝", code == 422 and bad_pdf.get("code") == "PDF_INVALID_HEADER", bad_pdf)
+
+code, vfinal = rest("GET", f"/spaces/{sid}/documents/{doc_id}/viewers")
+binary_part = next((p for p in vfinal.get("items", [])
+                    if p.get("partId") == uploaded.get("partId")), {})
+check("Viewer 为二进制 PDF 标记 pdfjs-canvas 与页数",
+      binary_part.get("renderHint") == "pdfjs-canvas"
+      and bool(binary_part.get("binaryUrl"))
+      and binary_part.get("stats", {}).get("pages", 0) >= 1, binary_part.get("stats"))
+
+code, rebound = rest("PUT", f"/spaces/{sid}/documents/{doc_id}/annotations/{a_web['annotationId']}",
+                     {"anchor": {"kind": "web", "domPath": "article/p[1]",
+                                 "textQuote": {"exact": "网页正文已更新"}},
+                      "text": "交互式重新定位", "source": "api"})
+check("丢失锚点可交互式重定位并产生新 Commit",
+      code == 200 and rebound.get("anchor", {}).get("rebound") is True
+      and bool(rebound.get("commitId"))
+      and rebound.get("resolution", {}).get("status") in ("anchored", "relocated"), rebound)
+
+code, rpc_caps = mcp("tools/call", {"name": "episteme.capabilities", "arguments": {}}, space=slug)
+check("MCP capabilities 工具可用",
+      rpc_caps.get("result", {}).get("structuredContent", {}).get("version", "").startswith("0.5"),
+      rpc_caps.get("result", {}).get("structuredContent", {}).get("version"))
+code, rpc_fetch = mcp("tools/call", {
+    "name": "episteme.fetch_web",
+    # Keep the snapshot long enough for Readability's charThreshold; a 9-character
+    # fragment legitimately takes the worker's readability-fallback path.
+    "arguments": {"docId": doc_id, "html": snapshot,
+                  "sourceUri": "https://example.com/mcp/1", "source": "mcp"}
+}, space=slug)
+rpc_fetch_body = rpc_fetch.get("result", {}).get("structuredContent", {})
+check("MCP fetch_web 走同一 worker 与同一写入链路",
+      rpc_fetch_body.get("extractor") == "mozilla-readability"
+      and bool(rpc_fetch_body.get("commitId")), rpc_fetch_body)
+
+code, mcp_info = http("GET", BASE + "/mcp")
+check("MCP 元信息声明 SSE / stdio 传输",
+      code == 200 and "sse" in str(mcp_info.get("endpoints", {}))
+      and "stdio" in str(mcp_info.get("endpoints", {})), mcp_info)
+code, sessions = http("GET", BASE + "/mcp/sessions")
+check("SSE 会话端点可用", code == 200 and sessions.get("transport") == "sse", sessions)
+
+
+def sse_roundtrip():
+    # Alias the import: a bare `import http.client` here shadows the module-level
+    # http() request helper used for the POST below.
+    import http.client as hc
+    conn = hc.HTTPConnection("127.0.0.1", 5080, timeout=8)
+    conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
+    resp = conn.getresponse()
+    # HTTPResponse has no settimeout(); the underlying socket inherits the
+    # connection's timeout, which bounds every readline() below.
+    if conn.sock is not None:
+        conn.sock.settimeout(6)
+    first_lines = []
+    try:
+        for _ in range(5):
+            line = resp.readline().decode("utf-8", "replace")
+            first_lines.append(line)
+            if not line or line.strip() == "":
+                break
+    except Exception:
+        pass
+    first = "".join(first_lines)
+    match = re.search(r"sessionId=([A-Za-z0-9_.-]+)", first)
+    sid_sse = match.group(1) if match else ""
+    ok_frame = resp.status == 200 and "event: endpoint" in first and bool(sid_sse)
+    pushed = False
+    if sid_sse:
+        code2, _ = http("POST", BASE + "/mcp/messages?sessionId=" + sid_sse,
+                        {"jsonrpc": "2.0", "id": 7, "method": "ping"})
+        pushed_code_ok = code2 == 202
+        pushed_lines = []
+        try:
+            for _ in range(5):
+                line = resp.readline().decode("utf-8", "replace")
+                pushed_lines.append(line)
+                if not line or line.strip() == "":
+                    break
+        except Exception:
+            pass
+        chunk = "".join(pushed_lines)
+        pushed = pushed_code_ok and "event: message" in chunk and '"jsonrpc":"2.0"' in chunk
+    conn.close()
+    return ok_frame, pushed, first[:160]
+
+
+sse_ok, sse_push, sse_first = sse_roundtrip()
+check("SSE 首帧下发 endpoint 会话地址", sse_ok, sse_first)
+check("SSE messages 往返推送同一 JSON-RPC 信封", sse_push, sse_first)
 
 print("\n== 结果: %d PASS / %d FAIL ==" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

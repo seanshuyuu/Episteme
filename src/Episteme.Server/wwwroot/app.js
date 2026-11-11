@@ -16,7 +16,9 @@
     viewers: null, activeDocId: null, reader: null, partIndex: 0,
     readerMode: 'source', webMode: 'read', page: 1, selectedLine: 0,
     readerRef: '', readOnly: false,
-    packs: [], packPreview: null, packExport: null
+    packs: [], packPreview: null, packExport: null,
+    caps: null, monacoConfigured: false, monacoEditor: null, pdfDoc: null,
+    pdfRenderGen: 0, lastFetch: null, lastPdfUpload: null, lastRebind: null
   };
 
   function esc(s) {
@@ -62,19 +64,52 @@
 
   // ---------- loading ----------
 
-  async function loadSpaces() {
+  function renderSpaces() {
+    var select = $('space-select');
+    if (!select) return;
+    select.innerHTML = state.spaces.map(function (s) {
+      return '<option value="' + esc(s.id) + '">' + esc(s.name) + ' · ' + esc(s.slug) + '</option>';
+    }).join('');
+    if (state.spaceId) select.value = state.spaceId;
+    if (state.spaces.length) select.classList.remove('hidden');
+    else select.classList.add('hidden');
+  }
+
+  // Keep the current selection when refreshing the list; a freshly created space is
+  // selected explicitly via preferredId so the user never lands back on the oldest one.
+  async function loadSpaces(preferredId) {
     var res = await api('/spaces');
     state.spaces = res.items || [];
     if (state.spaces.length === 0) {
+      renderSpaces();
       show('empty-state'); hide('workspace');
       $('space-name').textContent = '未选择空间';
+      state.spaceId = null; state.spaceName = '';
       return;
     }
     hide('empty-state'); show('workspace');
-    var s = state.spaces[0];
+    var wanted = preferredId || state.spaceId;
+    var s = state.spaces.find(function (x) { return x.id === wanted; }) || state.spaces[0];
     state.spaceId = s.id; state.spaceName = s.name;
     $('space-name').textContent = s.name;
+    renderSpaces();
     await loadAll();
+  }
+
+  async function switchSpace(id) {
+    var s = state.spaces.find(function (x) { return x.id === id; });
+    if (!s || s.id === state.spaceId) return null;
+    state.spaceId = s.id; state.spaceName = s.name;
+    $('space-name').textContent = s.name;
+    // Reader / version state belongs to a single space: never leak it across spaces.
+    state.nodeId = null; state.render = null; state.selectedCommit = null;
+    state.activeDocId = null; state.reader = null; state.partIndex = 0;
+    state.readerRef = ''; state.readOnly = false; state.page = 1;
+    state.packPreview = null; state.packExport = null;
+    disposeMonaco();
+    renderSpaces();
+    await loadAll();
+    return s;
   }
 
   async function loadAll() {
@@ -522,12 +557,248 @@
       }).join('') + '</div>';
   }
 
+  // ---------- v0.5: real media engines, progressive enhancement ----------
+  // Every upgrade is optional: the base DOM (textarea / text layer / plain text) is always
+  // rendered first, so environments without Monaco / pdf.js keep working unchanged.
+
+  function sanitizeSnapshotHtml(html) {
+    var text = String(html || '');
+    var blocked = 'script|style|iframe|object|embed|link|meta|base|form|input|svg|math|template|canvas';
+    text = text.replace(new RegExp('<\\s*(' + blocked + ')\\b[^>]*>[\\s\\S]*?<\\s*/\\s*\\1\\s*>', 'gi'), '');
+    text = text.replace(new RegExp('<\\s*(' + blocked + ')\\b[^>]*/?>', 'gi'), '');
+    text = text.replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+    text = text.replace(/(href|src)\s*=\s*(?:"\s*javascript:[^"]*"|'\s*javascript:[^']*'|javascript:[^\s>]+)/gi, '$1=""');
+    var box = document.createElement('div');
+    box.innerHTML = text;
+    Array.prototype.forEach.call(box.querySelectorAll('*'), function (el) {
+      var attrs = [], i;
+      for (i = 0; i < el.attributes.length; i++) attrs.push(el.attributes[i]);
+      attrs.forEach(function (attr) {
+        var name = String(attr.name || '').toLowerCase();
+        var keep = ['href', 'src', 'alt', 'title', 'rel', 'target', 'loading'];
+        if (keep.indexOf(name) < 0) { el.removeAttribute(attr.name); return; }
+        if ((name === 'href' || name === 'src') && !/^https?:\/\//i.test(String(attr.value || '')))
+          el.removeAttribute(attr.name);
+      });
+    });
+    return box.innerHTML;
+  }
+
+  function currentQuotes() {
+    var quotes = [];
+    ((state.reader && state.reader.items) || []).forEach(function (p) {
+      (p.annotations || []).forEach(function (a) {
+        var q = a.anchor && a.anchor.textQuote && a.anchor.textQuote.exact;
+        if (q && String(q).length >= 2 && quotes.indexOf(String(q)) < 0) quotes.push(String(q));
+      });
+    });
+    return quotes.slice(0, 20);
+  }
+
+  function highlightQuotes(root) {
+    var quotes = currentQuotes();
+    if (!quotes.length || !root || !document.createTreeWalker) return 0;
+    var filter = window.NodeFilter ? window.NodeFilter.SHOW_TEXT : 4;
+    var walker = document.createTreeWalker(root, filter, null, false);
+    var nodes = [], n, count = 0;
+    while ((n = walker.nextNode())) nodes.push(n);
+    nodes.forEach(function (node) {
+      var parent = node.parentNode;
+      if (!parent) return;
+      var tag = String(parent.tagName || '').toLowerCase();
+      if (['script', 'style', 'mark', 'textarea', 'code'].indexOf(tag) >= 0) return;
+      var value = String(node.nodeValue || ''), hit = null, i;
+      for (i = 0; i < quotes.length; i++)
+        if (value.indexOf(quotes[i]) >= 0) { hit = quotes[i]; break; }
+      if (!hit) return;
+      var idx = value.indexOf(hit);
+      var frag = document.createDocumentFragment();
+      frag.appendChild(document.createTextNode(value.slice(0, idx)));
+      var mark = document.createElement('mark');
+      mark.className = 'anchor-hit';
+      mark.textContent = hit;
+      frag.appendChild(mark);
+      frag.appendChild(document.createTextNode(value.slice(idx + hit.length)));
+      parent.replaceChild(frag, node);
+      count++;
+    });
+    return count;
+  }
+
+  function disposeMonaco() {
+    if (state.monacoEditor) { try { state.monacoEditor.dispose(); } catch (e) { /* noop */ } }
+    state.monacoEditor = null;
+    var host = $('monaco-host'), ta = $('part-editor');
+    if (host) { host.innerHTML = ''; host.classList.add('hidden'); }
+    if (ta) ta.classList.remove('hidden');
+  }
+
+  function monacoLanguage(p) {
+    var wanted = p.language || 'plaintext';
+    try {
+      var ids = window.monaco.languages.getLanguages().map(function (l) { return l.id; });
+      if (ids.indexOf(wanted) >= 0) return wanted;
+    } catch (e) { /* noop */ }
+    return 'plaintext';
+  }
+
+  function scheduleMonaco(p) {
+    if (!p || p.kind !== 'code' || state.readerMode !== 'source' || state.readOnly) return;
+    if (!window.require || !window.require.config || !$('monaco-host') || !$('part-editor')) return;
+    try {
+      if (!state.monacoConfigured) {
+        window.require.config({ paths: { vs: '/vendor/monaco/vs' } });
+        state.monacoConfigured = true;
+      }
+      window.require(['vs/editor/editor.main'], function () {
+        try {
+          if (!window.monaco || !window.monaco.editor || !$('monaco-host')) return;
+          var ta = $('part-editor');
+          if (!ta) return;
+          disposeMonaco();
+          state.monacoEditor = window.monaco.editor.create($('monaco-host'), {
+            value: ta.value, language: monacoLanguage(p), theme: 'vs',
+            automaticLayout: true, minimap: { enabled: false }, fontSize: 13,
+            scrollBeyondLastLine: false, lineNumbers: 'on', readOnly: false
+          });
+          ta.classList.add('hidden');
+          $('monaco-host').classList.remove('hidden');
+          state.monacoEditor.onDidChangeModelContent(function () {
+            var editor = $('part-editor');
+            if (editor && state.monacoEditor) editor.value = state.monacoEditor.getValue();
+          });
+        } catch (e) { disposeMonaco(); }
+      }, function () { disposeMonaco(); });
+    } catch (e) { disposeMonaco(); }
+  }
+
+  function readEditorValue() {
+    if (state.monacoEditor) {
+      try { return state.monacoEditor.getValue(); } catch (e) { /* fall through */ }
+    }
+    var ed = $('part-editor');
+    return ed ? ed.value : null;
+  }
+
+  function renderPdfBinary(p, box) {
+    var pdf = window.EpistemePdf, status = $('pdf-render-status');
+    if (!pdf || !pdf.getDocument) {
+      if (status) status.textContent = 'pdf.js 未加载 · 已降级为文本层';
+      return;
+    }
+    var generation = ++state.pdfRenderGen;
+    pdf.getDocument({ url: p.binaryUrl, withCredentials: false }).promise.then(function (doc) {
+      if (generation !== state.pdfRenderGen) { doc.destroy(); return null; }
+      state.pdfDoc = doc;
+      if (status) status.textContent = 'pdf.js 已加载 · 共 ' + doc.numPages + ' 页';
+      return doc.getPage(Math.min(Math.max(1, state.page), doc.numPages));
+    }).then(function (page) {
+      if (!page || generation !== state.pdfRenderGen) return;
+      var canvas = $('pdf-canvas');
+      if (!canvas || !canvas.getContext) { if (status) status.textContent = 'canvas 不可用 · 已降级为文本层'; return; }
+      var base = page.getViewport({ scale: 1 });
+      var scale = Math.min(1.5, Math.max(0.5, (box.clientWidth || 760) / (base.width || 760)));
+      var viewport = page.getViewport({ scale: scale });
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function () {
+        if (status && generation === state.pdfRenderGen)
+          status.textContent = 'pdf.js canvas 渲染完成 · 第 ' + state.page + ' / ' +
+            (state.pdfDoc ? state.pdfDoc.numPages : '?') + ' 页';
+      });
+    }).catch(function (e) {
+      if (status) status.textContent = 'pdf.js 渲染失败：' + (e && e.message ? e.message : String(e));
+    });
+  }
+
+  async function loadCapabilities() {
+    try {
+      state.caps = await api('/capabilities');
+      var chip = $('caps-chip');
+      if (chip) chip.textContent = 'pdf.js / Monaco / Readability · ' +
+        String(state.caps.authMode || '?') + ' · ' + String(state.caps.dbProvider || '?');
+    } catch (e) {
+      state.caps = null;
+      var el = $('caps-chip');
+      if (el) el.textContent = '能力接口不可用';
+    }
+    return state.caps;
+  }
+
+  async function fetchWebPart() {
+    if (!state.activeDocId) { hint('media-hint', '请先打开一份文档', 'error'); return null; }
+    var url = val('fetch-url');
+    var html = $('fetch-html') ? $('fetch-html').value : '';
+    if (!url && !String(html || '').trim()) {
+      hint('media-hint', '请填写网页地址，或粘贴 HTML 快照', 'error'); return null;
+    }
+    var body = { source: 'ui' };
+    if (url) body.url = url;
+    else { body.html = html; body.sourceUri = val('new-part-source'); }
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
+      '/parts/web', { method: 'POST', body: JSON.stringify(body) });
+    state.lastFetch = res;
+    hint('media-hint', '已' + (res.mode === 'offline-snapshot' ? '离线提取' : '抓取') + '：' +
+      (res.title || '无标题') + ' · ' + res.extractor + ' · Commit ' + res.commitId, 'ok');
+    hide('part-form');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
+  async function uploadPdfPart() {
+    if (!state.activeDocId) { hint('media-hint', '请先打开一份文档', 'error'); return null; }
+    var input = $('pdf-file');
+    if (!input || !input.files || !input.files.length) {
+      hint('media-hint', '请先选择一个 PDF 文件', 'error'); return null;
+    }
+    var file = input.files[0];
+    var dataUrl = await new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { reject(new Error('读取文件失败')); };
+      reader.readAsDataURL(file);
+    });
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
+      '/parts/pdf', {
+        method: 'POST',
+        body: JSON.stringify({ base64: dataUrl, name: file.name || 'document.pdf', source: 'ui' })
+      });
+    state.lastPdfUpload = res;
+    hint('media-hint', 'PDF 原件已入库 · ' + res.byteLength + ' 字节 / ' +
+      res.pages + ' 页 · Commit ' + res.commitId, 'ok');
+    hide('part-form');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
+  async function rebindAnnotation(annotationId) {
+    var p = currentPart();
+    if (!p || !state.activeDocId) { hint('reader-hint', '请先打开文档 Part', 'error'); return null; }
+    var anchor = buildAnchor(p);
+    var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
+      '/annotations/' + annotationId, {
+        method: 'PUT', body: JSON.stringify({ anchor: anchor, source: 'ui' })
+      });
+    state.lastRebind = res;
+    var status = res.resolution && res.resolution.status;
+    hint('reader-hint', '标记已重新定位 · 锚点 ' + (status || 'unknown') + ' · Commit ' + res.commitId, 'ok');
+    await openDocument(state.activeDocId, state.readerRef);
+    await loadAll();
+    return res;
+  }
+
   function renderStage(p) {
     var box = $('reader-stage');
     var content = p.content || '';
     var editable = p.viewer.capabilities && p.viewer.capabilities.editable;
     var allowEdit = editable && !state.readOnly && state.readerMode === 'source';
     var html = '';
+    var binaryPdf = !!p.binaryUrl;
+    disposeMonaco();
 
     if (p.kind === 'md') {
       html = state.readerMode === 'preview'
@@ -537,8 +808,15 @@
     } else if (p.kind === 'code') {
       html = state.readerMode === 'read'
         ? codeLinesHtml(content, true)
-        : '<textarea id="part-editor" class="part-editor code-editor" spellcheck="false"' +
+        : '<div id="monaco-host" class="monaco-host hidden"></div>' +
+          '<textarea id="part-editor" class="part-editor code-editor" spellcheck="false"' +
           (allowEdit ? '' : ' readonly') + '>' + esc(content) + '</textarea>';
+    } else if (p.kind === 'pdf' && binaryPdf) {
+      html = '<div class="pdf-note">PDF 原件只读 · pdf.js canvas 渲染（' + esc(p.stats.pages) +
+        ' 页）· 改动只以标记存储</div>' +
+        '<div class="pdf-render-bar"><span id="pdf-render-status" class="chip">准备渲染…</span></div>' +
+        '<div class="pdf-canvas-wrap"><canvas id="pdf-canvas"></canvas></div>' +
+        '<pre class="pdf-blob-ref">内容寻址引用：' + esc(content) + '</pre>';
     } else if (p.kind === 'pdf') {
       var pages = content.split('\f');
       var page = Math.min(Math.max(1, state.page), pages.length);
@@ -552,13 +830,16 @@
         }).join('') + '</div>';
     } else if (p.kind === 'web') {
       var text = plainText(content);
-      html = '<div class="web-origin">外部内容 · 原文链接：' +
+      var extractor = p.meta && p.meta.extractor ? p.meta.extractor : '快照';
+      html = '<div class="web-origin">外部内容 · ' + esc(extractor) + ' · 原文链接：' +
         (p.sourceUri ? '<a href="' + esc(p.sourceUri) + '" rel="noopener noreferrer" target="_blank">' + esc(p.sourceUri) + '</a>'
           : '未记录') + ' · 快照不执行脚本</div>';
       if (state.readerMode === 'source') {
         html += '<pre class="web-source">' + esc(content) + '</pre>';
       } else if (state.readerMode === 'plain') {
         html += '<pre class="web-plain">' + esc(text) + '</pre>';
+      } else if (/<\s*(article|p|div|h[1-6]|pre)\b/i.test(content)) {
+        html += '<div class="web-read web-article">' + sanitizeSnapshotHtml(content) + '</div>';
       } else {
         html += '<div class="web-read">' + text.split(/(?<=[。！？.!?])\s+/).map(function (para) {
           return '<p>' + esc(para) + '</p>';
@@ -569,6 +850,9 @@
         '<pre>' + esc(JSON.stringify(p.meta || {}, null, 2)) + '</pre></div>';
     }
     box.innerHTML = html;
+    try { highlightQuotes(box); } catch (e) { /* DOM-walker unavailable: highlighting is cosmetic */ }
+    if (p.kind === 'code' && state.readerMode === 'source' && allowEdit) scheduleMonaco(p);
+    if (binaryPdf) renderPdfBinary(p, box);
   }
 
   function renderAnnotations() {
@@ -594,7 +878,12 @@
         '<div class="an-meta">' + esc(a.author) +
         (anchor.page ? ' · p.' + esc(anchor.page) : '') +
         (anchor.line ? ' · L' + esc(anchor.line) : '') +
-        (anchor.commitId ? ' · ' + esc(String(anchor.commitId).slice(0, 14)) : '') + '</div></div>';
+        (anchor.commitId ? ' · ' + esc(String(anchor.commitId).slice(0, 14)) : '') + '</div>' +
+        (status === 'lost'
+          ? '<div class="an-actions"><button data-action="rebind-annotation" data-id="' +
+            esc(a.id) + '" class="ghost">重新定位到当前选中</button></div>'
+          : '') +
+        '</div>';
     }).join('');
   }
 
@@ -675,12 +964,12 @@
   }
 
   async function savePart() {
-    var p = currentPart(), ed = $('part-editor');
-    if (!p || !ed) { hint('reader-hint', '当前 Part 没有可编辑内容', 'error'); return null; }
+    var p = currentPart(), value = readEditorValue();
+    if (!p || value === null) { hint('reader-hint', '当前 Part 没有可编辑内容', 'error'); return null; }
     if (state.readOnly) { hint('reader-hint', '只读历史快照不能编辑；可切换到当前工作区', 'error'); return null; }
     var res = await api('/spaces/' + state.spaceId + '/documents/' + state.activeDocId +
       '/parts/' + p.partId, {
-      method: 'PUT', body: JSON.stringify({ content: ed.value, source: 'ui' })
+      method: 'PUT', body: JSON.stringify({ content: value, source: 'ui' })
     });
     hint('reader-hint', '已保存，Commit ' + res.commitId, 'ok');
     await openDocument(state.activeDocId, state.readerRef);
@@ -739,13 +1028,27 @@
   // ---------- actions ----------
 
   async function createSpace() {
-    var name = val('new-space-name');
-    if (!name) { hint('empty-hint', '请填写空间名称', 'error'); return null; }
+    // Two entry points share this action: the empty-state card and the always-available
+    // topbar "+ 空间" bar. Read whichever form is currently visible.
+    var inlineForm = $('space-form');
+    var inline = inlineForm && !inlineForm.classList.contains('hidden');
+    var name = inline ? val('space-new-name') : val('new-space-name');
+    var slug = inline ? val('space-new-slug') : val('new-space-slug');
+    if (!name) {
+      hint(inline ? 'space-form-hint' : 'empty-hint', '请填写空间名称', 'error');
+      return null;
+    }
     var res = await api('/spaces', {
-      method: 'POST', body: JSON.stringify({ name: name, slug: val('new-space-slug'), source: 'ui' })
+      method: 'POST', body: JSON.stringify({ name: name, slug: slug, source: 'ui' })
     });
-    hint('empty-hint', '已创建：' + res.slug, 'ok');
-    await loadSpaces();
+    if (inline) {
+      $('space-new-name').value = ''; $('space-new-slug').value = '';
+      hint('space-form-hint', '已创建：' + res.slug, 'ok');
+      hide('space-form');
+    } else {
+      hint('empty-hint', '已创建：' + res.slug, 'ok');
+    }
+    await loadSpaces(res.id);
     return res;
   }
 
@@ -877,6 +1180,8 @@
         try {
           switch (action) {
             case 'create-space': await createSpace(); break;
+            case 'show-space-form': show('space-form'); hint('space-form-hint', '', ''); break;
+            case 'hide-space-form': hide('space-form'); break;
             case 'new-node': show('node-form'); break;
             case 'save-node': await createNode(); break;
             case 'new-type': show('schema-builder'); if (!$('field-rows').children.length) addField(); break;
@@ -898,6 +1203,9 @@
             case 'export-notes': await exportNotes(); break;
             case 'append-part': await appendPart(); break;
             case 'show-part-form': show('part-form'); break;
+            case 'fetch-web': await fetchWebPart(); break;
+            case 'upload-pdf': await uploadPdfPart(); break;
+            case 'rebind-annotation': await rebindAnnotation(actionEl.getAttribute('data-id')); break;
             case 'preview-pack': await previewPack(actionEl.getAttribute('data-pack-id')); break;
             case 'install-pack': await installPack(actionEl.getAttribute('data-pack-id')); break;
             case 'export-pack': await exportPack(); break;
@@ -921,6 +1229,12 @@
     var theme = $('theme-select');
     if (theme) theme.addEventListener('change', function (e) { applyTheme(e.target.value); });
 
+    var spaceSelect = $('space-select');
+    if (spaceSelect) spaceSelect.addEventListener('change', async function (e) {
+      try { await switchSpace(e.target.value); }
+      catch (err) { hint('doc-hint', err.message, 'error'); }
+    });
+
     // In a real browser, selecting text pre-fills the quote input for md / web / pdf.
     document.addEventListener('mouseup', function () {
       if (!window.getSelection) return;
@@ -939,6 +1253,7 @@
     if (state.tokens && state.tokens.defaultTheme) state.theme = state.tokens.defaultTheme;
     var theme = $('theme-select'); if (theme) theme.value = state.theme;
     applyTheme(state.theme);
+    loadCapabilities();
     try { await loadSpaces(); } catch (e) { hint('empty-hint', e.message, 'error'); }
   }
 
@@ -949,7 +1264,9 @@
         spaces: state.spaces.slice(), spaceId: state.spaceId, spaceName: state.spaceName,
         nodes: state.nodes.slice(), nodeId: state.nodeId,
         contentTypes: state.contentTypes.slice(), documents: state.documents.slice(),
-        commits: state.commits.slice(), toolsVersion: state.toolsVersion,
+        commits: state.commits.slice(),
+        headCommitId: state.commits.length ? state.commits[0].id : '',
+        toolsVersion: state.toolsVersion,
         toolCount: state.tools ? state.tools.total : 0,
         renderColumns: state.render && state.render.columns ? state.render.columns.length : 0,
         theme: state.theme, tab: state.tab, selectedCommit: state.selectedCommit,
@@ -963,10 +1280,17 @@
         anchorLost: state.reader ? state.reader.anchorLost : 0,
         packCount: state.packs.length, packPreview: state.packPreview,
         packExportNodes: state.packExport && state.packExport.summary
-          ? state.packExport.summary.nodeCount : 0
+          ? state.packExport.summary.nodeCount : 0,
+        caps: state.caps, capsVersion: state.caps ? state.caps.version : null,
+        monacoActive: !!state.monacoEditor, pdfEngine: !!window.EpistemePdf,
+        lastFetch: state.lastFetch, lastPdfUpload: state.lastPdfUpload,
+        lastRebind: state.lastRebind,
+        binaryPdfUrl: p ? p.binaryUrl : '',
+        renderHint: p ? p.renderHint : ''
       };
     },
     api: api, refresh: loadAll, loadSpaces: loadSpaces, createSpace: createSpace,
+    switchSpace: switchSpace, renderSpaces: renderSpaces,
     createNode: createNode, addField: addField, saveType: saveType,
     createDocument: createDocument, selectNode: selectNode,
     loadTools: loadTools, revert: revert, switchTab: switchTab, applyTheme: applyTheme,
@@ -975,7 +1299,10 @@
     savePart: savePart, addAnnotation: addAnnotation, exportNotes: exportNotes,
     appendPart: appendPart, currentPart: currentPart,
     loadPacks: loadPacks, previewPack: previewPack, installPack: installPack,
-    exportPack: exportPack, importPack: importPack
+    exportPack: exportPack, importPack: importPack,
+    loadCapabilities: loadCapabilities, fetchWebPart: fetchWebPart,
+    uploadPdfPart: uploadPdfPart, rebindAnnotation: rebindAnnotation,
+    sanitizeSnapshotHtml: sanitizeSnapshotHtml, highlightQuotes: highlightQuotes
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

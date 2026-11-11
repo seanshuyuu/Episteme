@@ -74,6 +74,13 @@ public sealed partial class EpistemeService
             var viewer = ViewerRegistry.Describe(part.Kind);
             var text = PartContent.ReaderText(part.Kind, part.Content);
             var partAnns = annotations.Where(a => a.PartId == part.Id).OrderBy(a => a.CreatedAt).ToList();
+            var binaryPdf = part.Kind == "pdf" && Jsonx.Plain(part.Meta["pdfFormat"]) == "binary";
+            var binaryUrl = binaryPdf
+                ? $"/api/v1/episteme/spaces/{spaceId}/documents/{docId}/parts/{part.Id}/binary"
+                : "";
+            var pageCount = binaryPdf
+                ? Math.Max(1, IntOf(part.Meta, "pages"))
+                : part.Kind == "pdf" ? PartContent.PageCount(part.Content) : 0;
             var annArr = new JsonArray();
             foreach (var a in partAnns)
             {
@@ -92,10 +99,15 @@ public sealed partial class EpistemeService
                 ["sourceUri"] = part.SourceUri,
                 ["language"] = part.Language,
                 ["meta"] = part.Meta.DeepClone(),
+                ["binaryUrl"] = binaryUrl,
+                ["renderHint"] = binaryPdf ? "pdfjs-canvas" : part.Kind switch
+                {
+                    "code" => "monaco", "web" => "readability", "md" => "markdown-preview", _ => "metadata"
+                },
                 ["stats"] = new JsonObject
                 {
                     ["lines"] = PartContent.LineCount(part.Content),
-                    ["pages"] = part.Kind == "pdf" ? PartContent.PageCount(part.Content) : 0,
+                    ["pages"] = pageCount,
                     ["words"] = PartContent.WordCount(text),
                     ["characters"] = text.Length,
                     ["fingerprint"] = PartContent.Fingerprint(part.Content)

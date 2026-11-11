@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Episteme.UI.Avalonia.Api;
+using Episteme.UI.Avalonia.ViewModels;
 
 // Headless probe for the shared Desktop/Android client layer. It runs inside the .NET SDK
 // container against the live Episteme service, so the native client is verified without a GUI.
@@ -132,6 +133,99 @@ try
         var annotations = await api.AnnotationsAsync(sid3, docId);
         Check("标注审阅通道可读", annotations["total"] is not null,
             I(annotations, "total"));
+    }
+
+    // ---- v0.5 desktop completion: real read / write / diff / media / VM paths ----
+    var caps = await api.CapabilitiesAsync();
+    Check("桌面端可读 capabilities", S(caps, "version").StartsWith("0.5"), S(caps, "version"));
+    var contracts = await api.ViewerContractsAsync();
+    Check("桌面端可读统一 Viewer 契约", Count(contracts, "items") >= 5, Count(contracts, "items"));
+
+    var editDocs = await api.DocumentsAsync(sid3);
+    var editDoc = (editDocs["items"] as JsonArray ?? new JsonArray())
+        .OfType<JsonObject>().FirstOrDefault();
+    if (editDoc is null) Check("示例文档可用于桌面读写回归", false, "无示例文档");
+    else
+    {
+        var editDocId = S(editDoc, "id");
+        var renamed = await api.UpdateDocumentAsync(sid3, editDocId, new JsonObject
+        {
+            ["title"] = "桌面端改名", ["source"] = "desktop"
+        });
+        Check("桌面端更新文档标题生成 Commit",
+            !string.IsNullOrWhiteSpace(S(renamed, "commitId")), S(renamed, "commitId"));
+
+        var detail = await api.DocumentAsync(sid3, editDocId);
+        var part = (detail["parts"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>().FirstOrDefault(p => S(p, "kind") is "md" or "code" or "web");
+        if (part is null) Check("示例文档含可编辑 Part", false, "无可编辑 Part");
+        else
+        {
+            var partId = S(part, "id");
+            var kind = S(part, "kind");
+            var saved = await api.UpdatePartAsync(sid3, editDocId, partId, new JsonObject
+            {
+                ["content"] = "# 桌面端编辑\n已保存", ["source"] = "desktop"
+            });
+            Check("桌面端保存 Part 生成 Commit",
+                !string.IsNullOrWhiteSpace(S(saved, "commitId")), S(saved, "commitId"));
+
+            var anchor = new JsonObject { ["kind"] = kind };
+            if (kind == "web") anchor["domPath"] = "article/p[1]";
+            else anchor["line"] = 1;
+            var ann = await api.AddAnnotationAsync(sid3, editDocId, new JsonObject
+            {
+                ["partId"] = partId, ["kind"] = "note", ["text"] = "桌面端标注",
+                ["anchor"] = anchor, ["source"] = "desktop"
+            });
+            Check("桌面端新增标注写进版本",
+                !string.IsNullOrWhiteSpace(S(ann, "commitId")), S(ann, "commitId"));
+            var rebound = await api.RebindAnnotationAsync(sid3, editDocId,
+                S(ann, "annotationId"), new JsonObject
+                {
+                    // JsonNode instances cannot be attached to two parents; clone the anchor.
+                    ["anchor"] = anchor.DeepClone(), ["text"] = "重新定位", ["source"] = "desktop"
+                });
+            Check("桌面端可交互式重定位标注",
+                B(rebound["anchor"] as JsonObject ?? new JsonObject(), "rebound")
+                && !string.IsNullOrWhiteSpace(S(rebound, "commitId")), S(rebound, "commitId"));
+        }
+
+        var captured = await api.FetchWebAsync(sid3, editDocId, new JsonObject
+        {
+            // Readability needs a full document (head/title/body), not a bare <article>
+            // fragment; otherwise the worker honestly falls back to plain extraction.
+            ["html"] = "<!doctype html><html><head><title>桌面端抓取验收</title></head><body>"
+                       + "<nav>导航噪声</nav><article><h1>桌面端真实阅读器</h1>"
+                       + "<p>第一段正文，用于验证独立 fetch-worker 的 Readability 抽取与白名单清洗。</p>"
+                       + "<p>第二段包含 <a href=\"/next\">相对链接</a> 与足够长度的正文内容，确保抽取器不会退化到 fallback。</p>"
+                       + "<script>alert('xss')</script></article></body></html>",
+            ["source"] = "desktop"
+        });
+        Check("桌面端离线 HTML 提取走 fetch-worker",
+            S(captured, "extractor") == "mozilla-readability"
+            && !string.IsNullOrWhiteSpace(S(captured, "commitId")), S(captured, "extractor"));
+
+        var commits3 = await api.CommitsAsync(sid3);
+        var ids = (commits3["items"] as JsonArray ?? new JsonArray())
+            .OfType<JsonObject>().Select(c => S(c, "id")).ToList();
+        if (ids.Count >= 2)
+        {
+            var diff = await api.DiffAsync(sid3, ids[1], ids[0]);
+            Check("桌面端可读取提交差异",
+                diff["total"] is not null || diff["items"] is not null, I(diff, "total"));
+        }
+        else Check("桌面端可读取提交差异", true, "提交不足 2 条，跳过");
+
+        var vm = new MainViewModel(api, mcp);
+        Check("桌面 ViewModel 新增读写命令已注册",
+            vm.SaveDocCommand is not null && vm.SavePartCommand is not null
+            && vm.LoadDiffCommand is not null && vm.LoadCapabilitiesCommand is not null
+            && vm.CallMcpToolCommand is not null, vm.LastAction);
+        await vm.LoadAsync();
+        Check("桌面 ViewModel 无 GUI 加载空间与模板",
+            vm.Spaces.Count >= 1 && vm.Packs.Count == 2,
+            "spaces=" + vm.Spaces.Count + " packs=" + vm.Packs.Count);
     }
 }
 catch (Exception ex)

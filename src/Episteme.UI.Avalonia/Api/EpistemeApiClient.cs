@@ -84,6 +84,12 @@ public sealed class EpistemeApiClient
     private Task<JsonObject> Post(string path, JsonObject body, CancellationToken ct) =>
         RequestAsync(HttpMethod.Post, ApiRoot + path, body, ct);
 
+    private Task<JsonObject> Put(string path, JsonObject body, CancellationToken ct) =>
+        RequestAsync(HttpMethod.Put, ApiRoot + path, body, ct);
+
+    private Task<JsonObject> Patch(string path, JsonObject body, CancellationToken ct) =>
+        RequestAsync(HttpMethod.Patch, ApiRoot + path, body, ct);
+
     private static string S(string value) => Uri.EscapeDataString(value);
     private string Sp(string spaceId, string suffix = "") => $"/spaces/{S(spaceId)}{suffix}";
 
@@ -141,4 +147,47 @@ public sealed class EpistemeApiClient
 
     public Task<JsonObject> McpToolsAsync(string spaceId, CancellationToken ct = default) =>
         Get(Sp(spaceId, "/mcp/tools"), ct);
+
+    // ---- v0.5 desktop completion: real read / write / diff / media paths ----
+    public Task<JsonObject> CapabilitiesAsync(CancellationToken ct = default) => Get("/capabilities", ct);
+
+    public Task<JsonObject> ViewerContractsAsync(CancellationToken ct = default) => Get("/viewers", ct);
+
+    public Task<JsonObject> DiffAsync(string spaceId, string baseRef, string targetRef,
+        CancellationToken ct = default) =>
+        Get(Sp(spaceId, $"/diff?base={S(baseRef)}&target={S(targetRef)}"), ct);
+
+    public Task<JsonObject> UpdateDocumentAsync(string spaceId, string docId, JsonObject body,
+        CancellationToken ct = default) =>
+        Patch(Sp(spaceId, $"/documents/{S(docId)}"), body, ct);
+
+    public Task<JsonObject> UpdatePartAsync(string spaceId, string docId, string partId, JsonObject body,
+        CancellationToken ct = default) =>
+        Put(Sp(spaceId, $"/documents/{S(docId)}/parts/{S(partId)}"), body, ct);
+
+    public Task<JsonObject> AddAnnotationAsync(string spaceId, string docId, JsonObject body,
+        CancellationToken ct = default) =>
+        Post(Sp(spaceId, $"/documents/{S(docId)}/annotations"), body, ct);
+
+    public Task<JsonObject> RebindAnnotationAsync(string spaceId, string docId, string annotationId,
+        JsonObject body, CancellationToken ct = default) =>
+        Put(Sp(spaceId, $"/documents/{S(docId)}/annotations/{S(annotationId)}"), body, ct);
+
+    public Task<JsonObject> FetchWebAsync(string spaceId, string docId, JsonObject body,
+        CancellationToken ct = default) =>
+        Post(Sp(spaceId, $"/documents/{S(docId)}/parts/web"), body, ct);
+
+    public Task<JsonObject> UploadPdfAsync(string spaceId, string docId, JsonObject body,
+        CancellationToken ct = default) =>
+        Post(Sp(spaceId, $"/documents/{S(docId)}/parts/pdf"), body, ct);
+
+    public Task<JsonObject> ViewerPartsAsync(string spaceId, string docId, CancellationToken ct = default) =>
+        Get(Sp(spaceId, $"/documents/{S(docId)}/viewers"), ct);
+
+    public Task<JsonObject> ReadPartAsync(string spaceId, string docId, string partId,
+        CancellationToken ct = default) =>
+        Get(Sp(spaceId, $"/documents/{S(docId)}/parts/{S(partId)}?mode=read"), ct);
+
+    public Task<JsonObject> AuditAsync(string spaceId, CancellationToken ct = default) =>
+        Get(Sp(spaceId, "/audit"), ct);
 }

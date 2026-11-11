@@ -5,7 +5,9 @@ COPY src/Episteme.Core/Episteme.Core.csproj ./src/Episteme.Core/
 COPY src/Episteme.Server/Episteme.Server.csproj ./src/Episteme.Server/
 RUN dotnet restore src/Episteme.Server/Episteme.Server.csproj
 COPY src/ ./src/
-RUN dotnet publish src/Episteme.Server/Episteme.Server.csproj -c Release -o /out --no-restore
+# Start from a clean publish output so removed assets never survive a cached layer.
+# .NET 10 additionally emits .br / .gz compressed variants for wwwroot static assets.
+RUN rm -rf /out && dotnet publish src/Episteme.Server/Episteme.Server.csproj -c Release -o /out --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app

@@ -71,3 +71,13 @@ public sealed class AnnotationItem
     public string Text { get; set; } = "";
     public string Display => $"[{Kind}] " + (Text.Length > 40 ? Text[..40] + "…" : Text);
 }
+
+public sealed class PartItem
+{
+    public string Id { get; set; } = "";
+    public string Kind { get; set; } = "";
+    public int Ord { get; set; }
+    public string Content { get; set; } = "";
+    public string SourceUri { get; set; } = "";
+    public string Display => $"{Ord + 1} · {Kind} · {Content.Length} 字符";
+}

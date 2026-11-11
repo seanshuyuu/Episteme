@@ -1,5 +1,6 @@
 using Episteme.Core;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Episteme.Server;
 
@@ -75,5 +76,14 @@ public sealed class EpistemeDbContext(DbContextOptions<EpistemeDbContext> option
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.SpaceId, x.CreatedAt });
         });
+
+        // Npgsql maps DateTime to "timestamp with time zone" and rejects Kind != Utc;
+        // SQLite reads back Unspecified. One converter keeps both providers identical.
+        var utc = new ValueConverter<DateTime, DateTime>(
+            v => v.Kind == DateTimeKind.Utc ? v : DateTime.SpecifyKind(v, DateTimeKind.Utc),
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+        foreach (var entity in b.Model.GetEntityTypes())
+            foreach (var property in entity.GetProperties())
+                if (property.ClrType == typeof(DateTime)) property.SetValueConverter(utc);
     }
 }

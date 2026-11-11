@@ -21,10 +21,17 @@ public static class McpEndpoint
 
         app.MapGet("/mcp", () => Results.Json(new JsonObject
         {
-            ["name"] = "episteme", ["version"] = "0.4.0-p4p5",
+            ["name"] = "episteme", ["version"] = EpistemeConfig.Version,
             ["transport"] = "Streamable HTTP", ["protocolVersion"] = "2025-06-18",
-            ["endpoints"] = new JsonObject { ["rpc"] = "POST /mcp", ["debugTools"] = "GET /mcp/tools?space={slug}" },
-            ["note"] = "SSE 长连接与 stdio 本轮未实现；POST /mcp 为完整 JSON-RPC 通道"
+            ["endpoints"] = new JsonObject
+            {
+                ["rpc"] = "POST /mcp", ["sse"] = "GET /mcp/sse",
+                ["messages"] = "POST /mcp/messages?sessionId=...",
+                ["stdio"] = "src/Episteme.McpStdio（独立进程转发）",
+                ["debugTools"] = "GET /mcp/tools?space={slug}"
+            },
+            ["capabilities"] = "GET /api/v1/episteme/capabilities",
+            ["note"] = "POST /mcp 为完整 JSON-RPC 通道；SSE 与 stdio 为额外传输，共用同一 Dispatch"
         }));
 
         app.MapGet("/mcp/tools", async (HttpContext http, EpistemeService svc) =>
@@ -41,12 +48,20 @@ public static class McpEndpoint
 
     private static async Task<IResult> HandlePost(HttpContext http, EpistemeService svc, JsonObject body)
     {
+        if (Jsonx.Plain(body["method"]).StartsWith("notifications/", StringComparison.Ordinal))
+            return Results.StatusCode(202);
+        return Results.Json(await ProcessAsync(http, svc, body));
+    }
+
+    /// <summary>
+    /// Transport-independent JSON-RPC core. POST /mcp returns the envelope directly;
+    /// the SSE transport pushes exactly the same envelope onto the event stream.
+    /// </summary>
+    internal static async Task<JsonObject> ProcessAsync(HttpContext http, EpistemeService svc, JsonObject body)
+    {
         var id = body["id"]?.DeepClone();
         var method = Jsonx.Plain(body["method"]);
         var ct = http.RequestAborted;
-
-        if (method.StartsWith("notifications/", StringComparison.Ordinal))
-            return Results.StatusCode(202);
 
         try
         {
@@ -65,7 +80,7 @@ public static class McpEndpoint
                             ["resources"] = new JsonObject { ["listChanged"] = true },
                             ["prompts"] = new JsonObject()
                         },
-                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = "0.4.0-p4p5" }
+                        ["serverInfo"] = new JsonObject { ["name"] = "episteme", ["version"] = EpistemeConfig.Version }
                     };
                     break;
 
@@ -83,7 +98,8 @@ public static class McpEndpoint
                 }
 
                 case "tools/call":
-                    return Results.Json(Rpc(id, await ToolsCall(http, svc, body, ct)));
+                    result = await ToolsCall(http, svc, body, ct);
+                    break;
 
                 case "resources/list":
                 {
@@ -123,17 +139,17 @@ public static class McpEndpoint
                 }
 
                 default:
-                    return Results.Json(RpcError(id, -32601, $"Method not found: {method}", "METHOD_NOT_FOUND", 404));
+                    return RpcError(id, -32601, $"Method not found: {method}", "METHOD_NOT_FOUND", 404);
             }
-            return Results.Json(Rpc(id, result));
+            return Rpc(id, result);
         }
         catch (BusinessException ex)
         {
-            return Results.Json(RpcError(id, -32000, ex.Message, ex.Code, ex.Status));
+            return RpcError(id, -32000, ex.Message, ex.Code, ex.Status);
         }
         catch (Exception ex)
         {
-            return Results.Json(RpcError(id, -32603, ex.Message, "INTERNAL", 500));
+            return RpcError(id, -32603, ex.Message, "INTERNAL", 500);
         }
     }
 
@@ -163,7 +179,8 @@ public static class McpEndpoint
         var name = Jsonx.Plain(parameters["name"]);
         var args = parameters["arguments"] as JsonObject ?? new JsonObject();
         var spaceId = await Endpoints.ResolveSpaceId(http, svc, body, ct);
-        if (string.IsNullOrWhiteSpace(spaceId) && name != "episteme.list_spaces" && name != "episteme.list_packs")
+        if (string.IsNullOrWhiteSpace(spaceId) && name != "episteme.list_spaces"
+            && name != "episteme.list_packs" && name != "episteme.capabilities")
             throw new BusinessException("SPACE_NOT_FOUND", "尚未创建空间", 404);
 
         var role = http.Request.Headers["X-Episteme-Role"].FirstOrDefault();
@@ -224,6 +241,14 @@ public static class McpEndpoint
             case "episteme.list_packs": return await svc.ListPacksAsync(ct);
             case "episteme.install_pack": return await svc.InstallPackAsync(spaceId, args, ctx, ct);
             case "episteme.export_pack": return await svc.ExportPackAsync(spaceId, args, ct);
+            case "episteme.capabilities": return EpistemeConfig.Describe();
+            case "episteme.fetch_web":
+                return await svc.FetchWebAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
+            case "episteme.upload_pdf_base64":
+                return await svc.UploadPdfAsync(spaceId, Jsonx.Plain(args["docId"]), args, ctx, ct);
+            case "episteme.rebind_annotation":
+                return await svc.RebindAnnotationAsync(spaceId, Jsonx.Plain(args["docId"]),
+                    Jsonx.Plain(args["annotationId"]), args, ctx, ct);
             case "episteme.commit":
             {
                 var log = await svc.LogAsync(spaceId, new JsonObject { ["limit"] = 1 }, ct);

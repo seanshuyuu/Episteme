@@ -51,7 +51,26 @@ public static class ToolRegistry
             ("includeSamples", "boolean", "同时导入示例文档")),
         T("export_pack", "把当前空间的目录树与 Schema 导出为可复用的 Pack JSON",
             ("includeDocuments", "boolean", "把文档一并导出为示例数据"),
-            ("name", "string", "模板名称"))
+            ("name", "string", "模板名称")),
+        T("capabilities", "查询当前实例的能力开关：鉴权模式、数据库、渲染器、抓取 worker、MCP 传输",
+            ("detail", "boolean", "附带完整说明")),
+        T("fetch_web", "抓取网页并抽取正文：走独立 fetch-worker（SSRF 白名单 + Mozilla Readability + 白名单清洗），生成/重抓一个 web Part 并产生 Commit；也可传 html 做离线快照提取",
+            ("docId", "string", "目标文档 ID"),
+            ("url", "string", "在线抓取 URL（与 html 二选一）"),
+            ("html", "string", "离线 HTML 快照（与 url 二选一）"),
+            ("sourceUri", "string", "离线快照的原始 URL"),
+            ("allowedHosts", "array", "本次抓取的域名白名单（只能比全局更严）"),
+            ("replacePartId", "string", "重抓已有 web Part 而非新增")),
+        T("upload_pdf_base64", "上传真实 PDF 二进制：写入内容寻址 blob 仓库，Part 只保留 sha256 引用，原件由前端 pdf.js 渲染；拒绝非 %PDF- 文件头",
+            ("docId", "string", "目标文档 ID"),
+            ("base64", "string", "PDF 的 base64 / data URL"),
+            ("name", "string", "原始文件名"),
+            ("sourceUri", "string", "来源链接")),
+        T("rebind_annotation", "交互式重新定位丢失的标记：用新 anchor 覆盖旧锚点并产生一条 Commit，不静默丢弃标注",
+            ("docId", "string", "文档 ID"),
+            ("annotationId", "string", "标记 ID"),
+            ("anchor", "object", "新锚点（按 Part 类型归一化校验）"),
+            ("text", "string", "同时更新批注内容"))
     };
 
     private static ToolDef T(string name, string description, params (string Name, string Type, string Desc)[] props)

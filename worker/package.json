@@ -1,0 +1,14 @@
+{
+  "name": "episteme-fetch-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated web capture worker for Episteme: SSRF guards + Readability extraction.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@mozilla/readability": "0.6.0",
+    "linkedom": "0.18.15"
+  }
+}

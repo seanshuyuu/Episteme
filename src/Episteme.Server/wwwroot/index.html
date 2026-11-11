@@ -14,8 +14,11 @@
         <div class="brand-text"><strong>Episteme</strong><span>知书 · 通用文档内核</span></div>
       </div>
       <div class="topbar-meta">
+        <select id="space-select" class="space-select" aria-label="切换空间"></select>
+        <button id="btn-new-space" class="ghost" data-action="show-space-form" title="新建空间">+ 空间</button>
         <span id="space-name" class="chip">未选择空间</span>
         <span id="tools-version" class="chip">tools v–</span>
+        <span id="caps-chip" class="chip">能力检测中…</span>
         <select id="theme-select" aria-label="主题">
           <option value="mint">浅绿</option>
           <option value="sky">浅蓝</option>
@@ -24,6 +27,14 @@
         </select>
       </div>
     </header>
+
+    <div id="space-form" class="space-form hidden">
+      <input id="space-new-name" placeholder="新空间名称" aria-label="新空间名称">
+      <input id="space-new-slug" placeholder="标识（可留空）" aria-label="新空间标识">
+      <button id="btn-create-space-inline" class="primary" data-action="create-space">创建</button>
+      <button class="ghost" data-action="hide-space-form">取消</button>
+      <span id="space-form-hint" class="hint"></span>
+    </div>
 
     <section id="empty-state" class="empty-state">
       <div class="empty-card">
@@ -110,6 +121,17 @@
             </div>
             <textarea id="new-part-content" placeholder="内容；PDF 用字面 \\f 分页，或直接每行一段" aria-label="Part 内容"></textarea>
             <button id="btn-append-part" data-action="append-part" class="primary">添加 Part</button>
+            <div class="subhead">真实媒介导入</div>
+            <div class="form-row">
+              <input id="fetch-url" placeholder="https://… 抓取网页（独立 worker + Readability）" aria-label="抓取网页地址">
+              <button id="btn-fetch-web" data-action="fetch-web" class="ghost">抓取正文</button>
+            </div>
+            <textarea id="fetch-html" placeholder="或粘贴 HTML 快照离线提取（无需公网）" aria-label="离线 HTML 快照"></textarea>
+            <div class="form-row">
+              <label class="file-label"><input id="pdf-file" type="file" accept="application/pdf" aria-label="选择 PDF"> 选择 PDF 原件</label>
+              <button id="btn-upload-pdf" data-action="upload-pdf" class="ghost">上传 PDF（pdf.js 渲染）</button>
+            </div>
+            <p id="media-hint" class="hint"></p>
           </div>
           <div class="subhead">标记 · 锚点 <button id="btn-export-notes" data-action="export-notes" class="link">导出为笔记</button></div>
           <div id="annotation-form" class="annotation-form">
@@ -168,6 +190,15 @@
       </section>
     </main>
   </div>
+  <!-- Vendored, build-free reader engines. Both degrade gracefully when unavailable (e.g. jsdom / offline shell). -->
+  <script src="/vendor/monaco/vs/loader.js"></script>
+  <script type="module">
+    try {
+      const pdfjs = await import('/vendor/pdfjs/pdf.min.mjs');
+      pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.min.mjs';
+      window.EpistemePdf = pdfjs;
+    } catch (e) { window.EpistemePdf = null; }
+  </script>
   <script src="/app.js"></script>
 </body>
 </html>

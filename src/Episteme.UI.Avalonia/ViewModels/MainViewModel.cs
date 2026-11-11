@@ -29,7 +29,7 @@ public sealed class FieldInput : ObservableObject
 /// contract: dynamic tree, Schema-driven form, version log, annotation review and Pack templates.
 /// No domain vocabulary is hard-coded into the shell (Empty by default).
 /// </summary>
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject
 {
     private readonly EpistemeApiClient _api;
     private readonly EpistemeMcpClient _mcp;
@@ -134,7 +134,12 @@ public sealed class MainViewModel : ObservableObject
         CreateDocCommand = new AsyncRelayCommand(CreateDocAsync) { OnError = Fail };
         ReviewCommand = new AsyncRelayCommand(ReviewAsync) { OnError = Fail };
         McpCommand = new AsyncRelayCommand(McpProbeAsync) { OnError = Fail };
+        InitializeDesktopCommands();
     }
+
+    // Implemented in MainViewModel.Desktop.cs (keeps the P5 shell and the v0.5 completion separate).
+    partial void InitializeDesktopCommands();
+    partial void OnDocDetailLoaded(JsonObject full);
 
     private void ApplyTheme(string key)
     {
@@ -336,6 +341,7 @@ public sealed class MainViewModel : ObservableObject
                         Text = S(o, "text", S(o, "body", S(o, "note")))
                     });
             Status = $"审阅：{doc.Display} · {Annotations.Count} 条标注";
+            OnDocDetailLoaded(full);
         }
         catch (Exception ex) { Status = "加载文档失败：" + ex.Message; }
     }
