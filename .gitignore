@@ -15,6 +15,7 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+*.Backup.tmp
 .env
 .env.*
 !.env.example

@@ -434,8 +434,9 @@ check("revert 后标注随父快照恢复（partId 重映射，不丢失）",
 print("\n---- P4 声明式 Pack / 模板导入导出 ----")
 code, packs = rest("GET", "/packs")
 pack_items = packs.get("items", [])
-check("内置 Pack 目录列出 2 套且校验通过",
-      code == 200 and len(pack_items) == 2 and all(p.get("valid") for p in pack_items),
+check("内置 Pack 目录列出 3 套且校验通过",
+      code == 200 and len(pack_items) == 3 and all(p.get("valid") for p in pack_items)
+      and any(p.get("id") == "pack_git-ingest" for p in pack_items),
       [(p.get("id"), p.get("valid")) for p in pack_items])
 wb_pack = next((p for p in pack_items if p.get("id") == "workbench"), {})
 check("workbench Pack 声明 15 目录 / 12 内容类型",
@@ -504,7 +505,7 @@ check("非法 Pack（ID 非法 / 引用未声明类型）被 422 拒绝",
       code == 422 and pbad.get("code") == "PACK_INVALID", {"code": code, "body": pbad})
 code, rpc_packs = mcp("tools/call", {"name": "episteme.list_packs", "arguments": {}}, space=pack_slug)
 check("MCP list_packs 返回内置模板",
-      rpc_packs.get("result", {}).get("structuredContent", {}).get("total", 0) == 2, rpc_packs)
+      rpc_packs.get("result", {}).get("structuredContent", {}).get("total", 0) == 3, rpc_packs)
 
 code, pspace3 = rest("POST", "/spaces",
                      {"name": "示例 Pack 空间", "slug": "pack-" + time.strftime("%H%M%S") + "-c", "source": "api"})

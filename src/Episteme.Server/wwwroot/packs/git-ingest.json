@@ -1,0 +1,209 @@
+{
+  "$schema": "https://episteme.local/schema/pack/v1",
+  "id": "pack_git-ingest",
+  "name": "Git 提交归档",
+  "version": "1.0.0",
+  "episteme": ">=0.5.0",
+  "description": "旁路 git 同步专用模板：把 git push 产生的提交登记为文档，字段覆盖提交标识、作者与时间、说明与变更、文件内容索引；变更文件正文作为 md / code / web / attachment Part 交给四类阅读器。安装只产生一条 source=import 的 Commit。",
+  "author": "Episteme",
+  "sampleData": false,
+  "nodes": [
+    {
+      "path": "/Git 提交",
+      "contentType": "git_commit",
+      "icon": "git-commit",
+      "defaultPartKinds": [
+        "md",
+        "code"
+      ]
+    },
+    {
+      "path": "/Git 提交/按仓库",
+      "contentType": null,
+      "icon": "archive"
+    }
+  ],
+  "contentTypes": [
+    {
+      "slug": "git_commit",
+      "label": "Git 提交",
+      "icon": "git-commit",
+      "version": 1,
+      "exposeToMcp": true,
+      "mcpToolPrefix": "gitcommit",
+      "primaryField": "title",
+      "titleTemplate": "{{title}}",
+      "defaultPartKinds": [
+        "md",
+        "code"
+      ],
+      "fields": [
+        {
+          "key": "title",
+          "label": "标题",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "validation": {
+            "maxLength": 300
+          }
+        },
+        {
+          "key": "gitSha",
+          "label": "Commit SHA",
+          "type": "text",
+          "required": true,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitShortSha",
+          "label": "短 SHA",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitRepo",
+          "label": "远程仓库",
+          "type": "text",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "用 text 而非 url，兼容 git@host:repo.git 这类 SSH 远程"
+        },
+        {
+          "key": "gitBranch",
+          "label": "分支",
+          "type": "text",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitTag",
+          "label": "标签",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitAuthorName",
+          "label": "作者",
+          "type": "text",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitAuthorEmail",
+          "label": "作者邮箱",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitAuthorDate",
+          "label": "作者时间",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "ISO 8601，保留 git 原始时区"
+        },
+        {
+          "key": "gitCommitter",
+          "label": "提交者",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitMessage",
+          "label": "提交说明",
+          "type": "text",
+          "required": false,
+          "indexed": true,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitBody",
+          "label": "说明正文",
+          "type": "longtext",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitChangedFiles",
+          "label": "变更文件",
+          "type": "json",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true,
+          "hint": "对象：{count, truncated, files:[{status,path}]}"
+        },
+        {
+          "key": "gitDiff",
+          "label": "Diff",
+          "type": "longtext",
+          "required": false,
+          "exposeToMcp": false,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitFileContents",
+          "label": "文件内容索引",
+          "type": "json",
+          "required": false,
+          "exposeToMcp": false,
+          "mcpWritable": true,
+          "hint": "对象：{imported:[{path,kind,bytes}], skipped:[{path,reason}], maxFileBytes, maxFiles}"
+        },
+        {
+          "key": "gitPartCount",
+          "label": "导入 Part 数",
+          "type": "number",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        },
+        {
+          "key": "gitSyncSource",
+          "label": "同步来源",
+          "type": "text",
+          "required": false,
+          "exposeToMcp": true,
+          "mcpWritable": true
+        }
+      ],
+      "views": [
+        {
+          "name": "全部提交",
+          "filter": {},
+          "sort": [
+            {
+              "field": "updatedAt",
+              "desc": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "sampleDocuments": [],
+  "views": [],
+  "prompts": [],
+  "jobs": []
+}

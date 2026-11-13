@@ -3,7 +3,7 @@
 > 通用文档操作系统空壳：用户自定义目录与内容，动态 MCP 读写编辑，git 式版本管理，Markdown / Code / PDF / Web 四类**真实**阅读器，声明式 Pack 模板，Web / 桌面 / Android 三端；生产化能力以环境变量渐进开启。
 > 由「商业短篇创作工作台」抽象一层而来；工作台已落地为本平台的**第一套内置模板（Pack）**。
 
-**当前阶段：v0.5 · P1–P5 全部落地，并完成真实阅读器、生产化加固、桌面端补全与功能打磨排错**（安卓端按用户要求一行未动）；服务端为 Docker 部署，客户端为可编译源码。v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07`–`docs/10`，本轮验收见 `docs/10-v0.5完善与全量验收报告.md`。
+**当前阶段：v0.5 · P1–P5 全部落地，并完成真实阅读器、生产化加固、桌面端补全、功能打磨排错，以及 git 旁路同步（公网入口 + post-receive hook）**（安卓端按用户要求一行未动）；服务端为 Docker 部署，客户端为可编译源码。v0.1 规格与高保真原型保留为设计基线。实现范围、回归结果与明确边界见 `docs/07`–`docs/10`，本轮验收见 `docs/10-v0.5完善与全量验收报告.md`。
 
 > **工作区清理（2026-11-10）**：按用户要求，旧「商业短篇创作工作台」的源码、文档、原型、部署、测试，以及 Docker 数据卷与镜像已全部清除；本工作区现仅保留 `episteme/` 与 `.workbuddy/`。完整备份与恢复步骤见 `/mnt/work/backups/workbench-cleanup-20261110/RESTORE.md`。
 >
@@ -28,10 +28,10 @@ docker compose --project-name episteme -f deploy/docker-compose.yml --env-file d
 - 能力自检：`GET /api/v1/episteme/capabilities`、`GET /health`、`GET /api/v1/episteme/worker/health`。
 - **真实阅读器**：本地 vendored pdf.js 4.10.38 / Monaco 0.52.2 / Mozilla Readability 0.6.0，零 CDN；PDF 原件存内容寻址 blob、Web 快照走独立 worker 的 SSRF 防护 + 白名单清洗；丢失锚点可交互式重定位。
 - **生产化开关**（默认全部关闭、不影响 legacy 契约）：`EPISTEME_AUTH_MODE=secure`（JWT HS256 / HMAC-SHA256 / Nonce / 限流）、`EPISTEME_DB_PROVIDER=postgres` + `EPISTEME_PG_CONNECTION`、`EPISTEME_RATE_LIMIT`、`EPISTEME_SIGNATURE_SKEW`、`EPISTEME_FETCH_TOKEN`、`EPISTEME_FETCH_ALLOWLIST`。
-- P4 入口：`GET /api/v1/episteme/packs` 列出 2 套内置模板；Web UI「模板」Tab 可预览 / 安装 / 导出 / 导入。
+- P4 入口：`GET /api/v1/episteme/packs` 列出 3 套内置模板（workbench / reading-desk / git-ingest）；Web UI「模板」Tab 可预览 / 安装 / 导出 / 导入。
 - P5 客户端：`src/Episteme.Client.slnx`（Avalonia 12.1.5 共享壳 + Desktop + McpStdio + 无 GUI Probe）；`src/Episteme.Android/` 为独立 head（需 Android SDK，本轮按用户要求未改动、未编译）。
 
-回归（连续两轮全绿，每轮前清空数据卷；合计 **213 项 / 轮**）：
+回归（7 套全绿，合计 **235 项 / 轮**）：
 
 | 套件 | 命令 | 结果 |
 |---|---|---|
@@ -41,6 +41,7 @@ docker compose --project-name episteme -f deploy/docker-compose.yml --env-file d
 | secure 鉴权 / 限流 | 另起 5081 实例 → `EPISTEME_TEST_BASE=… python3 tests/secure_smoke.py` | **12/12** |
 | MCP stdio 传输 | `EPISTEME_DOTNET_CMD=… python3 tests/stdio_smoke.py` | **7/7** |
 | PostgreSQL provider | 另起 PG17 + 5082 实例 → `EPISTEME_TEST_BASE=… python3 tests/postgres_smoke.py` | **13/13** |
+| git 旁路同步 | `python3 tests/git_sync_smoke.py`（可配 `EPISTEME_SECURE_BASE` / `EPISTEME_SECURE_SECRET` 跑 HMAC） | **22/22** |
 
 客户端层（容器内编译 + 无 GUI 冒烟；首次 NuGet 下载较慢，用缓存卷加速）：
 
@@ -53,6 +54,56 @@ docker run --rm --network episteme_default -e EPISTEME_API=http://api:8080 \
 ```
 
 服务端 publish 与客户端 build 均为 **0 警告 0 错误**。Android head 需 `dotnet workload install android` 与 Android SDK，本轮未编译验证；桌面 GUI 因容器无 X server 未实际开窗。
+
+---
+
+## 从任意位置同步 git 提交（旁路方案）
+
+**Episteme 不是 git remote**：它没有实现 `git-upload-pack` / `git-receive-pack`，也不能 `git clone`。标准的 `git push` 落在你自己的 Git 服务（Gitea / GitHub / bare 仓库），由其 `post-receive` hook 或 CI 调用 `tools/git-sync.py`，把提交写进 Episteme。
+
+### 1. 让服务可从公网访问
+
+- `deploy/Caddyfile.example`：域名 + 自动 TLS 反代到 `127.0.0.1:5080`；`flush_interval -1` 保证 SSE 不被缓冲。
+- `deploy/secure.env.example`：把 `deploy/.env` 切到 `EPISTEME_AUTH_MODE=secure`，配置 `EPISTEME_AUTH_SECRET` 与 `EPISTEME_API_KEYS=git-sync:owner`。**不要**把未开 secure 的 5080 直接暴露公网——legacy 的角色头可伪造。
+- 生效：`docker compose -f deploy/docker-compose.yml -p episteme up -d --force-recreate`。
+
+### 2. 安装 git-ingest 模板
+
+`GET /api/v1/episteme/packs` 会列出 `pack_git-ingest`（共 3 套）。也可让脚本自动安装；`--dry-run` 只采集、不写文档：
+
+```bash
+python3 tools/git-sync.py --mode head --api https://episteme.example.com \
+  --space <spaceId> --repo /path/to/repo --install-pack --dry-run
+```
+
+它创建 `/Git 提交` 目录与 `git_commit` 内容类型（17 个字段），并把 `gitcommit` 前缀的动态 MCP 工具一并派生出来。
+
+### 3. 挂到 git push
+
+- `deploy/post-receive.example`：复制到 bare 仓库 `hooks/post-receive` 并 `chmod +x`；脚本从 stdin 读 `<old> <new> <ref>`，按旧→新顺序导入。
+- CI 用 `--mode range --range <base>..<head>`；本地试用用 `--mode head`。
+
+```bash
+# 开发流程不变，push 正常走 git 服务
+git remote add archive ssh://git@your-server/srv/git/project.git
+git push archive main
+# 服务器 hook 自动把每个提交同步进 Episteme
+```
+
+认证：`--auth legacy`（仅内网）/ `--auth hmac`（secure，HMAC-SHA256 + Nonce）/ `--auth jwt`（HS256）。HMAC 的 canonical 串为 ``method\npath\nquery\ntimestamp\nnonce\nrole\nbodySha256``，与 `Security/SecurityMiddleware.cs` 一致；服务端配置 `EPISTEME_API_KEYS` 后，脚本的 `--key-id` 与 `--role` 必须与之匹配。
+
+### 记录什么
+
+| 组 | 字段 | 文件内容 Part |
+|---|---|---|
+| 提交标识 | `gitSha` / `gitShortSha` / `gitRepo` / `gitBranch` / `gitTag` | — |
+| 作者与时间 | `gitAuthorName` / `gitAuthorEmail` / `gitAuthorDate` / `gitCommitter` | — |
+| 说明与变更 | `gitMessage` / `gitBody` / `gitChangedFiles` / `gitDiff` | — |
+| 文件内容 | `gitFileContents` / `gitPartCount` | `.md`→md、代码→code、`.html`→web、其它文本→attachment；二进制 / 超大 / 非 UTF-8 文件跳过并记原因 |
+
+每个提交用 `idempotencyKey=git-sync:<sha>:<repoHash>`，hook 重跑或 CI 重试不会产生重复文档；`actor` 写 git 作者、`reason` 写 `git:<sha>`，版本日志与审计里也能看到 git 来源。默认上限：20 文件 / 每文件 256 KB / diff 64 KB / 每次 push 20 提交，均可用 `--max-*` 调整。
+
+**边界**：这是旁路同步链，不是原生 git 协议；`POST /exports/git` 仍只返回线性化提交清单，不生成可 clone 的真实仓库。完整参数见 `python3 tools/git-sync.py --help`。
 
 ---
 
@@ -102,10 +153,11 @@ docker run --rm --network episteme_default -e EPISTEME_API=http://api:8080 \
 | `src/Episteme.Server/wwwroot/vendor/` | 本地 vendored pdf.js / Monaco（零 CDN） |
 | `src/Episteme.Client.slnx` + `Episteme.UI.Avalonia` / `Desktop` / `Android` / `Client.Probe` / `McpStdio` | P5 三端、桌面读写补全、stdio bridge 与无 GUI 客户端层冒烟 |
 | `worker/` | 独立 fetch-worker：Node 22 + Readability + linkedom，SSRF 八类防护、/fetch、/extract、白名单清洗 |
-| `src/Episteme.Server/wwwroot/packs/` | 2 套内置声明式 Pack JSON（workbench / reading-desk） |
-| `deploy/` | Dockerfile（restore 独立缓存层）、compose（api + worker + 可选 postgres，restart: no）、端口与开关 .env |
+| `src/Episteme.Server/wwwroot/packs/` | 3 套内置声明式 Pack JSON（workbench / reading-desk / git-ingest） |
+| `deploy/` | Dockerfile、compose、.env，以及公网入口样例 `Caddyfile.example` / `secure.env.example` / `post-receive.example` |
 | `.dockerignore` | 排除客户端 bin/obj 与 .git，构建上下文 595 MB → 3.59 kB |
-| `tests/` | 104 项 REST/MCP、47 项 jsdom、30 项客户端 Probe、12 项 secure、7 项 stdio、13 项 PostgreSQL 回归 |
+| `tools/git-sync.py` | 旁路 git 同步脚本：hook / head / range 三种模式、四组 git 元数据、文件内容导入、HMAC / JWT 鉴权、幂等 |
+| `tests/` | 104 项 REST/MCP、47 项 jsdom、30 项客户端 Probe、12 项 secure、7 项 stdio、13 项 PostgreSQL、22 项 git 同步回归 |
 
 ---
 

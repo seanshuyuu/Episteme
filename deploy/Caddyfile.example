@@ -1,0 +1,19 @@
+# Episteme 公网入口示例（Caddy 自动申请并续期 Let's Encrypt 证书）
+# 用法：把域名换成自己的，放到 /etc/caddy/Caddyfile，然后 systemctl reload caddy
+# 前提：域名已解析到本机、80/443 在防火墙/安全组放行。
+#
+# Episteme 自身只监听 127.0.0.1:5080（或 0.0.0.0:5080），不要直接把 5080 暴露公网：
+# legacy 模式的 X-Episteme-Role 头可伪造，等于任何人可写。
+
+episteme.example.com {
+	encode zstd gzip
+
+	# flush_interval -1 关闭响应缓冲，SSE (/mcp/sse) 才能逐事件下发
+	reverse_proxy 127.0.0.1:5080 {
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/episteme.log
+	}
+}

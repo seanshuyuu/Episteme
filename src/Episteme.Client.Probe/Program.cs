@@ -35,7 +35,7 @@ try
     var packs = await api.PacksAsync();
     var packsValid = (packs["items"] as JsonArray ?? new JsonArray())
         .OfType<JsonObject>().All(p => B(p, "valid"));
-    Check("内置 Pack 目录 2 套且均校验通过", Count(packs) == 2 && packsValid, Count(packs));
+    Check("内置 Pack 目录 ≥3 套且均校验通过", Count(packs) >= 3 && packsValid, Count(packs));
 
     var space = await api.CreateSpaceAsync("客户端冒烟 " + stamp, "client-" + stamp);
     var sid = S(space, "id");
@@ -106,7 +106,7 @@ try
     Check("MCP tools/list 返回动态工具", Count(toolList, "tools") >= 26, Count(toolList, "tools"));
     var listPacks = EpistemeMcpClient.Structured(
         await mcp.CallToolAsync("episteme.list_packs", new JsonObject(), slug));
-    Check("MCP episteme.list_packs 可调用", I(listPacks, "total") == 2, I(listPacks, "total"));
+    Check("MCP episteme.list_packs 可调用", I(listPacks, "total") >= 3, I(listPacks, "total"));
 
     var space3 = await api.CreateSpaceAsync("客户端阅读 " + stamp, "client-" + stamp + "-c");
     var sid3 = S(space3, "id");
@@ -224,7 +224,7 @@ try
             && vm.CallMcpToolCommand is not null, vm.LastAction);
         await vm.LoadAsync();
         Check("桌面 ViewModel 无 GUI 加载空间与模板",
-            vm.Spaces.Count >= 1 && vm.Packs.Count == 2,
+            vm.Spaces.Count >= 1 && vm.Packs.Count >= 3,
             "spaces=" + vm.Spaces.Count + " packs=" + vm.Packs.Count);
     }
 }

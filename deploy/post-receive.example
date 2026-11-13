@@ -1,0 +1,30 @@
+#!/bin/sh
+# Bare 仓库的 post-receive hook 示例。
+# 用法：复制到 <bare-repo>/hooks/post-receive，chmod +x，
+#       并把 EPISTEME_* 改成你的实际值。
+#
+# git push 的正常流程：
+#   git remote add archive ssh://git@your-server/srv/git/project.git
+#   git push archive main
+# 服务器收到 push 后执行本 hook，逐条把提交同步进 Episteme。
+# Episteme 不是 git remote，只是订阅方；提交与文件内容仍由 git 仓库保管。
+
+set -eu
+
+# 从文件读取密钥，避免把凭证写进仓库或进程列表
+export EPISTEME_AUTH_SECRET="$(cat /etc/episteme/auth-secret)"
+
+export EPISTEME_API="https://episteme.example.com"
+export EPISTEME_SPACE_ID="REPLACE_WITH_SPACE_ID"
+export EPISTEME_AUTH_MODE="secure"
+export EPISTEME_API_KEY_ID="git-sync"
+export EPISTEME_SYNC_ROLE="owner"
+# 可选：SSH 形式的 remote 在 bare 仓库里可能读不到，显式指定展示用仓库地址
+export EPISTEME_GIT_REPO="https://github.com/your-org/project.git"
+
+# --mode hook 从 stdin 读取 "<old> <new> <ref>" 三元组，按旧→新顺序导入
+exec /usr/bin/python3 /opt/episteme/tools/git-sync.py \
+    --mode hook \
+    --max-commits 20 \
+    --max-files 20 \
+    --install-pack
