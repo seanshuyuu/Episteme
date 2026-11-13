@@ -18,7 +18,8 @@
     readerRef: '', readOnly: false,
     packs: [], packPreview: null, packExport: null,
     caps: null, monacoConfigured: false, monacoEditor: null, pdfDoc: null,
-    pdfRenderGen: 0, lastFetch: null, lastPdfUpload: null, lastRebind: null
+    pdfRenderGen: 0, lastFetch: null, lastPdfUpload: null, lastRebind: null,
+    helpOpen: false, helpSection: null, helpAll: false, helpQuery: ''
   };
 
   function esc(s) {
@@ -1170,10 +1171,214 @@
     return res;
   }
 
+  // ---------- in-app help manual ----------
+  // Content lives in help-content.js (window.EpistemeHelp). This file only renders it,
+  // so the empty-shell homepage stays free of any business vocabulary.
+
+  var HELP_FALLBACK = [{
+    id: 'fallback', group: '入门', title: '帮助内容未加载',
+    lead: '帮助手册是本地静态资源 help-content.js，未随页面加载成功。',
+    blocks: [{ type: 'list', items: ['刷新页面后重试；若仍不可用，请确认镜像包含 wwwroot/help-content.js。'] }]
+  }];
+  var helpFocusBefore = null;
+
+  function helpSections() {
+    var data = window.EpistemeHelp;
+    return data && data.sections && data.sections.length ? data.sections : HELP_FALLBACK;
+  }
+
+  function helpText(section) {
+    try { return JSON.stringify(section).toLowerCase(); }
+    catch (e) { return String(section.title || '').toLowerCase(); }
+  }
+
+  function helpMatches() {
+    var q = String(state.helpQuery || '').trim().toLowerCase();
+    var list = helpSections();
+    return q ? list.filter(function (s) { return helpText(s).indexOf(q) >= 0; }) : list;
+  }
+
+  function helpBlockHtml(block) {
+    if (block.type === 'steps') {
+      return '<ol class="help-steps">' + (block.items || []).map(function (it) {
+        return '<li><strong>' + esc(it.t) + '</strong><span>' + esc(it.d || '') + '</span></li>';
+      }).join('') + '</ol>';
+    }
+    if (block.type === 'list') {
+      return '<ul class="help-list">' + (block.items || []).map(function (it) {
+        return typeof it === 'string' ? '<li>' + esc(it) + '</li>'
+          : '<li><strong>' + esc(it.t) + '</strong> ' + esc(it.d || '') + '</li>';
+      }).join('') + '</ul>';
+    }
+    if (block.type === 'note' || block.type === 'warn') {
+      return '<div class="help-callout' + (block.type === 'warn' ? ' warn' : '') + '">' +
+        '<strong>' + esc(block.title || (block.type === 'warn' ? '注意事项' : '提示')) + '</strong>' +
+        '<ul>' + (block.items || []).map(function (it) { return '<li>' + esc(it) + '</li>'; }).join('') +
+        '</ul></div>';
+    }
+    if (block.type === 'table') {
+      return '<div class="help-table-wrap"><table class="help-table"><thead><tr>' +
+        (block.head || []).map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+        '</tr></thead><tbody>' +
+        (block.rows || []).map(function (row) {
+          return '<tr>' + row.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+    if (block.type === 'code') return '<pre class="help-code">' + esc(block.text || '') + '</pre>';
+    return '';
+  }
+
+  function helpSectionHtml(s) {
+    return '<section class="help-section" id="help-section-' + esc(s.id) + '">' +
+      '<span class="help-group">' + esc(s.group || '说明') + '</span>' +
+      '<h3>' + esc(s.title) + '</h3>' +
+      '<p class="help-lead">' + esc(s.lead || '') + '</p>' +
+      (s.blocks || []).map(helpBlockHtml).join('') + '</section>';
+  }
+
+  function renderHelpNav() {
+    var box = $('help-nav');
+    if (!box) return;
+    var matches = helpMatches();
+    var groups = [], byGroup = {};
+    matches.forEach(function (s) {
+      var g = s.group || '说明';
+      if (!byGroup[g]) { byGroup[g] = []; groups.push(g); }
+      byGroup[g].push(s);
+    });
+    var nav = groups.map(function (g) {
+      return '<div class="help-nav-group">' + esc(g) + '</div>' + byGroup[g].map(function (s) {
+        return '<button type="button" data-action="help-goto" data-help-id="' + esc(s.id) + '"' +
+          (s.id === state.helpSection && !state.helpAll ? ' class="active"' : '') + '>' +
+          esc(s.title) + '</button>';
+      }).join('');
+    }).join('');
+    box.innerHTML = nav || '<p class="help-empty">没有匹配的主题，试试更短的关键词。</p>';
+    var count = $('help-count');
+    if (count) {
+      count.textContent = String(state.helpQuery || '').trim()
+        ? '匹配 ' + matches.length + ' / ' + helpSections().length + ' 个主题'
+        : '共 ' + helpSections().length + ' 个主题';
+    }
+  }
+
+  function renderHelpContent() {
+    var box = $('help-content');
+    if (!box) return;
+    var sections = helpSections();
+    var visible = state.helpAll ? sections
+      : sections.filter(function (s) { return s.id === state.helpSection; });
+    if (!visible.length) visible = sections.slice(0, 1);
+    box.innerHTML = visible.map(helpSectionHtml).join('');
+    box.scrollTop = 0;
+
+    var index = 0;
+    sections.forEach(function (s, i) { if (s.id === state.helpSection) index = i; });
+    state.helpSection = sections[index].id;
+    var pos = $('help-position');
+    if (pos) pos.textContent = state.helpAll
+      ? '全部 ' + sections.length + ' 节' : (index + 1) + ' / ' + sections.length;
+    var prev = $('help-prev'), next = $('help-next');
+    if (prev) prev.disabled = state.helpAll || index <= 0;
+    if (next) next.disabled = state.helpAll || index >= sections.length - 1;
+    var allBtn = $('btn-help-all');
+    if (allBtn) allBtn.textContent = state.helpAll ? '分节阅读' : '阅读全部';
+    renderHelpNav();
+  }
+
+  function showHelpSection(id) {
+    var found = helpSections().filter(function (s) { return s.id === id; })[0];
+    if (!found) return null;
+    state.helpSection = found.id;
+    state.helpAll = false;
+    renderHelpContent();
+    return found.id;
+  }
+
+  function helpStep(delta) {
+    var sections = helpSections(), index = 0;
+    sections.forEach(function (s, i) { if (s.id === state.helpSection) index = i; });
+    var target = Math.max(0, Math.min(sections.length - 1, index + delta));
+    return showHelpSection(sections[target].id);
+  }
+
+  function toggleHelpAll() {
+    state.helpAll = !state.helpAll;
+    renderHelpContent();
+    return state.helpAll;
+  }
+
+  function openHelp() {
+    var overlay = $('help-overlay');
+    if (!overlay) return false;
+    helpFocusBefore = document.activeElement || null;
+    var sections = helpSections();
+    var current = sections.filter(function (s) { return s.id === state.helpSection; })[0];
+    if (!current) state.helpSection = sections[0].id;
+    state.helpOpen = true;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    var version = $('help-version');
+    if (version) version.textContent = 'v' + ((window.EpistemeHelp && window.EpistemeHelp.version) || '0.5');
+    renderHelpContent();
+    var search = $('help-search');
+    if (search) { search.value = state.helpQuery || ''; search.focus(); }
+    return true;
+  }
+
+  function closeHelp() {
+    var overlay = $('help-overlay');
+    if (!overlay) return false;
+    state.helpOpen = false;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    if (helpFocusBefore && helpFocusBefore.focus) {
+      try { helpFocusBefore.focus(); } catch (e) { /* detached node */ }
+    }
+    helpFocusBefore = null;
+    return true;
+  }
+
+  function bindHelpEvents() {
+    var search = $('help-search');
+    if (search) search.addEventListener('input', function (e) {
+      state.helpQuery = String(e.target.value || '');
+      var matches = helpMatches();
+      if (String(state.helpQuery).trim() && matches.length &&
+          !matches.some(function (s) { return s.id === state.helpSection; })) {
+        state.helpSection = matches[0].id;
+        state.helpAll = false;
+      }
+      renderHelpContent();
+    });
+
+    document.addEventListener('keydown', function (ev) {
+      if (!state.helpOpen) return;
+      if (ev.key === 'Escape') { closeHelp(); return; }
+      if (ev.key === 'Enter' && ev.target === $('help-search')) {
+        var first = helpMatches()[0];
+        if (first) { showHelpSection(first.id); ev.preventDefault(); }
+        return;
+      }
+      if (ev.key !== 'Tab') return;
+      var overlay = $('help-overlay');
+      if (!overlay) return;
+      var items = Array.prototype.slice.call(
+        overlay.querySelectorAll('button, input, [href], [tabindex]:not([tabindex="-1"])')
+      ).filter(function (el) { return !el.disabled; });
+      if (!items.length) return;
+      var firstEl = items[0], lastEl = items[items.length - 1];
+      if (ev.shiftKey && document.activeElement === firstEl) { ev.preventDefault(); lastEl.focus(); }
+      else if (!ev.shiftKey && document.activeElement === lastEl) { ev.preventDefault(); firstEl.focus(); }
+    });
+  }
+
   // ---------- events ----------
 
   function bindEvents() {
+    bindHelpEvents();
     document.addEventListener('click', async function (ev) {
+      if (ev.target && ev.target.id === 'help-overlay') { closeHelp(); return; }
       var actionEl = ev.target.closest('[data-action]');
       if (actionEl) {
         var action = actionEl.getAttribute('data-action');
@@ -1210,6 +1415,12 @@
             case 'install-pack': await installPack(actionEl.getAttribute('data-pack-id')); break;
             case 'export-pack': await exportPack(); break;
             case 'import-pack': await importPack(); break;
+            case 'open-help': openHelp(); break;
+            case 'close-help': closeHelp(); break;
+            case 'help-goto': showHelpSection(actionEl.getAttribute('data-help-id')); break;
+            case 'help-prev': helpStep(-1); break;
+            case 'help-next': helpStep(1); break;
+            case 'help-all': toggleHelpAll(); break;
           }
         } catch (e) {
           hint('doc-hint', e.message, 'error');
@@ -1286,7 +1497,10 @@
         lastFetch: state.lastFetch, lastPdfUpload: state.lastPdfUpload,
         lastRebind: state.lastRebind,
         binaryPdfUrl: p ? p.binaryUrl : '',
-        renderHint: p ? p.renderHint : ''
+        renderHint: p ? p.renderHint : '',
+        helpOpen: state.helpOpen, helpSection: state.helpSection,
+        helpAll: state.helpAll, helpQuery: state.helpQuery,
+        helpSectionCount: helpSections().length
       };
     },
     api: api, refresh: loadAll, loadSpaces: loadSpaces, createSpace: createSpace,
@@ -1302,7 +1516,9 @@
     exportPack: exportPack, importPack: importPack,
     loadCapabilities: loadCapabilities, fetchWebPart: fetchWebPart,
     uploadPdfPart: uploadPdfPart, rebindAnnotation: rebindAnnotation,
-    sanitizeSnapshotHtml: sanitizeSnapshotHtml, highlightQuotes: highlightQuotes
+    sanitizeSnapshotHtml: sanitizeSnapshotHtml, highlightQuotes: highlightQuotes,
+    openHelp: openHelp, closeHelp: closeHelp, showHelpSection: showHelpSection,
+    toggleHelpAll: toggleHelpAll, helpStep: helpStep
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

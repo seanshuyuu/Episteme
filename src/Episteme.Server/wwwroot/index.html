@@ -25,6 +25,7 @@
           <option value="lilac">浅紫</option>
           <option value="blush">浅粉</option>
         </select>
+        <button id="btn-help" class="ghost" data-action="open-help" title="查看完整使用方法与注意事项">帮助</button>
       </div>
     </header>
 
@@ -46,6 +47,7 @@
           <input id="new-space-slug" placeholder="标识（可留空）" aria-label="空间标识">
         </div>
         <button id="btn-create-space" data-action="create-space" class="primary">创建空间</button>
+        <p class="help-entry"><button class="link" data-action="open-help">查看完整使用方法与注意事项</button></p>
         <p id="empty-hint" class="hint"></p>
       </div>
     </section>
@@ -190,6 +192,41 @@
       </section>
     </main>
   </div>
+
+  <!-- In-app help manual: local structured content rendered by app.js, zero network dependency. -->
+  <section id="help-overlay" class="help-overlay hidden" role="dialog" aria-modal="true"
+           aria-labelledby="help-title" aria-hidden="true">
+    <div class="help-dialog">
+      <header class="help-head">
+        <div class="help-head-title">
+          <strong id="help-title">使用帮助 · Episteme 知书</strong>
+          <span class="chip" id="help-version">v0.5</span>
+          <span class="muted" id="help-count"></span>
+        </div>
+        <div class="help-head-actions">
+          <button id="btn-help-all" data-action="help-all" class="ghost">阅读全部</button>
+          <button id="btn-help-close" data-action="close-help" class="ghost" aria-label="关闭帮助">关闭 ×</button>
+        </div>
+      </header>
+      <div class="help-body">
+        <aside class="help-side">
+          <input id="help-search" type="search" placeholder="搜索帮助内容…" aria-label="搜索帮助内容" autocomplete="off">
+          <div id="help-nav" class="help-nav"></div>
+          <p class="help-tip">按 Esc 关闭 · 输入关键词过滤主题</p>
+        </aside>
+        <article id="help-content" class="help-content" tabindex="-1"></article>
+      </div>
+      <footer class="help-foot">
+        <span class="muted">帮助内容随镜像本地提供，不依赖外部网络。</span>
+        <div class="help-pager">
+          <button id="help-prev" data-action="help-prev" class="ghost">上一节</button>
+          <span id="help-position" class="chip">1 / 1</span>
+          <button id="help-next" data-action="help-next" class="ghost">下一节</button>
+        </div>
+      </footer>
+    </div>
+  </section>
+
   <!-- Vendored, build-free reader engines. Both degrade gracefully when unavailable (e.g. jsdom / offline shell). -->
   <script src="/vendor/monaco/vs/loader.js"></script>
   <script type="module">
@@ -199,6 +236,7 @@
       window.EpistemePdf = pdfjs;
     } catch (e) { window.EpistemePdf = null; }
   </script>
+  <script src="/help-content.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
