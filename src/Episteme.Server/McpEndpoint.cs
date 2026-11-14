@@ -39,11 +39,28 @@ public static class McpEndpoint
             {
                 var spaceId = await Endpoints.ResolveSpaceId(http, svc, new JsonObject(), ct);
                 return string.IsNullOrWhiteSpace(spaceId)
-                    ? new JsonObject { ["tools"] = new JsonArray(), ["toolsVersion"] = 0, ["note"] = "尚未创建空间" }
+                    ? BootstrapTools()
                     : await svc.ToolsListAsync(spaceId, ct);
             }));
 
         return app;
+    }
+
+    /// <summary>
+    /// Tools needed to bootstrap an empty instance. Returned as a normal tools/list
+    /// payload so MCP clients can discover create_space before any space exists.
+    /// </summary>
+    internal static JsonObject BootstrapTools()
+    {
+        var arr = new JsonArray();
+        foreach (var tool in ToolRegistry.BootstrapTools()) arr.Add(ToolRegistry.ToMcp(tool));
+        return new JsonObject
+        {
+            ["tools"] = arr, ["total"] = arr.Count, ["toolsVersion"] = 0,
+            ["staticToolCount"] = arr.Count, ["dynamicToolCount"] = 0,
+            ["bootstrap"] = true,
+            ["note"] = "尚无空间；先用 episteme.create_space 创建，其余工具在创建后可用"
+        };
     }
 
     private static async Task<IResult> HandlePost(HttpContext http, EpistemeService svc, JsonObject body)
@@ -92,7 +109,7 @@ public static class McpEndpoint
                 {
                     var spaceId = await Endpoints.ResolveSpaceId(http, svc, body, ct);
                     result = string.IsNullOrWhiteSpace(spaceId)
-                        ? new JsonObject { ["tools"] = new JsonArray(), ["toolsVersion"] = 0, ["note"] = "尚未创建空间" }
+                        ? BootstrapTools()
                         : await svc.ToolsListAsync(spaceId, ct);
                     break;
                 }
@@ -180,7 +197,8 @@ public static class McpEndpoint
         var args = parameters["arguments"] as JsonObject ?? new JsonObject();
         var spaceId = await Endpoints.ResolveSpaceId(http, svc, body, ct);
         if (string.IsNullOrWhiteSpace(spaceId) && name != "episteme.list_spaces"
-            && name != "episteme.list_packs" && name != "episteme.capabilities")
+            && name != "episteme.list_packs" && name != "episteme.capabilities"
+            && name != "episteme.create_space" && name != "episteme.viewers")
             throw new BusinessException("SPACE_NOT_FOUND", "尚未创建空间", 404);
 
         var role = http.Request.Headers["X-Episteme-Role"].FirstOrDefault();
@@ -208,6 +226,7 @@ public static class McpEndpoint
     {
         switch (name)
         {
+            case "episteme.create_space": return await CreateSpaceViaMcp(svc, args, ctx, ct);
             case "episteme.list_spaces": return await svc.ListSpacesAsync(ct);
             case "episteme.tree": return await svc.ListNodesAsync(spaceId, ct);
             case "episteme.read":
@@ -290,6 +309,55 @@ public static class McpEndpoint
                     return await DynamicCall(svc, spaceId, name, args, ctx, ct);
                 throw new BusinessException("TOOL_NOT_FOUND", $"未知工具：{name}", 404);
         }
+    }
+
+    /// <summary>
+    /// create_space is a bootstrap tool: it works with zero spaces and can install a Pack
+    /// in the same call. Authentication has already happened in the middleware; the
+    /// new space's creator is its owner, so the install step legitimately runs as owner.
+    /// </summary>
+    private static async Task<JsonObject> CreateSpaceViaMcp(
+        EpistemeService svc, JsonObject args, WriteContext ctx, CancellationToken ct)
+    {
+        var ownerCtx = new WriteContext
+        {
+            Source = ctx.Source, Actor = ctx.Actor, Role = "owner",
+            AgentId = ctx.AgentId, Reason = ctx.Reason,
+            IdempotencyKey = ctx.IdempotencyKey, Branch = ctx.Branch,
+            ExpectParent = ctx.ExpectParent, DryRun = ctx.DryRun,
+            Action = "create_space"
+        };
+
+        var created = await svc.CreateSpaceAsync(args, ownerCtx, ct);
+        var spaceId = Jsonx.Plain(created["id"]);
+        var result = (JsonObject)created.DeepClone();
+        result["createdBy"] = "mcp";
+        result["tool"] = "episteme.create_space";
+
+        var packId = Jsonx.Plain(args["packId"]).Trim();
+        if (string.IsNullOrWhiteSpace(packId)) return result;
+
+        // A brand-new space has nothing to conflict with, but overwrite=true keeps this
+        // idempotent if the caller replays create_space with the same pack, and also lets
+        // a space that already carries pack_git-ingest adopt the workspace template.
+        var installArgs = new JsonObject
+        {
+            ["packId"] = packId,
+            ["includeSamples"] = args["includeSamples"]?.DeepClone() ?? false,
+            ["overwrite"] = true,
+            ["source"] = "mcp"
+        };
+        var install = await svc.InstallPackAsync(spaceId, installArgs, ownerCtx, ct);
+        result["pack"] = new JsonObject
+        {
+            ["packId"] = packId,
+            ["installed"] = true,
+            ["createdNodes"] = install["createdNodes"]?.DeepClone(),
+            ["createdContentTypes"] = install["createdContentTypes"]?.DeepClone(),
+            ["toolsVersion"] = install["toolsVersion"]?.DeepClone()
+        };
+        result["toolsVersion"] = install["toolsVersion"]?.DeepClone();
+        return result;
     }
 
     private static async Task<JsonObject> DynamicCall(

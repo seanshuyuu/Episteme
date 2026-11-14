@@ -63,9 +63,32 @@ public sealed class WriteContext
         args[key] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
 }
 
-public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext> factory)
+public sealed partial class EpistemeService(
+    IDbContextFactory<EpistemeDbContext> factory,
+    IHttpContextAccessor httpAccessor,
+    IdentityStore identity)
 {
     private Task<EpistemeDbContext> Db(CancellationToken ct) => factory.CreateDbContextAsync(ct);
+
+    /// <summary>Current principal in users mode; null in legacy / secure or for anonymous metadata.</summary>
+    private UserPrincipal? Principal() =>
+        EpistemeConfig.Users
+            ? httpAccessor.HttpContext?.Items["EpistemePrincipal"] as UserPrincipal
+            : null;
+
+    /// <summary>
+    /// Per-space read boundary. Admin sees everything; ordinary users only see spaces
+    /// explicitly granted to them. This filters GET /spaces, which in turn bounds MCP's
+    /// ResolveSpaceId fallback (an agent can never silently land in a foreign space).
+    /// </summary>
+    private async Task<List<Space>> VisibleSpacesAsync(EpistemeDbContext db, CancellationToken ct)
+    {
+        var spaces = await db.Spaces.OrderBy(s => s.CreatedAt).ToListAsync(ct);
+        var principal = Principal();
+        if (principal is null || principal.IsAdmin) return spaces;
+        var allowed = principal.SpaceRoles.Keys.ToHashSet(StringComparer.Ordinal);
+        return spaces.Where(s => allowed.Contains(s.Id)).ToList();
+    }
 
     private static async Task<Space> RequireSpace(EpistemeDbContext db, string id, CancellationToken ct) =>
         await db.Spaces.FirstOrDefaultAsync(s => s.Id == id, ct)
@@ -107,7 +130,7 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
     public async Task<JsonObject> ListSpacesAsync(CancellationToken ct)
     {
         await using var db = await Db(ct);
-        var spaces = await db.Spaces.OrderBy(s => s.CreatedAt).ToListAsync(ct);
+        var spaces = await VisibleSpacesAsync(db, ct);
         var items = new JsonArray();
         foreach (var s in spaces)
         {
@@ -126,7 +149,14 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
 
     public async Task<JsonObject> CreateSpaceAsync(JsonObject args, WriteContext ctx, CancellationToken ct)
     {
-        RequireRole(ctx, "owner");
+        // In users mode any authenticated account may create its OWN space and becomes
+        // that space's owner. MCP's default "agent" role would otherwise block the new
+        // create_space tool. legacy/secure keep the original owner-only contract.
+        var principal = Principal();
+        if (EpistemeConfig.Users && principal is null)
+            throw new BusinessException("UNAUTHORIZED", "创建空间需要先登录", 401);
+        if (!(EpistemeConfig.Users && principal is not null)) RequireRole(ctx, "owner");
+
         await using var db = await Db(ct);
         var name = S(args, "name");
         if (string.IsNullOrWhiteSpace(name)) throw new BusinessException("BAD_REQUEST", "name 不能为空");
@@ -160,10 +190,17 @@ public sealed partial class EpistemeService(IDbContextFactory<EpistemeDbContext>
         });
         await db.SaveChangesAsync(ct);
 
+        // Auto-grant the creator as owner. Without this, a freshly created space would
+        // be invisible even to its creator on the very next request.
+        if (EpistemeConfig.Users && principal is not null)
+            await identity.GrantAsync(principal.UserId, space.Id, IdentityRoles.Owner,
+                principal.UserName, ct);
+
         return new JsonObject
         {
             ["id"] = space.Id, ["slug"] = space.Slug, ["name"] = space.Name,
-            ["toolsVersion"] = space.ToolsVersion, ["headCommitId"] = initial.Id
+            ["toolsVersion"] = space.ToolsVersion, ["headCommitId"] = initial.Id,
+            ["ownerGranted"] = EpistemeConfig.Users && principal is not null
         };
     }
 

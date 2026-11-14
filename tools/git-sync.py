@@ -11,14 +11,22 @@ What is recorded (install the `pack_git-ingest` Pack first):
   - change     : subject, body, changed file list, unified diff
   - contents   : changed text files become md / code / web / attachment Parts
 
-Authentication (matches Episteme v0.5 secure mode):
+Authentication (matches Episteme v0.5 secure / users modes):
   --auth legacy  X-Episteme-Role header (default, local/LAN only)
   --auth jwt     HS256 Bearer token built from --secret
   --auth hmac    X-Episteme-Key / Timestamp / Nonce / Signature / Role,
                  canonical = method\\npath\\nquery\\ntimestamp\\nnonce\\nrole\\nbodySha256
+  --auth bearer  --token <登录令牌>：users 模式由服务端签发的 JWT
+  --auth login   --user / --password 调 /api/v1/auth/login 自动换取令牌
 
-Idempotency: idempotencyKey = git-sync:<sha>:<repo-hash>. Re-running a hook or
-CI job never creates duplicate documents.
+Application-type routing (pack_code-workspace):
+  --app-type desktop|mobile|cross|fullstack 自动把 --node-path 指向对应归档目录
+  --project-name 写入 fields.projectName；fields.appType 写入中文类型名
+  每个变更文件 Part 携带 meta.gitPath / meta.name / meta.gitStatus，
+  Web 阅读器据此显示真实文件树而非「代码 1 / 代码 2」。
+
+Idempotency: idempotencyKey = git-sync:<sha>:<repo-hash>:<node>. Re-running a hook
+or CI job never creates duplicate documents, even across different archive nodes.
 
 Examples:
   # one-off, current HEAD
@@ -57,6 +65,22 @@ from pathlib import Path
 API_ROOT = "/api/v1/episteme"
 DEFAULT_PACK = "pack_git-ingest"
 DEFAULT_NODE_PATH = "/Git 提交"
+
+# pack_code-workspace: one archive node per application type.
+CODE_WORKSPACE_PACK = "pack_code-workspace"
+APP_TYPE_NODES = {
+    "desktop": ("桌面端", "/Git 提交/桌面端"),
+    "mobile": ("移动端", "/Git 提交/移动端"),
+    "cross": ("跨平台", "/Git 提交/跨平台"),
+    "crossplatform": ("跨平台", "/Git 提交/跨平台"),
+    "fullstack": ("前后端分离", "/Git 提交/前后端分离"),
+    "client-server": ("前后端分离", "/Git 提交/前后端分离"),
+    # Chinese aliases so hook configs can be written naturally.
+    "桌面端": ("桌面端", "/Git 提交/桌面端"),
+    "移动端": ("移动端", "/Git 提交/移动端"),
+    "跨平台": ("跨平台", "/Git 提交/跨平台"),
+    "前后端分离": ("前后端分离", "/Git 提交/前后端分离"),
+}
 
 CODE_LANG = {
     ".cs": "csharp", ".py": "python", ".js": "javascript", ".mjs": "javascript",
@@ -122,7 +146,8 @@ def jwt_hs256(secret: str, role: str, ttl: int) -> str:
 
 class Client:
     def __init__(self, base: str, auth: str, secret: str, key_id: str,
-                 role: str, timeout: int, jwt_ttl: int):
+                 role: str, timeout: int, jwt_ttl: int,
+                 token: str = "", user: str = "", password: str = ""):
         self.base = base.rstrip("/")
         self.auth = auth
         self.secret = secret
@@ -130,9 +155,38 @@ class Client:
         self.role = role
         self.timeout = timeout
         self.jwt_ttl = jwt_ttl
+        self.token = token or env_default("EPISTEME_AUTH_TOKEN")
+        self.user = user or env_default("EPISTEME_USER")
+        self.password = password or env_default("EPISTEME_PASSWORD")
+        if self.auth == "login" and (not self.user or not self.password):
+            raise SyncError("--auth login 需要 --user / --password")
+        if self.auth == "login":
+            self.token = self.login()
+        if self.auth == "bearer" and not self.token:
+            raise SyncError("--auth bearer 需要 --token / EPISTEME_AUTH_TOKEN")
 
     def url(self, path: str) -> str:
         return self.base + API_ROOT + path
+
+    def login(self) -> str:
+        """users mode: exchange a real account for a server-issued JWT."""
+        body = {"userName": self.user, "password": self.password}
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            self.base + "/api/v1/auth/login", data=data,
+            headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8", "replace") or "{}")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", "replace")
+            raise SyncError("登录失败 {}：{}".format(exc.code, raw[:300]))
+        except OSError as exc:
+            raise SyncError("登录请求失败：{}".format(exc))
+        token = payload.get("token", "")
+        if not token:
+            raise SyncError("登录响应缺少 token：{}".format(str(payload)[:200]))
+        return token
 
     def request(self, method: str, url: str, body=None):
         data = b"" if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -140,6 +194,8 @@ class Client:
         split = urllib.parse.urlsplit(url)
         if self.auth == "legacy":
             headers["X-Episteme-Role"] = self.role
+        elif self.auth in ("bearer", "login"):
+            headers["Authorization"] = "Bearer " + self.token
         elif self.auth == "jwt":
             if not self.secret:
                 raise SyncError("--auth jwt 需要 --secret / EPISTEME_AUTH_SECRET")
@@ -163,7 +219,7 @@ class Client:
                 "X-Episteme-Signature": signature,
                 "X-Episteme-Role": self.role,
             })
-        else:
+        elif self.auth not in ("legacy", "jwt", "hmac", "bearer", "login"):
             raise SyncError("未知认证模式：" + self.auth)
 
         req = urllib.request.Request(
@@ -266,7 +322,16 @@ def collect_commit(git: Git, sha: str, branch: str, repo_url: str,
             "kind": kind,
             "content": text,
             "sourceUri": "git:{}:{}".format(sha, path),
-            "meta": {"gitPath": path, "gitStatus": status, "gitSha": sha},
+            "meta": {
+                "gitPath": path,
+                "name": Path(path).name,
+                "displayPath": path,
+                "gitStatus": status,
+                "gitSha": sha,
+                "language": language or "",
+                "appType": getattr(opts, "app_type_label", ""),
+                "projectName": getattr(opts, "project_name", ""),
+            },
         }
         if language:
             part["language"] = language
@@ -308,7 +373,18 @@ def collect_commit(git: Git, sha: str, branch: str, repo_url: str,
         "gitPartCount": len(parts),
         "gitSyncSource": "git-sync/1.0",
     }
+    app_label = getattr(opts, "app_type_label", "")
+    project_name = getattr(opts, "project_name", "")
+    node_path = getattr(opts, "node_path", DEFAULT_NODE_PATH)
+    if app_label:
+        fields["appType"] = app_label
+    if project_name:
+        fields["projectName"] = project_name
+    if node_path:
+        fields["gitSyncNode"] = node_path
+
     repo_hash = hashlib.sha256(repo_url.encode("utf-8")).hexdigest()[:8]
+    node_hash = hashlib.sha256(node_path.encode("utf-8")).hexdigest()[:8]
     payload = {
         "title": title,
         "fields": fields,
@@ -318,7 +394,7 @@ def collect_commit(git: Git, sha: str, branch: str, repo_url: str,
         "agentId": "git-sync",
         "reason": "git:" + full,
         "action": "git_ingest",
-        "idempotencyKey": "git-sync:{}:{}".format(full, repo_hash),
+        "idempotencyKey": "git-sync:{}:{}:{}".format(full, repo_hash, node_hash),
     }
     return {"sha": full, "short": short, "payload": payload,
             "parts": len(parts), "changed": len(changed)}
@@ -338,8 +414,12 @@ def resolve_node(client: Client, space: str, opts) -> str:
 
 
 def install_pack(client: Client, space: str, opts):
+    # overwrite=true: a space that already has pack_git-ingest shares the git_commit
+    # type and /Git 提交 node with pack_code-workspace. Without it the second install
+    # would fail with PACK_CONFLICT when --app-type routes into the workspace template.
     code, res = client.post("/spaces/{}/packs/install".format(space), {
         "packId": opts.pack_id,
+        "overwrite": True,
         "source": "api",
         "idempotencyKey": "git-sync-pack:" + opts.pack_id,
     })
@@ -415,12 +495,24 @@ def parse_args(argv=None):
                    help="bare 仓库 GIT_DIR（hook 中通常无需指定，会继承环境）")
     p.add_argument("--repo-url", default=env_default("EPISTEME_GIT_REPO"))
     p.add_argument("--branch", default="")
-    p.add_argument("--auth", choices=["legacy", "secure", "jwt", "hmac"],
+    p.add_argument("--auth", choices=["legacy", "secure", "jwt", "hmac", "bearer", "login"],
                    default=env_default("EPISTEME_AUTH_MODE", "legacy"),
-                   help="secure 等价于 hmac；默认 legacy")
+                   help="secure 等价于 hmac；bearer/login 用于 users 账号模式；默认 legacy")
     p.add_argument("--secret", default=env_default("EPISTEME_AUTH_SECRET"))
     p.add_argument("--key-id", default=env_default("EPISTEME_API_KEY_ID", "git-sync"))
     p.add_argument("--role", default=env_default("EPISTEME_SYNC_ROLE", "owner"))
+    p.add_argument("--token", default=env_default("EPISTEME_AUTH_TOKEN"),
+                   help="users 模式登录令牌（--auth bearer）")
+    p.add_argument("--user", default=env_default("EPISTEME_USER"),
+                   help="users 模式账号（--auth login）")
+    p.add_argument("--password", default=env_default("EPISTEME_PASSWORD"),
+                   help="users 模式密码（--auth login）")
+    p.add_argument("--app-type", default=env_default("EPISTEME_APP_TYPE"),
+                   help="desktop / mobile / cross / fullstack（或中文名）；自动选择归档节点")
+    p.add_argument("--project-name", default=env_default("EPISTEME_PROJECT_NAME"),
+                   help="写入 fields.projectName，用于按项目检索")
+    p.add_argument("--scene-pack", default=env_default("EPISTEME_SCENE_PACK"),
+                   help="配合 --app-type 时改用 pack_code-workspace 安装（也可手动指定 --pack-id）")
     p.add_argument("--timeout", type=int, default=30)
     p.add_argument("--jwt-ttl", type=int, default=600)
     p.add_argument("--max-commits", type=int, default=20)
@@ -439,12 +531,40 @@ def main(argv=None) -> int:
     auth = opts.auth
     if auth == "secure":
         auth = "hmac"
-    elif auth not in ("legacy", "jwt", "hmac"):
+    elif auth not in ("legacy", "jwt", "hmac", "bearer", "login"):
         auth = "legacy"
     opts.auth = auth
 
-    client = Client(opts.api, auth, opts.secret, opts.key_id,
-                    opts.role, opts.timeout, opts.jwt_ttl)
+    # --app-type routes the commit into the matching archive node of
+    # pack_code-workspace and enriches the payload with appType / projectName.
+    opts.app_type_label = ""
+    opts.project_name = opts.project_name or ""
+    if opts.app_type:
+        key = opts.app_type.strip().lower()
+        resolved = APP_TYPE_NODES.get(key) or APP_TYPE_NODES.get(opts.app_type.strip())
+        if not resolved:
+            print("未知的 --app-type：{}（可选 {}）".format(
+                opts.app_type, "/".join(sorted(set(APP_TYPE_NODES)))), file=sys.stderr)
+            return 2
+        opts.app_type_label, auto_node = resolved
+        if not opts.node_path or opts.node_path == DEFAULT_NODE_PATH:
+            opts.node_path = auto_node
+        if opts.pack_id == DEFAULT_PACK and not opts.node:
+            opts.pack_id = CODE_WORKSPACE_PACK
+            opts.scene_node_auto = True
+            # Convenience: an app-type route implies the matching workspace Pack.
+            if not opts.install_pack:
+                opts.install_pack = True
+    if opts.scene_pack:
+        opts.pack_id = opts.scene_pack
+
+    try:
+        client = Client(opts.api, auth, opts.secret, opts.key_id,
+                        opts.role, opts.timeout, opts.jwt_ttl,
+                        token=opts.token, user=opts.user, password=opts.password)
+    except SyncError as exc:
+        print("git-sync: " + str(exc), file=sys.stderr)
+        return 1
     git = Git(opts.repo, opts.git_dir)
     try:
         if opts.install_pack:

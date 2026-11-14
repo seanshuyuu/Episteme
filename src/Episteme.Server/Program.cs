@@ -24,6 +24,8 @@ else
     builder.Services.AddDbContextFactory<EpistemeDbContext>(o => o.UseSqlite(sqliteConnection));
 }
 
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IdentityStore>();
 builder.Services.AddScoped<EpistemeService>();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
@@ -43,6 +45,20 @@ await using (var db = await app.Services.GetRequiredService<IDbContextFactory<Ep
     await db.Database.EnsureCreatedAsync();
 }
 
+// Identity tables are created idempotently with portable SQL so an existing database
+// (created by an older Episteme version) also gains them without a migration step.
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var identity = scope.ServiceProvider.GetRequiredService<IdentityStore>();
+    await identity.EnsureTablesAsync(CancellationToken.None);
+    if (EpistemeConfig.Users)
+    {
+        var seeded = await identity.SeedAdminAsync(CancellationToken.None);
+        if (!string.IsNullOrWhiteSpace(seeded))
+            app.Logger.LogInformation("Seeded initial admin account: {Admin}", seeded);
+    }
+}
+
 app.UseCors();
 EpistemeSecurity.Use(app);
 app.UseDefaultFiles();
@@ -59,6 +75,7 @@ app.MapGet("/health", () => Results.Json(new
 }));
 
 app.MapEpistemeEndpoints();
+app.MapIdentityEndpoints();
 app.MapMcpEndpoints();
 app.MapSseMcpEndpoints();
 

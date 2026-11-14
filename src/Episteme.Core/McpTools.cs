@@ -9,6 +9,12 @@ public static class ToolRegistry
 {
     public static IReadOnlyList<ToolDef> StaticTools() => new List<ToolDef>
     {
+        T("create_space", "创建一个新的工作空间（空间是版本历史与权限的边界）。可同时安装一个内置 Pack 来一次性生成目录树与内容类型；创建者是新空间的 owner。需要 owner 角色或 users 模式的管理员令牌。",
+            ("name", "string", "空间名称，必填"),
+            ("slug", "string", "唯一标识，可留空自动生成"),
+            ("description", "string", "空间说明"),
+            ("packId", "string", "可选：创建后立即安装的内置 Pack ID，例如 pack_code-workspace"),
+            ("includeSamples", "boolean", "安装 Pack 时是否同时导入示例文档")),
         T("list_spaces", "列出可访问的空间", ("includeStats", "boolean", "附带文档与提交统计")),
         T("tree", "列出目录树（含节点绑定的内容类型与是否暴露）", ("path", "string", "起始路径"), ("depth", "integer", "深度")),
         T("read", "读取文档：fields + Parts + annotations", ("docId", "string", "文档 ID"), ("ref", "string", "历史 commitId / branch / tag")),
@@ -72,6 +78,20 @@ public static class ToolRegistry
             ("anchor", "object", "新锚点（按 Part 类型归一化校验）"),
             ("text", "string", "同时更新批注内容"))
     };
+
+    /// <summary>
+    /// Tools that are usable before any space exists (or when a user has no space grant).
+    /// Without this, tools/list returns an empty array on an empty instance and an MCP
+    /// client can never discover create_space to bootstrap itself.
+    /// </summary>
+    private static readonly HashSet<string> SpaceFree = new(StringComparer.Ordinal)
+    {
+        "episteme.create_space", "episteme.list_spaces", "episteme.list_packs",
+        "episteme.capabilities", "episteme.viewers"
+    };
+
+    public static IReadOnlyList<ToolDef> BootstrapTools() =>
+        StaticTools().Where(t => SpaceFree.Contains(t.Name)).ToList();
 
     private static ToolDef T(string name, string description, params (string Name, string Type, string Desc)[] props)
     {

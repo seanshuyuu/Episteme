@@ -251,10 +251,10 @@
       },
       {
         id: 'safety', group: '注意事项', title: '安全与部署注意事项',
-        lead: '生产化能力全部是环境变量开关，默认 legacy + SQLite + 不鉴权，这样默认体验最简单，也意味着默认不适合直接暴露到公网。',
+        lead: '生产化能力全部是环境变量开关。模板默认 legacy + SQLite + 不鉴权；多人在内网使用请切 users 模式（真实账号与空间授权），公网无人值守同步可用 secure 模式，见「账号、角色与代码工作空间」。',
         blocks: [
           { type: 'warn', title: '上线前必须处理', items: [
-            'deploy/.env 默认 EPISTEME_BIND_IP=0.0.0.0 且 EPISTEME_AUTH_MODE=legacy。至少改成 127.0.0.1 或前置反向代理，并把 AUTH_MODE 设为 secure。',
+            'deploy/.env 默认 EPISTEME_BIND_IP=0.0.0.0 且模板 AUTH_MODE 为 legacy。至少改成 127.0.0.1 或前置反向代理，并把 AUTH_MODE 设为 users（多人）或 secure（机器通道）。',
             'secure 模式必须配置足够长的 EPISTEME_AUTH_SECRET；可选 EPISTEME_API_KEYS 登记 keyId:role。JWT 只做 HS256 签名 / 过期 / 角色校验，没有 issuer、audience、刷新与撤销列表。',
             '服务端不终止 TLS，也没有 WAF；请在网关层做 HTTPS、证书与访问控制。限流是全局固定窗口（默认每分钟 600 次），不是按用户分区。',
             '抓取 worker 只在 compose 内网可达（expose 8090，不发布宿主端口）；上线前用 EPISTEME_FETCH_ALLOWLIST 与受控 DNS / 出网策略复验 /fetch 全链路。',
@@ -264,7 +264,33 @@
             '数据目录 EPISTEME_DATA_DIR（容器 /app/data）含 episteme.db 与 blobs/；备份请复制整个目录，不要只导出单个表。',
             '数据库启动执行 EnsureCreatedAsync()，没有迁移脚本；跨版本升级前先备份并自行迁移。',
             '切换 PostgreSQL 需同时设置 EPISTEME_DB_PROVIDER=postgres 与 EPISTEME_PG_CONNECTION；PG 容器默认不发布宿主端口。',
-            '.env 文件被纳入版本跟踪，切勿把真实密钥提交进仓库。'
+            '.env 已加入 .gitignore；全新克隆先 cp deploy/.env.example deploy/.env，切勿把真实密钥提交进仓库。'
+          ] }
+        ]
+      },
+      {
+        id: 'accounts', group: '注意事项', title: '账号、角色与代码工作空间',
+        lead: 'users 模式下的登录、授权与「个人代码管理工作空间」怎么用；legacy / secure 模式不会出现登录墙。',
+        blocks: [
+          { type: 'list', items: [
+            '启用：deploy/.env 设置 EPISTEME_AUTH_MODE=users、EPISTEME_AUTH_SECRET（openssl rand -hex 32）、EPISTEME_ADMIN_PASSWORD，重建 api 容器；完整样例见 deploy/users.env.example。',
+            '普通用户可在登录墙自助注册（默认 editor），管理员由首启种子账号创建；之后所有 /api/ 与 /mcp 请求都要带 Authorization: Bearer <token>。',
+            '全局角色 admin / owner / editor / agent / viewer；空间角色 owner / editor / agent / viewer，由管理员在「管理后台 → 空间授权」逐空间授予，未授权空间返回 403 SPACE_FORBIDDEN。',
+            '任何已登录账号都能创建自己的空间并自动成为该空间 owner；目录结构变更仅 owner，内容写入允许 owner / editor / agent。'
+          ] },
+          { type: 'note', title: '通过 MCP 建代码工作空间', items: [
+            '空库时 tools/list 只返回 5 个引导工具；先调 episteme.create_space，参数带 packId=pack_code-workspace 与 includeSamples=true，一次建好四类项目目录与四类提交归档目录。',
+            '四类目录：/代码项目/桌面端、/移动端、/跨平台、/前后端分离；对应的 /Git 提交/<类型> 用于归档，另有 /在线预览。',
+            'git-sync.py 加 --app-type desktop|mobile|cross|fullstack 与 --project-name <项目名>，并改用 --auth login 或 --auth bearer，提交即写入对应类型节点。'
+          ] },
+          { type: 'note', title: '代码在线预览', items: [
+            '每个变更文件是一个 Part，meta 里带 gitPath / name / language / appType / projectName；阅读器按真实路径分组显示文件树，Monaco 按语言高亮。',
+            '同一个 commit 归档到不同 --app-type 时互不覆盖（幂等键包含归档节点）；hook 重跑或 CI 重试不会产生重复文档。'
+          ] },
+          { type: 'warn', title: '边界', items: [
+            'JWT 无刷新令牌与主动吊销列表；改密后旧令牌到期前仍可用，停用账号会被服务端实时拒绝。',
+            '无邮箱验证、密码找回与 SSO；身份表用 raw SQL 幂等建表，不是 EF Migration。',
+            '前端是渐进增强：auth.js 只在 users 模式注入 DOM，legacy / secure 下行为不变。'
           ] }
         ]
       },
@@ -279,6 +305,7 @@
             ['SSE / 多实例', '会话只在单进程内存；未接 Redis 背板、对象存储、密钥托管与审计归档'],
             ['阅读器', 'Monaco / pdf.js 加载失败自动降级；老式 \\f PDF 文本层保持兼容显示'],
             ['secure 模式', '最小实现：无 JWT 刷新 / 撤销、无 TLS 终止、无限流按用户分区'],
+            ['users 模式', '无会话表 / 邮箱验证 / 密码找回 / SSO；JWT 到期前不因改密主动失效，停用账号实时拒绝'],
             ['MCP', '自实现最小 JSON-RPC；resources/read 仅提示；无 tools/list_changed 主动推送'],
             ['在线抓取', '回归基于离线 /extract 快照，公网 /fetch 需在受控环境复验']
           ] },
@@ -297,6 +324,7 @@
             ['抓取 503 FETCH_WORKER_UNAVAILABLE', 'EPISTEME_FETCH_WORKER_URL 是否配置；fetch-worker 是否健康（/fetch-worker/health）'],
             ['抓取被拒或内容为空', '全局与单次域名白名单、私网 / 重定向 / 端口限制；短 HTML 走 Readability 回退属正常'],
             ['secure 模式 401 / 403', 'AUTH_SECRET 是否配置；JWT 的 role claim；HMAC 头 X-Episteme-Key/Timestamp/Nonce/Signature 与 API_KEYS 角色是否一致'],
+            ['users 模式 401 / 403', 'Authorization: Bearer 是否携带且未过期；账号是否被停用；未授权空间需管理员在后台授予角色；登录超频会返回 429'],
             ['PDF 上传失败', '文件头必须是 %PDF-，大小 1 字节 ~ 20 MiB，base64 必须合法'],
             ['Schema 保存报 422', 'slug / 字段 key 命名、枚举 options、必填字段 defaultValue、字段类型变更的 cast 规则'],
             ['端口被占用', '改 deploy/.env 的 EPISTEME_HTTP_PORT；本地运行改 ASPNETCORE_URLS'],

@@ -37,15 +37,33 @@
   function show(id) { var e = $(id); if (e) e.classList.remove('hidden'); }
   function hide(id) { var e = $(id); if (e) e.classList.add('hidden'); }
 
+  // Auth is progressive: in legacy/secure mode window.EpistemeAuth.token() returns ''
+  // and every request keeps the original owner header, so all existing regressions hold.
+  function authToken() {
+    try {
+      var a = window.EpistemeAuth;
+      return a && typeof a.token === 'function' ? (a.token() || '') : '';
+    } catch (e) { return ''; }
+  }
+
   async function api(path, options) {
     options = options || {};
+    var headers = Object.assign(
+      { 'Content-Type': 'application/json', 'X-Episteme-Role': 'owner' },
+      options.headers || {});
+    var token = authToken();
+    if (token) headers['Authorization'] = 'Bearer ' + token;
     var res = await fetch(API + path, {
-      method: options.method || 'GET',
-      headers: Object.assign({ 'Content-Type': 'application/json', 'X-Episteme-Role': 'owner' }, options.headers || {}),
-      body: options.body
+      method: options.method || 'GET', headers: headers, body: options.body
     });
     var data = {};
     try { data = await res.json(); } catch (e) { /* empty body */ }
+    if (res.status === 401) {
+      try {
+        if (window.EpistemeAuth && typeof window.EpistemeAuth.onUnauthorized === 'function')
+          window.EpistemeAuth.onUnauthorized();
+      } catch (e) { /* keep the original error visible */ }
+    }
     if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
     return data;
   }
@@ -458,11 +476,30 @@
       });
     });
 
+    // Git-synced code documents carry meta.gitPath / meta.name. Show the real file name
+    // (and a grouped file tree) instead of anonymous "代码 1 / 代码 2" tabs.
+    function filePath(p) {
+      var m = p && p.meta || {};
+      return String(m.gitPath || m.displayPath || '').trim();
+    }
+    function partLabel(p, i) {
+      var m = p && p.meta || {};
+      var path = filePath(p);
+      var name = String(m.name || (path ? path.split('/').pop() : '') || '').trim();
+      if (!name) return esc(p.viewer.label) + ' ' + (i + 1);
+      var lang = String(p.language || m.language || '').trim();
+      return '<span class="file-name">' + esc(name) + '</span>' +
+        (lang ? '<span class="file-lang">' + esc(lang) + '</span>' : '');
+    }
     $('reader-part-tabs').innerHTML = (r.items || []).map(function (p, i) {
+      var path = filePath(p);
       return '<button data-action="select-part" data-index="' + i + '" class="part-tab' +
-        (i === state.partIndex ? ' active' : '') + '">' + esc(p.viewer.label) + ' ' + (i + 1) +
+        (i === state.partIndex ? ' active' : '') + '"' +
+        (path ? ' title="' + esc(path) + '"' : '') + '>' + partLabel(p, i) +
         (p.annotationCount ? ' <span class="badge">' + esc(p.annotationCount) + '</span>' : '') + '</button>';
     }).join('');
+
+    renderFileTree(r.items || [], filePath);
 
     var p = currentPart();
     if (!p) {
@@ -490,6 +527,44 @@
       renderStage(p);
     }
     renderAnnotations();
+  }
+
+  /**
+   * Group Parts that represent git files by directory. Only rendered when at least
+   * one Part has a git path, so ordinary documents keep the exact DOM the UI
+   * regression asserts on. Uses its own data-action to avoid shifting part-tab indices.
+   */
+  function renderFileTree(items, filePath) {
+    var box = $('reader-file-tree');
+    if (!box) return;
+    var groups = {};
+    var count = 0;
+    items.forEach(function (p, i) {
+      var path = filePath(p);
+      if (!path) return;
+      count++;
+      var slash = path.lastIndexOf('/');
+      var dir = slash > 0 ? path.slice(0, slash) : '/';
+      if (!groups[dir]) groups[dir] = [];
+      groups[dir].push({ i: i, p: p, path: path });
+    });
+    if (!count) { box.innerHTML = ''; box.classList.add('hidden'); return; }
+    var dirs = Object.keys(groups).sort();
+    box.innerHTML = '<div class="file-tree-head"><strong>代码文件 · ' + count + '</strong>' +
+      '<span class="muted">' + dirs.length + ' 个目录 · 点击在线预览</span></div>' +
+      dirs.map(function (dir) {
+        return '<div class="file-group"><div class="file-dir">▸ ' + esc(dir) + '</div>' +
+          groups[dir].map(function (f) {
+            var name = String((f.p.meta || {}).name || f.path.split('/').pop());
+            var lang = String(f.p.language || (f.p.meta || {}).language || '').trim();
+            return '<button data-action="select-git-file" data-index="' + f.i + '" class="file-item' +
+              (f.i === state.partIndex ? ' active' : '') + '" title="' + esc(f.path) + '">' +
+              '<span class="file-status">' + esc((f.p.meta || {}).gitStatus || '') + '</span>' +
+              '<span class="file-name">' + esc(name) + '</span>' +
+              (lang ? '<span class="file-lang">' + esc(lang) + '</span>' : '') + '</button>';
+          }).join('') + '</div>';
+      }).join('');
+    box.classList.remove('hidden');
   }
 
   function partPages(p) {
@@ -1400,6 +1475,7 @@
             case 'switch-tab': switchTab(actionEl.getAttribute('data-tab')); break;
             case 'open-reader': await openDocument(actionEl.getAttribute('data-doc-id')); break;
             case 'select-part': selectPart(actionEl.getAttribute('data-index')); break;
+            case 'select-git-file': selectPart(actionEl.getAttribute('data-index')); break;
             case 'reader-mode': switchReaderMode(actionEl.getAttribute('data-mode')); break;
             case 'reader-page': changePage(Number(actionEl.getAttribute('data-step'))); break;
             case 'select-line': selectLine(Number(actionEl.getAttribute('data-line'))); break;

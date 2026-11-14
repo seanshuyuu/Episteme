@@ -3,7 +3,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Episteme.Core;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
 
 namespace Episteme.Server;
@@ -22,6 +24,12 @@ public static class EpistemeSecurity
 
     private static readonly string[] ProtectedPrefixes = { "/api/", "/mcp" };
 
+    /// <summary>Public auth endpoints. They must be reachable before a login token exists.</summary>
+    private static readonly string[] PublicAuthPaths =
+    {
+        "/api/v1/auth/config", "/api/v1/auth/register", "/api/v1/auth/login"
+    };
+
     private static (bool Ok, int Status, string Code, string Message, string Role) Ok(string role) =>
         (true, 200, "", "", role);
 
@@ -30,7 +38,9 @@ public static class EpistemeSecurity
 
     public static void Add(WebApplicationBuilder builder)
     {
-        if (!EpistemeConfig.Secure) return;
+        if (!EpistemeConfig.Guarded) return;
+        // IdentityStore / IHttpContextAccessor are registered unconditionally in Program.cs
+        // because EpistemeService depends on them in every auth mode.
         var permits = EpistemeConfig.RateLimitPerMinute();
         var window = new FixedWindowRateLimiterOptions
         {
@@ -65,19 +75,23 @@ public static class EpistemeSecurity
 
     public static void Use(WebApplication app)
     {
-        if (!EpistemeConfig.Secure) return;
+        if (!EpistemeConfig.Guarded) return;
         app.UseWhen(ctx => IsProtected(ctx.Request), branch =>
         {
             branch.UseRateLimiter();
             branch.Use(async (ctx, next) =>
             {
-                var result = await AuthenticateAsync(ctx);
+                var result = EpistemeConfig.Users
+                    ? await AuthenticateUsersAsync(ctx)
+                    : await AuthenticateAsync(ctx);
                 if (!result.Ok)
                 {
                     await Reject(ctx, result.Status, result.Code, result.Message);
                     return;
                 }
                 // Downstream (Endpoints.Ctx / ToolsCall) keeps reading X-Episteme-Role.
+                // In users mode the role is derived from the server-side principal, never
+                // from a client-supplied header, so a forged X-Episteme-Role cannot escalate.
                 ctx.Request.Headers["X-Episteme-Role"] = result.Role;
                 ctx.Items["EpistemeRole"] = result.Role;
                 await next();
@@ -88,6 +102,8 @@ public static class EpistemeSecurity
     private static bool IsProtected(HttpRequest request)
     {
         var path = request.Path.Value ?? "";
+        foreach (var pub in PublicAuthPaths)
+            if (path.Equals(pub, StringComparison.OrdinalIgnoreCase)) return false;
         foreach (var prefix in ProtectedPrefixes)
             if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
@@ -100,6 +116,115 @@ public static class EpistemeSecurity
         {
             ["code"] = code, ["message"] = message, ["traceId"] = ctx.TraceIdentifier
         });
+    }
+
+    /// <summary>
+    /// users mode: server-issued JWT + live DB lookup. HMAC machine credentials remain
+    /// available for git-sync / CI. The role written downstream is the principal's
+    /// effective role in the requested space, never a client-supplied value.
+    /// </summary>
+    private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
+        AuthenticateUsersAsync(HttpContext ctx)
+    {
+        var secret = EpistemeConfig.AuthSecret();
+        if (string.IsNullOrWhiteSpace(secret))
+            return Fail(500, "AUTH_NOT_CONFIGURED", "users 模式需要配置 EPISTEME_AUTH_SECRET");
+
+        var path = ctx.Request.Path.Value ?? "";
+        // Capability metadata is public so the SPA can decide whether to show a login wall.
+        if (path == "/api/v1/episteme/capabilities" && ctx.Request.Method == "GET")
+            return Ok("viewer");
+
+        // Machine channel (git-sync / stdio bridge / CI): keep the existing HMAC contract.
+        var keyId = ctx.Request.Headers["X-Episteme-Key"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(keyId))
+            return await VerifyHmacAsync(ctx, keyId, secret);
+
+        var authorization = ctx.Request.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(authorization) ||
+            !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return Fail(401, "UNAUTHORIZED", "需要 Authorization: Bearer <登录令牌>");
+
+        var (valid, code, userId, _) = IdentityTokens.Verify(authorization[7..].Trim(), secret);
+        if (!valid) return Fail(401, code, "登录令牌无效或已过期，请重新登录");
+
+        var store = ctx.RequestServices.GetRequiredService<IdentityStore>();
+        var user = await store.FindByIdAsync(userId, ctx.RequestAborted);
+        if (user is null || !user.IsActive)
+            return Fail(401, "USER_DISABLED", "账号不存在或已被停用");
+
+        var principal = await store.PrincipalAsync(user, ctx.RequestAborted);
+        ctx.Items["EpistemePrincipal"] = principal;
+        ctx.Items["EpistemeUserId"] = user.Id;
+        ctx.Items["EpistemeUserName"] = user.UserName;
+
+        // Admin console is a global-only capability.
+        if (path.StartsWith("/api/v1/admin", StringComparison.OrdinalIgnoreCase) && !principal.IsAdmin)
+            return Fail(403, "ADMIN_REQUIRED", "需要管理员权限");
+
+        var rawSpace = await SpaceIdForRequestAsync(ctx, store);
+        var globalEndpoint = string.IsNullOrWhiteSpace(rawSpace);
+        if (!globalEndpoint && !principal.IsAdmin && !principal.SpaceRoles.ContainsKey(rawSpace!))
+            return Fail(403, "SPACE_FORBIDDEN", "当前账号未被授权访问该空间");
+
+        return Ok(principal.EffectiveRole(rawSpace, globalEndpoint));
+    }
+
+    /// <summary>Resolve the target space (id or slug) from path, ?space= or an MCP params body.</summary>
+    private static async Task<string> SpaceIdForRequestAsync(HttpContext ctx, IdentityStore store)
+    {
+        var path = ctx.Request.Path.Value ?? "";
+        var marker = "/spaces/";
+        var at = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        string raw = "";
+        if (at >= 0)
+        {
+            var rest = path[(at + marker.Length)..];
+            raw = rest.Split('/')[0];
+        }
+        if (string.IsNullOrWhiteSpace(raw)) raw = ctx.Request.Query["space"].ToString();
+        if (string.IsNullOrWhiteSpace(raw)) raw = await McpSpaceFromBodyAsync(ctx);
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+
+        // Resolve slug -> id so grants (stored by id) match. Fall back to the raw value
+        // so an unknown space still yields 404/403 rather than silently becoming public.
+        await using var db = await ctx.RequestServices
+            .GetRequiredService<IDbContextFactory<EpistemeDbContext>>()
+            .CreateDbContextAsync(ctx.RequestAborted);
+        var space = await db.Spaces.FirstOrDefaultAsync(
+            s => s.Id == raw || s.Slug == raw, ctx.RequestAborted);
+        return space?.Id ?? raw;
+    }
+
+    /// <summary>
+    /// MCP tools/call may carry spaceId in the JSON-RPC params rather than the URL.
+    /// Buffering lets us inspect it without consuming the body for the endpoint.
+    /// </summary>
+    private static async Task<string> McpSpaceFromBodyAsync(HttpContext ctx)
+    {
+        var path = ctx.Request.Path.Value ?? "";
+        if (!path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(ctx.Request.Method, "POST", StringComparison.OrdinalIgnoreCase)) return "";
+        if (ctx.Request.ContentLength is 0) return "";
+        try
+        {
+            ctx.Request.EnableBuffering();
+            using var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+            var text = await reader.ReadToEndAsync(ctx.RequestAborted);
+            ctx.Request.Body.Position = 0;
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            using var doc = JsonDocument.Parse(text);
+            if (!doc.RootElement.TryGetProperty("params", out var p)) return "";
+            if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("spaceId", out var s)
+                && s.ValueKind == JsonValueKind.String) return s.GetString() ?? "";
+            return "";
+        }
+        catch (Exception)
+        {
+            try { ctx.Request.Body.Position = 0; } catch { /* body already consumed */ }
+            return "";
+        }
     }
 
     private static async Task<(bool Ok, int Status, string Code, string Message, string Role)> AuthenticateAsync(

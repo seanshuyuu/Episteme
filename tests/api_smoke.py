@@ -3,13 +3,18 @@
 import base64
 import copy
 import json
+import os
 import re
 import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
-BASE = "http://127.0.0.1:5080"
+BASE = os.environ.get("EPISTEME_TEST_BASE", "http://127.0.0.1:5080").rstrip("/")
+_U = urlparse(BASE)
+HOST = _U.hostname or "127.0.0.1"
+PORT = _U.port or 80
 API = BASE + "/api/v1/episteme"
 OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -79,8 +84,8 @@ check("创建空间", code == 200 and bool(space.get("id")), space)
 sid = space.get("id", "")
 
 code, before = rest("GET", f"/spaces/{sid}/mcp/tools")
-check("初始 30 个静态工具（P4 Pack 3 个 + v0.5 capabilities / fetch_web / upload_pdf_base64 / rebind_annotation）",
-      code == 200 and before.get("total") == 30 and before.get("staticToolCount") == 30, before)
+check("初始 31 个静态工具（30 + create_space 引导工具）",
+      code == 200 and before.get("total") == 31 and before.get("staticToolCount") == 31, before)
 
 definition = {
     "slug": "paper", "label": "论文", "version": 1, "exposeToMcp": True,
@@ -111,8 +116,8 @@ check("Schema 返回 render 描述",
 code, after = rest("GET", f"/spaces/{sid}/mcp/tools")
 names = [t["name"] for t in after.get("tools", [])]
 new_tools = ["episteme.query_paper", "episteme.create_paper", "episteme.update_paper"]
-check("Schema 改后 tools/list 同会话 +3",
-      code == 200 and after.get("total") == 33 and all(n in names for n in new_tools),
+check("Schema 改后 tools/list 同会话 +3（31 → 34）",
+      code == 200 and after.get("total") == 34 and all(n in names for n in new_tools),
       {"total": after.get("total"), "names": names[-5:]})
 check("toolsVersion 递增", after.get("toolsVersion", 0) > before.get("toolsVersion", 0), after)
 
@@ -434,9 +439,10 @@ check("revert 后标注随父快照恢复（partId 重映射，不丢失）",
 print("\n---- P4 声明式 Pack / 模板导入导出 ----")
 code, packs = rest("GET", "/packs")
 pack_items = packs.get("items", [])
-check("内置 Pack 目录列出 3 套且校验通过",
-      code == 200 and len(pack_items) == 3 and all(p.get("valid") for p in pack_items)
-      and any(p.get("id") == "pack_git-ingest" for p in pack_items),
+check("内置 Pack 目录列出 4 套且校验通过",
+      code == 200 and len(pack_items) == 4 and all(p.get("valid") for p in pack_items)
+      and any(p.get("id") == "pack_git-ingest" for p in pack_items)
+      and any(p.get("id") == "pack_code-workspace" for p in pack_items),
       [(p.get("id"), p.get("valid")) for p in pack_items])
 wb_pack = next((p for p in pack_items if p.get("id") == "workbench"), {})
 check("workbench Pack 声明 15 目录 / 12 内容类型",
@@ -504,8 +510,8 @@ code, pbad = rest("POST", f"/spaces/{psid2}/packs/import", {"pack": bad_pack, "s
 check("非法 Pack（ID 非法 / 引用未声明类型）被 422 拒绝",
       code == 422 and pbad.get("code") == "PACK_INVALID", {"code": code, "body": pbad})
 code, rpc_packs = mcp("tools/call", {"name": "episteme.list_packs", "arguments": {}}, space=pack_slug)
-check("MCP list_packs 返回内置模板",
-      rpc_packs.get("result", {}).get("structuredContent", {}).get("total", 0) == 3, rpc_packs)
+check("MCP list_packs 返回内置模板（4 套）",
+      rpc_packs.get("result", {}).get("structuredContent", {}).get("total", 0) == 4, rpc_packs)
 
 code, pspace3 = rest("POST", "/spaces",
                      {"name": "示例 Pack 空间", "slug": "pack-" + time.strftime("%H%M%S") + "-c", "source": "api"})
@@ -610,7 +616,7 @@ check("真实 PDF 二进制写入内容寻址 blob 仓库",
 def raw_get(path):
     """Read a binary endpoint without the JSON-oriented rest() helper."""
     import http.client
-    conn = http.client.HTTPConnection("127.0.0.1", 5080, timeout=6)
+    conn = http.client.HTTPConnection(HOST, PORT, timeout=6)
     conn.request("GET", path, headers={"X-Episteme-Role": "owner"})
     resp = conn.getresponse()
     payload = resp.read()
@@ -673,7 +679,7 @@ def sse_roundtrip():
     # Alias the import: a bare `import http.client` here shadows the module-level
     # http() request helper used for the POST below.
     import http.client as hc
-    conn = hc.HTTPConnection("127.0.0.1", 5080, timeout=8)
+    conn = hc.HTTPConnection(HOST, PORT, timeout=8)
     conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
     resp = conn.getresponse()
     # HTTPResponse has no settimeout(); the underlying socket inherits the

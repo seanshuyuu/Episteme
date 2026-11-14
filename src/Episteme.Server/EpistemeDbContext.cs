@@ -17,9 +17,14 @@ public sealed class EpistemeDbContext(DbContextOptions<EpistemeDbContext> option
     public DbSet<Commit> Commits => Set<Commit>();
     public DbSet<RefRow> Refs => Set<RefRow>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    // Identity tables (ep_users / ep_space_members) are deliberately NOT EF entities.
+    // They are created idempotently by IdentityStore with portable raw SQL, so upgrading
+    // an existing database does not depend on EnsureCreated (which never adds tables).
+    // See Security/IdentityStore.cs.
 
     protected override void OnModelCreating(ModelBuilder b)
     {
+
         b.Entity<Space>(e =>
         {
             e.HasKey(x => x.Id);

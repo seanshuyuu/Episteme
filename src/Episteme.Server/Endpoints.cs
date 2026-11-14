@@ -194,11 +194,17 @@ public static class Endpoints
         api.MapGet("/spaces/{id}/mcp/tools", async (string id, HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.ToolsListAsync(id, ct)));
 
+        // Keep the REST debug endpoint aligned with /mcp/tools and tools/list: on an empty
+        // instance expose the bootstrap tool set (including create_space) instead of
+        // querying ToolsListAsync with an empty space id.
         api.MapGet("/mcp/tools", async (HttpContext http, EpistemeService svc) =>
-        {
-            var spaceId = await ResolveSpaceId(http, svc, new JsonObject(), http.RequestAborted);
-            return await Run(http, ct => svc.ToolsListAsync(spaceId, ct));
-        });
+            await Run(http, async ct =>
+            {
+                var spaceId = await ResolveSpaceId(http, svc, new JsonObject(), ct);
+                return string.IsNullOrWhiteSpace(spaceId)
+                    ? McpEndpoint.BootstrapTools()
+                    : await svc.ToolsListAsync(spaceId, ct);
+            }));
 
         api.MapGet("/spaces/{id}/audit", async (string id, HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.AuditListAsync(id, ct)));

@@ -17,10 +17,33 @@ public static class EpistemeConfig
     }
 
     public static string AuthMode() => Env("EPISTEME_AUTH_MODE", "legacy").ToLowerInvariant();
+    /// <summary>Shared-secret gateway (HS256 JWT / HMAC), no user database.</summary>
     public static bool Secure => AuthMode() == "secure";
+    /// <summary>Real accounts: registration, login, global roles, per-space grants, admin console.</summary>
+    public static bool Users => AuthMode() == "users";
+    /// <summary>Any auth-enabled mode registers the security middleware.</summary>
+    public static bool Guarded => Secure || Users;
     public static string DbProvider() => Env("EPISTEME_DB_PROVIDER", "sqlite").ToLowerInvariant();
     public static string AuthSecret() => Env("EPISTEME_AUTH_SECRET", "");
     public static string FetchWorkerUrl() => Env("EPISTEME_FETCH_WORKER_URL", "").TrimEnd('/');
+
+    public static bool AllowRegistration() =>
+        !Env("EPISTEME_ALLOW_REGISTRATION", "true").Equals("false", StringComparison.OrdinalIgnoreCase);
+
+    public static string AdminUser() => Env("EPISTEME_ADMIN_USER", "admin");
+    public static string AdminPassword() => Env("EPISTEME_ADMIN_PASSWORD", "");
+    public static string JwtIssuer() => Env("EPISTEME_JWT_ISSUER", "episteme");
+    public static string JwtAudience() => Env("EPISTEME_JWT_AUDIENCE", "episteme-clients");
+    public static int JwtTtlSeconds()
+    {
+        var raw = Env("EPISTEME_JWT_TTL_SECONDS", "86400");
+        return int.TryParse(raw, out var n) && n > 0 ? n : 86400;
+    }
+    public static int LoginRateLimit()
+    {
+        var raw = Env("EPISTEME_LOGIN_RATE_LIMIT", "30");
+        return int.TryParse(raw, out var n) && n > 0 ? n : 30;
+    }
     public static int RateLimitPerMinute()
     {
         var raw = Env("EPISTEME_RATE_LIMIT", "600");
@@ -65,7 +88,24 @@ public static class EpistemeConfig
             ["nonceReplayGuard"] = true,
             ["rateLimitPerMinute"] = RateLimitPerMinute(),
             ["auditLog"] = true,
-            ["active"] = Secure
+            ["active"] = Guarded,
+            ["accounts"] = Users,
+            ["registration"] = Users && AllowRegistration(),
+            ["perSpaceGrants"] = Users,
+            ["adminConsole"] = Users
+        },
+        ["auth"] = new JsonObject
+        {
+            ["mode"] = AuthMode(),
+            ["registrationEnabled"] = Users && AllowRegistration(),
+            ["roles"] = new JsonArray("admin", "owner", "editor", "agent", "viewer"),
+            ["spaceRoles"] = new JsonArray("owner", "editor", "agent", "viewer"),
+            ["endpoints"] = new JsonObject
+            {
+                ["config"] = "/api/v1/auth/config", ["register"] = "/api/v1/auth/register",
+                ["login"] = "/api/v1/auth/login", ["me"] = "/api/v1/auth/me",
+                ["logout"] = "/api/v1/auth/logout", ["admin"] = "/api/v1/admin/users"
+            }
         },
         ["note"] = "生产化能力均为环境变量开关；默认 legacy，不破坏既有契约"
     };

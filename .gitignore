@@ -19,7 +19,9 @@ __pycache__/
 .env
 .env.*
 !.env.example
-!deploy/.env
+# Local Compose credentials (secret / admin password) must never enter the repo.
+# deploy/.env.example is the tracked template; users.env.example is the users-mode sample.
+deploy/.env
 
 # WorkBuddy session & memory data (never commit)
 .workbuddy/
