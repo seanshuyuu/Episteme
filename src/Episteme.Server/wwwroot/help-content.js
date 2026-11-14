@@ -287,8 +287,16 @@
             '每个变更文件是一个 Part，meta 里带 gitPath / name / language / appType / projectName；阅读器按真实路径分组显示文件树，Monaco 按语言高亮。',
             '同一个 commit 归档到不同 --app-type 时互不覆盖（幂等键包含归档节点）；hook 重跑或 CI 重试不会产生重复文档。'
           ] },
+          { type: 'note', title: 'MCP 为什么只能写进自己的空间', items: [
+            '三层校验：JWT 验签 + 查库得到服务端 principal；中间件按路径 / ?space= / params.spaceId / arguments.spaceId 比对空间授权；tools/call 在派发前用最终落点再校验一次。',
+            '最终落点会用空间角色覆盖 WriteContext.Role，并用登录名覆盖审计 actor：省略 spaceId 不会继承全局角色，被降为 viewer 后该空间立即只读。',
+            'ResolveSpaceId 的回退目标只来自「当前账号可见空间」列表，因此不带 spaceId 也永远落不到别人的空间；客户端伪造 X-Episteme-Role 会被服务端覆盖。',
+            '跨账户越权矩阵见 tests/isolation_smoke.py：直接 REST、多种 MCP 传参、伪造角色头、省略 spaceId 全部被拒，对方空间文档数保持 0。'
+          ] },
           { type: 'warn', title: '边界', items: [
             'JWT 无刷新令牌与主动吊销列表；改密后旧令牌到期前仍可用，停用账号会被服务端实时拒绝。',
+            'HMAC 机器密钥（X-Episteme-Key）没有用户身份，默认可写全库；用 EPISTEME_MACHINE_SPACES 限定空间，或让 CI 改用 --auth login 的真实账号。',
+            '这是空间级隔离，不是账户级私有库：管理员可读全部空间，被授予同一空间的多个账号按各自角色共享读写；没有单文档 ACL。',
             '无邮箱验证、密码找回与 SSO；身份表用 raw SQL 幂等建表，不是 EF Migration。',
             '前端是渐进增强：auth.js 只在 users 模式注入 DOM，legacy / secure 下行为不变。'
           ] }

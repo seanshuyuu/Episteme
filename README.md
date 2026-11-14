@@ -557,7 +557,7 @@ MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET
 
 ## 7. 测试与验收
 
-历史验收记录（`docs/10`）：v0.5 阶段连续三轮 **213 项 / 轮**（六套）全绿；加入 git 旁路同步后为七套 235 项；合并应用内帮助手册后为八套 **267 项**（含 `help_smoke` 35 项）。本轮账号体系与代码工作空间增量在同一镜像上复跑 **267 / 267**，并新增两套 users 专项 **97 项**（`auth_smoke.py` 76 + `auth_ui_smoke.js` 21），合计 **364 项通过 / 0 失败**。服务端 `dotnet publish` 与客户端 `dotnet build` 均为 0 警告 0 错误。
+历史验收记录（`docs/10`）：v0.5 阶段连续三轮 **213 项 / 轮**（六套）全绿；加入 git 旁路同步后为七套 235 项；合并应用内帮助手册后为八套 **267 项**（含 `help_smoke` 35 项）。账号体系与代码工作空间增量在同一镜像上复跑 **267 / 267**，并新增 users 专项 **97 项**（`auth_smoke.py` 76 + `auth_ui_smoke.js` 21），合计 364 项。跨账户隔离审计后再次全量复跑 **12 轮 / 413 项**（legacy 八套 267 + users 两套 97 + `isolation_smoke.py` 无范围 24 / 有范围 25），全部 **0 失败**。服务端 `dotnet publish` 与客户端 `dotnet build` 均为 0 警告 0 错误。
 
 | 套件 | 命令（仓库根） | 项数 | 前置条件 |
 |---|---|---|---|
@@ -575,8 +575,8 @@ MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET
 
 复跑注意：
 
-- `tests/api_smoke.py` 现已支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`tests/ui_smoke.js` 仍写死 5080 且 `WWW` 为绝对路径，换机器复跑前需改；`tests/help_smoke.js` 与 `tests/auth_ui_smoke.js` 用 `__dirname` 相对定位。secure / postgres 套件分别默认 5081 / 5082。
-- `tests/ui_smoke.js` 的 `WWW` 已指向本仓库 `src/Episteme.Server/wwwroot`；换机器复跑时需改成对应绝对路径。`tests/help_smoke.js` 与 `tests/auth_ui_smoke.js` 用 `__dirname` 相对定位，无需改动。
+- `tests/api_smoke.py`、`tests/ui_smoke.js`、`tests/help_smoke.js`、`tests/auth_ui_smoke.js`、`tests/isolation_smoke.py` 均支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`ui_smoke.js` 的 `WWW` 已改为 `__dirname` 相对定位，换机器无需改动。secure / postgres 套件默认 5081 / 5082，桌面 Probe 可用 `EPISTEME_API` 改基址。
+- `tests/isolation_smoke.py` 需要空库 users 实例，并传 `EPISTEME_ADMIN_PASSWORD`；测机器通道时再传 `EPISTEME_MACHINE_SECRET`，实例配了 `EPISTEME_MACHINE_SPACES` 时设 `EPISTEME_MACHINE_SPACES_SET=1` 与固定 `EPISTEME_TEST_SUFFIX`。
 - users 专项会真实创建账号与空间，建议在独立 compose 项目（`docker compose -p <name> --env-file ...`）的空库上跑；legacy 八套必须保持 `EPISTEME_AUTH_MODE=legacy`，否则会因缺少 Bearer 令牌而 401。
 - `tests/ui_test.js` 用 `__dirname` 相对定位 `../prototype/index.html`，无需服务器；本机若因内存限制无法启动 Chromium，可只跑 jsdom 套件。
 - `tests/ui_report.md` 保留 2026-11-09 的 28/28 历史结果；仓库内没有 `requirements.txt` 或测试用 `package.json`，依赖靠 `NODE_PATH` 外部提供。
@@ -806,6 +806,21 @@ python3 tools/git-sync.py --mode head --api http://127.0.0.1:5080 \
 
 - JWT 无状态、无刷新令牌与主动吊销列表；改密后旧令牌在到期前仍可用，但停用账号会被服务端实时拒绝。
 - 无邮箱 / 手机验证、密码找回、SSO、审计归档；密码用 PBKDF2-SHA256 加盐存储，不落明文。
-- 空间授权在中间件按 URL / `?space=` / MCP `params.spaceId` 校验；空间内的**单个文档**不再做二次跨空间校验（所有文档端点都带空间前缀）。
+- 空间授权在中间件按 URL / `?space=` / MCP `params.spaceId`（含 `arguments.spaceId`）校验，并在 `tools/call` 用最终落点做二次校验；空间内的**单个文档**不再做二次跨空间校验（所有文档端点都带空间前缀）。
+- HMAC 机器通道（`X-Episteme-Key`）没有用户身份，默认可写全库；用 `EPISTEME_MACHINE_SPACES` 限定，或让 CI 改走 `--auth login` 的真实账号。
 - 前端是渐进增强：`auth.js` 只在 `users` 模式注入登录墙与后台，legacy / secure 下 `window.EpistemeAuth.token()` 恒为空字符串，既有 UI 回归不受影响。
-- 完整验证见 `tests/auth_smoke.py`（76 项）与 `tests/auth_ui_smoke.js`（21 项）。
+- 完整验证见 `tests/auth_smoke.py`（76 项）、`tests/auth_ui_smoke.js`（21 项）与 `tests/isolation_smoke.py`（跨账户越权矩阵，无范围 24 项 / 有范围 25 项）。
+
+### 11.7 MCP 为什么只能写到当前账号的空间
+
+隔离不靠「客户端自觉传 spaceId」，而是三层服务端校验叠加：
+
+1. **身份不可伪造**：`POST /mcp` 必须带登录后由服务端签发的 HS256 JWT；中间件用 `EPISTEME_AUTH_SECRET` 验签，再查库确认账号仍启用，得到 `UserPrincipal`（含 `SpaceRoles` 授权字典）。客户端自带的 `X-Episteme-Role` 会被中间件覆盖，无法提权。
+2. **入口拦截**：中间件从路径 `/spaces/{id}`、`?space=`、`params.spaceId` 或 `params.arguments.spaceId` 提取目标空间，把 slug 解析成 id；普通账号若 `SpaceRoles` 中无该空间，直接 `403 SPACE_FORBIDDEN`。
+3. **落点复核**：`tools/call` 在 `Dispatch` 之前拿到 `ResolveSpaceId` 的**最终结果**（省略 spaceId 时会回退到该账号可见的第一个空间），再用 principal 复核一次：无授权即拒绝，并**用空间角色覆盖 `WriteContext.Role`**、用登录名覆盖审计 `actor`。因此省略 spaceId 不能继承全局角色，管理员把账号在某空间降为 `viewer` 后，该空间的写入立即失效。
+
+「只写在自己账户下」的空间归属来自两处：`create_space` 会自动给创建者插入一条 `ep_space_members(owner)` 记录；`ListSpacesAsync` 对普通用户只返回已授权空间，所以 `ResolveSpaceId` 的回退目标也永远在自己的可见集合内。
+
+跨账户越权矩阵（`tests/isolation_smoke.py`，两个真实账号 + 两个 MCP 创建的空间）覆盖：直接 REST 读写、MCP `params.spaceId`、`?space=`、`arguments.spaceId`、伪造 owner 头、省略 spaceId 回退、viewer 降级后写入、普通账号调管理端点。结论：**所有指向他人空间的写入均被拒绝，对方空间文档数保持 0**。
+
+明确的设计边界：这是**空间级**隔离，不是账户级私有库——管理员可看全部空间；被管理员授予同一空间的多个账号可共同读写该空间（按各自空间角色）；HMAC 机器密钥是共享超级用户，需用 `EPISTEME_MACHINE_SPACES` 收紧。没有单文档 ACL、没有行级加密、没有跨空间引用隔离。

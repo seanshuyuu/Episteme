@@ -205,6 +205,33 @@ public static class McpEndpoint
         var ctx = WriteContext.From(args, "mcp", string.IsNullOrWhiteSpace(role) ? "agent" : role);
         ctx.Action = name;
 
+        // Defense in depth for users mode: spaceId above is the FINAL space that Dispatch
+        // will actually touch (ResolveSpaceId may fall back to the first visible space).
+        // Re-check it here with the server-side principal so that (a) omitting spaceId
+        // cannot inherit the caller's global role, and (b) a grant downgrade inside the
+        // space always wins over the role the middleware computed for a global endpoint.
+        if (EpistemeConfig.Users && !string.IsNullOrWhiteSpace(spaceId))
+        {
+            var principal = http.Items["EpistemePrincipal"] as UserPrincipal;
+            if (principal is not null && !principal.IsAdmin)
+            {
+                if (!principal.SpaceRoles.TryGetValue(spaceId, out var spaceRole))
+                    throw new BusinessException("SPACE_FORBIDDEN", "当前账号未被授权访问该空间", 403);
+                ctx.Role = spaceRole;
+                // Audit actor must be the authenticated account, never a client-supplied
+                // "actor" field in the tool arguments.
+                ctx.Actor = principal.UserName;
+            }
+            else if (principal is null
+                     && http.Items["EpistemeMachineSpaceIds"] is string[] machineScope
+                     && !Array.Exists(machineScope,
+                         s => string.Equals(s, spaceId, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new BusinessException("MACHINE_SPACE_FORBIDDEN",
+                    "机器密钥被限定在指定空间内，拒绝访问该空间", 403);
+            }
+        }
+
         var payload = await Dispatch(svc, spaceId, name, args, ctx, ct);
         return new JsonObject
         {

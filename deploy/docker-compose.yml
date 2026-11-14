@@ -23,6 +23,9 @@ services:
       EPISTEME_JWT_AUDIENCE: ${EPISTEME_JWT_AUDIENCE:-episteme-clients}
       EPISTEME_LOGIN_RATE_LIMIT: ${EPISTEME_LOGIN_RATE_LIMIT:-30}
       EPISTEME_API_KEYS: ${EPISTEME_API_KEYS:-}
+      # Empty = HMAC machine credentials may write any space (legacy behaviour).
+      # Set to a comma-separated list of space ids/slugs to pin CI credentials.
+      EPISTEME_MACHINE_SPACES: ${EPISTEME_MACHINE_SPACES:-}
       EPISTEME_DB_PROVIDER: ${EPISTEME_DB_PROVIDER:-sqlite}
       EPISTEME_PG_CONNECTION: ${EPISTEME_PG_CONNECTION:-}
       EPISTEME_RATE_LIMIT: ${EPISTEME_RATE_LIMIT:-600}

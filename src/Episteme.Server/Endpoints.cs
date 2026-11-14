@@ -276,6 +276,10 @@ public static class Endpoints
     {
         var parameters = body["params"] as JsonObject;
         var raw = Jsonx.Plain(parameters?["spaceId"]);
+        // Keep this in sync with SecurityMiddleware.McpSpaceFromBodyAsync: an MCP
+        // arguments.spaceId must be honoured, never silently ignored.
+        if (string.IsNullOrWhiteSpace(raw))
+            raw = Jsonx.Plain((parameters?["arguments"] as JsonObject)?["spaceId"]);
         if (string.IsNullOrWhiteSpace(raw)) raw = http.Request.Query["space"].ToString();
         var spaces = await svc.ListSpacesAsync(ct);
         var items = spaces["items"] as JsonArray ?? new JsonArray();

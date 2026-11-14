@@ -3,8 +3,9 @@ const fs = require('fs');
 const http = require('node:http');
 const { JSDOM } = require('jsdom');
 
-const BASE = 'http://127.0.0.1:5080';
-const WWW = '/mnt/work/JobAndResearch/Coding/WorkBuddy/2026-11-08-10-00-09/episteme/src/Episteme.Server/wwwroot';
+const path = require('node:path');
+const BASE = (process.env.EPISTEME_TEST_BASE || 'http://127.0.0.1:5080').replace(/\/$/, '');
+const WWW = path.join(__dirname, '..', 'src', 'Episteme.Server', 'wwwroot');
 
 // Host shell has a 4 GB hard ulimit -v; Node's built-in fetch (undici lazillhttp Wasm)
 // cannot allocate memory here. Use a plain node:http fetch shim instead.

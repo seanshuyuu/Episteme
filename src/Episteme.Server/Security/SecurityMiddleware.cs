@@ -135,10 +135,29 @@ public static class EpistemeSecurity
         if (path == "/api/v1/episteme/capabilities" && ctx.Request.Method == "GET")
             return Ok("viewer");
 
-        // Machine channel (git-sync / stdio bridge / CI): keep the existing HMAC contract.
+        var store = ctx.RequestServices.GetRequiredService<IdentityStore>();
+
+        // Machine channel (git-sync / CI) has NO user identity, so it is deliberately a
+        // super-user path. EPISTEME_MACHINE_SPACES optionally pins it to explicit spaces.
         var keyId = ctx.Request.Headers["X-Episteme-Key"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(keyId))
-            return await VerifyHmacAsync(ctx, keyId, secret);
+        {
+            var machine = await VerifyHmacAsync(ctx, keyId, secret);
+            if (!machine.Ok) return machine;
+            var scoped = await MachineSpaceIdsAsync(ctx);
+            if (scoped is not null)
+            {
+                // ToolsCall re-checks the FINAL resolved space, which also covers MCP
+                // requests that omit spaceId and would otherwise hit the default space.
+                ctx.Items["EpistemeMachineSpaceIds"] = scoped;
+                var (_, resolved) = await SpaceIdForRequestAsync(ctx, store);
+                if (!string.IsNullOrWhiteSpace(resolved) &&
+                    !Array.Exists(scoped, s => string.Equals(s, resolved, StringComparison.OrdinalIgnoreCase)))
+                    return Fail(403, "MACHINE_SPACE_FORBIDDEN",
+                        "机器密钥被限定在指定空间内，拒绝访问该空间");
+            }
+            return machine;
+        }
 
         var authorization = ctx.Request.Headers.Authorization.ToString();
         if (string.IsNullOrWhiteSpace(authorization) ||
@@ -148,7 +167,6 @@ public static class EpistemeSecurity
         var (valid, code, userId, _) = IdentityTokens.Verify(authorization[7..].Trim(), secret);
         if (!valid) return Fail(401, code, "登录令牌无效或已过期，请重新登录");
 
-        var store = ctx.RequestServices.GetRequiredService<IdentityStore>();
         var user = await store.FindByIdAsync(userId, ctx.RequestAborted);
         if (user is null || !user.IsActive)
             return Fail(401, "USER_DISABLED", "账号不存在或已被停用");
@@ -162,7 +180,7 @@ public static class EpistemeSecurity
         if (path.StartsWith("/api/v1/admin", StringComparison.OrdinalIgnoreCase) && !principal.IsAdmin)
             return Fail(403, "ADMIN_REQUIRED", "需要管理员权限");
 
-        var rawSpace = await SpaceIdForRequestAsync(ctx, store);
+        var (_, rawSpace) = await SpaceIdForRequestAsync(ctx, store);
         var globalEndpoint = string.IsNullOrWhiteSpace(rawSpace);
         if (!globalEndpoint && !principal.IsAdmin && !principal.SpaceRoles.ContainsKey(rawSpace!))
             return Fail(403, "SPACE_FORBIDDEN", "当前账号未被授权访问该空间");
@@ -170,8 +188,31 @@ public static class EpistemeSecurity
         return Ok(principal.EffectiveRole(rawSpace, globalEndpoint));
     }
 
+    /// <summary>
+    /// Optional scope for HMAC machine credentials in users mode. Accepts space ids or
+    /// slugs; null means unrestricted (keeps the existing git-sync contract unchanged).
+    /// </summary>
+    private static async Task<string[]?> MachineSpaceIdsAsync(HttpContext ctx)
+    {
+        var raw = Environment.GetEnvironmentVariable("EPISTEME_MACHINE_SPACES") ?? "";
+        var tokens = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length == 0) return null;
+        await using var db = await ctx.RequestServices
+            .GetRequiredService<IDbContextFactory<EpistemeDbContext>>()
+            .CreateDbContextAsync(ctx.RequestAborted);
+        var ids = new List<string>();
+        foreach (var token in tokens)
+        {
+            var row = await db.Spaces.FirstOrDefaultAsync(
+                s => s.Id == token || s.Slug == token, ctx.RequestAborted);
+            ids.Add(row?.Id ?? token);
+        }
+        return ids.Distinct(StringComparer.Ordinal).ToArray();
+    }
+
     /// <summary>Resolve the target space (id or slug) from path, ?space= or an MCP params body.</summary>
-    private static async Task<string> SpaceIdForRequestAsync(HttpContext ctx, IdentityStore store)
+    private static async Task<(string Raw, string Resolved)> SpaceIdForRequestAsync(
+        HttpContext ctx, IdentityStore store)
     {
         var path = ctx.Request.Path.Value ?? "";
         var marker = "/spaces/";
@@ -184,7 +225,7 @@ public static class EpistemeSecurity
         }
         if (string.IsNullOrWhiteSpace(raw)) raw = ctx.Request.Query["space"].ToString();
         if (string.IsNullOrWhiteSpace(raw)) raw = await McpSpaceFromBodyAsync(ctx);
-        if (string.IsNullOrWhiteSpace(raw)) return "";
+        if (string.IsNullOrWhiteSpace(raw)) return ("", "");
 
         // Resolve slug -> id so grants (stored by id) match. Fall back to the raw value
         // so an unknown space still yields 404/403 rather than silently becoming public.
@@ -193,7 +234,7 @@ public static class EpistemeSecurity
             .CreateDbContextAsync(ctx.RequestAborted);
         var space = await db.Spaces.FirstOrDefaultAsync(
             s => s.Id == raw || s.Slug == raw, ctx.RequestAborted);
-        return space?.Id ?? raw;
+        return (raw, space?.Id ?? raw);
     }
 
     /// <summary>
@@ -216,8 +257,17 @@ public static class EpistemeSecurity
             if (string.IsNullOrWhiteSpace(text)) return "";
             using var doc = JsonDocument.Parse(text);
             if (!doc.RootElement.TryGetProperty("params", out var p)) return "";
-            if (p.ValueKind == JsonValueKind.Object && p.TryGetProperty("spaceId", out var s)
-                && s.ValueKind == JsonValueKind.String) return s.GetString() ?? "";
+            if (p.ValueKind == JsonValueKind.Object)
+            {
+                if (p.TryGetProperty("spaceId", out var s)
+                    && s.ValueKind == JsonValueKind.String) return s.GetString() ?? "";
+                // Some MCP clients put spaceId inside arguments instead of params.
+                // Honour it so the request is rejected explicitly instead of being
+                // silently re-routed to the caller's default space.
+                if (p.TryGetProperty("arguments", out var a) && a.ValueKind == JsonValueKind.Object
+                    && a.TryGetProperty("spaceId", out var s2) && s2.ValueKind == JsonValueKind.String)
+                    return s2.GetString() ?? "";
+            }
             return "";
         }
         catch (Exception)
