@@ -56,6 +56,12 @@ await using (var scope = app.Services.CreateAsyncScope())
         var seeded = await identity.SeedAdminAsync(CancellationToken.None);
         if (!string.IsNullOrWhiteSpace(seeded))
             app.Logger.LogInformation("Seeded initial admin account: {Admin}", seeded);
+        // Account authorization requires every space to have exactly one owner.
+        // v0.5 databases only had ep_space_members grants; backfill from the legacy
+        // owner grant, otherwise hand the space to the first admin so nothing vanishes.
+        var backfilled = await identity.BackfillOwnersAsync(CancellationToken.None);
+        if (backfilled > 0)
+            app.Logger.LogInformation("Backfilled account ownership for {Count} existing spaces", backfilled);
     }
 }
 

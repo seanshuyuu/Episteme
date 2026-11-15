@@ -2,15 +2,18 @@ using System.Collections.Concurrent;
 using System.Text.Json.Nodes;
 using Episteme.Core;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 namespace Episteme.Server;
 
 /// <summary>
 /// EPISTEME_AUTH_MODE=users endpoints. Public: config / register / login.
-/// Authenticated: me / logout / password. Admin-only: /api/v1/admin/*.
-/// In legacy or secure mode these endpoints report AUTH_MODE_UNSUPPORTED rather than
-/// silently exposing an unprotected user database.
+/// Authenticated (login session): me / logout / password / me/mcp-token.
+/// Admin-only: /api/v1/admin/*.
+///
+/// Authorization is ACCOUNT-scoped: every space has exactly one owner, and a user's
+/// global role is effective inside every space they own. The v0.5 per-space grant
+/// matrix (/admin/members PUT|DELETE) is disabled with an explicit error.
+/// In legacy or secure mode these endpoints report AUTH_MODE_UNSUPPORTED.
 /// </summary>
 public static class IdentityEndpoints
 {
@@ -29,8 +32,17 @@ public static class IdentityEndpoints
             ["mode"] = EpistemeConfig.AuthMode(),
             ["accountsEnabled"] = EpistemeConfig.Users,
             ["registrationEnabled"] = EpistemeConfig.Users && EpistemeConfig.AllowRegistration(),
+            ["authorizationModel"] = "account",
             ["roles"] = new JsonArray("admin", "owner", "editor", "agent", "viewer"),
             ["jwtTtlSeconds"] = EpistemeConfig.JwtTtlSeconds(),
+            ["mcpToken"] = new JsonObject
+            {
+                ["endpoint"] = "/api/v1/auth/me/mcp-token",
+                ["header"] = "X-Episteme-Mcp-Token",
+                ["prefix"] = IdentityStore.McpTokenPrefix,
+                ["bearer"] = true,
+                ["note"] = "每人一个可自助生成/重置/停用的长期 MCP 令牌，仅登录会话可管理"
+            },
             ["product"] = "Episteme", ["version"] = EpistemeConfig.Version
         }));
 
@@ -46,11 +58,21 @@ public static class IdentityEndpoints
         auth.MapPost("/logout", () => Results.Json(new JsonObject
         {
             ["loggedOut"] = true,
-            ["note"] = "令牌为无状态 JWT，请在客户端清除本地存储；服务端不需要会话表"
+            ["note"] = "令牌为无状态 JWT，请在客户端清除本地存储；长期 MCP 令牌不受登出影响，可在设置里停用"
         }));
 
         auth.MapPost("/password", async (HttpContext http, IdentityStore store, [FromBody] JsonObject body) =>
             await Endpoints.Run(http, ct => ChangePasswordAsync(http, store, body, ct)));
+
+        // Per-account MCP credential: view status, generate/reset, revoke. Session only.
+        auth.MapGet("/me/mcp-token", async (HttpContext http, IdentityStore store) =>
+            await Endpoints.Run(http, ct => McpTokenStatusAsync(http, store, ct)));
+        auth.MapPost("/me/mcp-token", async (HttpContext http, IdentityStore store, [FromBody] JsonObject? body) =>
+            await Endpoints.Run(http, ct => McpTokenRotateAsync(http, store, body ?? new JsonObject(), ct)));
+        auth.MapPut("/me/mcp-token", async (HttpContext http, IdentityStore store, [FromBody] JsonObject? body) =>
+            await Endpoints.Run(http, ct => McpTokenRotateAsync(http, store, body ?? new JsonObject(), ct)));
+        auth.MapDelete("/me/mcp-token", async (HttpContext http, IdentityStore store) =>
+            await Endpoints.Run(http, ct => McpTokenRevokeAsync(http, store, ct)));
 
         var admin = app.MapGroup("/api/v1/admin");
         admin.MapGet("/overview", async (HttpContext http, IdentityStore store, EpistemeService svc) =>
@@ -66,12 +88,17 @@ public static class IdentityEndpoints
             await Endpoints.Run(http, ct => DeleteUserAsync(http, store, id, ct)));
         admin.MapGet("/spaces", async (HttpContext http, EpistemeService svc, IdentityStore store) =>
             await Endpoints.Run(http, ct => AdminSpacesAsync(http, svc, store, ct)));
+        // Account ownership management (replaces the per-space grant matrix).
+        admin.MapGet("/owners", async (HttpContext http, IdentityStore store) =>
+            await Endpoints.Run(http, ct => ListOwnersAsync(http, store, ct)));
+        admin.MapPut("/spaces/{spaceId}/owner", async (string spaceId, HttpContext http,
+            IdentityStore store, EpistemeService svc, [FromBody] JsonObject body) =>
+            await Endpoints.Run(http, ct => TransferOwnerAsync(http, store, svc, spaceId, body, ct)));
+        // Legacy paths retained for read-only compatibility; mutations are refused.
         admin.MapGet("/members", async (HttpContext http, IdentityStore store) =>
-            await Endpoints.Run(http, ct => ListMembersAsync(http, store, ct)));
-        admin.MapPut("/members", async (HttpContext http, IdentityStore store, [FromBody] JsonObject body) =>
-            await Endpoints.Run(http, ct => GrantAsync(http, store, body, ct)));
-        admin.MapDelete("/members", async (HttpContext http, IdentityStore store, [FromBody] JsonObject? body) =>
-            await Endpoints.Run(http, ct => RevokeAsync(http, store, body ?? new JsonObject(), ct)));
+            await Endpoints.Run(http, ct => ListLegacyMembersAsync(http, store, ct)));
+        admin.MapPut("/members", (HttpContext http) => GrantRemoved());
+        admin.MapDelete("/members", (HttpContext http) => GrantRemoved());
 
         return app;
     }
@@ -93,13 +120,41 @@ public static class IdentityEndpoints
         throw new BusinessException("UNAUTHORIZED", "需要登录后访问", 401);
     }
 
+    /// <summary>Credential management must never be reachable with a machine token.</summary>
+    private static UserPrincipal RequireSession(HttpContext http)
+    {
+        RequireUsers();
+        var p = RequirePrincipal(http);
+        if (p.IsMcpToken)
+            throw new BusinessException("MCP_TOKEN_SESSION_REQUIRED",
+                "管理或重置 MCP 令牌需要账号登录会话，MCP 令牌本身不能操作自己", 403);
+        return p;
+    }
+
     private static void RequireAdmin(HttpContext http)
     {
         RequireUsers();
         var p = RequirePrincipal(http);
-        if (!p.IsAdmin)
+        if (!p.IsAdmin || p.IsMcpToken)
             throw new BusinessException("ADMIN_REQUIRED", "需要管理员权限", 403);
     }
+
+    private static UserPrincipal RequireAdminAndReturn(HttpContext http)
+    {
+        RequireAdmin(http);
+        return RequirePrincipal(http);
+    }
+
+    /// <summary>
+    /// Explicit 409 for old grant-matrix clients. Returned as a plain IResult so the
+    /// single-HttpContext lambda cannot bind to the RequestDelegate overload.
+    /// </summary>
+    private static IResult GrantRemoved() => Results.Json(new JsonObject
+    {
+        ["code"] = "GRANT_MODEL_REMOVED",
+        ["message"] = "已改为按账号授权：空间授权矩阵已停用。请在「管理后台 → 空间归属」转让归属，或让账号自建空间",
+        ["authorizationModel"] = "account"
+    }, statusCode: 409);
 
     private static void ValidateName(string name)
     {
@@ -145,6 +200,27 @@ public static class IdentityEndpoints
                 .UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"))
     };
 
+    private static string? IsoFromUnix(long unix) => unix == 0 ? null
+        : DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+    /// <summary>Status view never contains the token or its digest.</summary>
+    private static JsonObject McpTokenNode(McpTokenRecord? record) => new()
+    {
+        ["hasToken"] = record is not null,
+        ["active"] = record is not null && !record.Revoked,
+        ["revoked"] = record?.Revoked ?? false,
+        ["hint"] = record?.TokenHint ?? "",
+        ["prefix"] = IdentityStore.McpTokenPrefix,
+        ["createdAt"] = record is null ? null : JsonValue.Create(record.CreatedAt),
+        ["lastUsedAt"] = IsoFromUnix(record?.LastUsedUnix ?? 0) is { } used
+            ? JsonValue.Create(used) : null,
+        ["endpoint"] = "/api/v1/auth/me/mcp-token",
+        ["bearerHeader"] = "Authorization: Bearer <epm_...>",
+        ["alternateHeader"] = "X-Episteme-Mcp-Token: <epm_...>",
+        ["transport"] = "POST /mcp, GET /mcp/sse, tools/git-sync.py --auth bearer",
+        ["note"] = "明文只在生成/重置时返回一次，服务端仅保存 SHA-256 摘要；重置后旧令牌立即失效"
+    };
+
     private static JsonObject TokenBundle(AppUser user, string token)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
@@ -182,8 +258,8 @@ public static class IdentityEndpoints
             Id = Ids.New("usr"), UserName = name,
             Email = S(body, "email"), DisplayName = S(body, "displayName") is { Length: > 0 } d ? d : name,
             PasswordHash = hash, PasswordSalt = salt,
-            // New self-registered users are ordinary users. They may create their own
-            // space (and become its owner) but cannot touch other spaces or the console.
+            // New self-registered users are ordinary users. They own their own spaces
+            // and cannot see anybody else's, nor reach the admin console.
             GlobalRole = IdentityRoles.Editor, IsActive = true, CreatedAt = DateTime.UtcNow
         };
         await store.InsertUserPublicAsync(user, ct);
@@ -192,7 +268,9 @@ public static class IdentityEndpoints
         var token = IdentityTokens.Issue(fresh, EpistemeConfig.AuthSecret(), EpistemeConfig.JwtTtlSeconds());
         var result = TokenBundle(fresh, token);
         result["registered"] = true;
-        result["note"] = "已自动登录；新建的空间会自动授予你 owner 权限";
+        result["authorizationModel"] = "account";
+        result["mcpToken"] = McpTokenNode(null);
+        result["note"] = "已自动登录；登录后可在「我的 MCP Token」生成专属长期令牌；新建空间自动归属本账号";
         return result;
     }
 
@@ -215,16 +293,19 @@ public static class IdentityEndpoints
         user.LastLoginUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var token = IdentityTokens.Issue(user, EpistemeConfig.AuthSecret(), EpistemeConfig.JwtTtlSeconds());
         var result = TokenBundle(user, token);
-        result["spaces"] = await VisibleSpacesAsync(store, user, ct);
+        result["authorizationModel"] = "account";
+        result["spaces"] = await OwnedSpacesNodeAsync(store, user.Id, ct);
+        result["mcpToken"] = McpTokenNode(await store.McpTokenAsync(user.Id, ct));
+        result["note"] = "登录 JWT 用于浏览器；MCP / CI 建议使用「我的 MCP Token」里的长期令牌";
         return result;
     }
 
-    private static async Task<JsonArray> VisibleSpacesAsync(IdentityStore store, AppUser user, CancellationToken ct)
+    private static async Task<JsonArray> OwnedSpacesNodeAsync(
+        IdentityStore store, string userId, CancellationToken ct)
     {
-        var grants = await store.SpaceRolesAsync(user.Id, ct);
         var arr = new JsonArray();
-        foreach (var (spaceId, role) in grants)
-            arr.Add(new JsonObject { ["spaceId"] = spaceId, ["role"] = role });
+        foreach (var spaceId in await store.OwnedSpaceIdsAsync(userId, ct))
+            arr.Add(new JsonObject { ["spaceId"] = spaceId, ["role"] = "owner" });
         return arr;
     }
 
@@ -234,12 +315,14 @@ public static class IdentityEndpoints
         var p = RequirePrincipal(http);
         var user = await store.FindByIdAsync(p.UserId, ct)
                    ?? throw new BusinessException("UNAUTHORIZED", "账号不存在", 401);
-        var roles = new JsonObject();
-        foreach (var (spaceId, role) in p.SpaceRoles) roles[spaceId] = role;
+        var owned = new JsonArray();
+        foreach (var id in p.OwnedSpaceIds) owned.Add(JsonValue.Create(id));
         return new JsonObject
         {
             ["user"] = UserNode(user), ["isAdmin"] = p.IsAdmin,
-            ["spaceRoles"] = roles, ["spaceCount"] = p.SpaceRoles.Count,
+            ["authorizationModel"] = "account", ["authChannel"] = p.AuthChannel,
+            ["ownedSpaces"] = owned, ["ownedSpaceCount"] = p.OwnedSpaceIds.Count,
+            ["mcpToken"] = McpTokenNode(await store.McpTokenAsync(user.Id, ct)),
             ["authMode"] = EpistemeConfig.AuthMode()
         };
     }
@@ -248,7 +331,7 @@ public static class IdentityEndpoints
         HttpContext http, IdentityStore store, JsonObject body, CancellationToken ct)
     {
         RequireUsers();
-        var p = RequirePrincipal(http);
+        var p = RequireSession(http);
         var user = await store.FindByIdAsync(p.UserId, ct)
                    ?? throw new BusinessException("UNAUTHORIZED", "账号不存在", 401);
         var oldPassword = Jsonx.Plain(body["oldPassword"]);
@@ -260,7 +343,70 @@ public static class IdentityEndpoints
         user.PasswordHash = hash;
         user.PasswordSalt = salt;
         await store.UpdateUserAsync(user, ct);
-        return new JsonObject { ["changed"] = true, ["note"] = "已修改密码，现有令牌仍然有效" };
+        return new JsonObject
+        {
+            ["changed"] = true,
+            ["note"] = "已修改密码；登录 JWT 与 MCP 令牌均不受影响，可在「我的 MCP Token」单独重置"
+        };
+    }
+
+    // ---------- per-account MCP token (self-service) ----------
+
+    private static async Task<JsonObject> McpTokenStatusAsync(
+        HttpContext http, IdentityStore store, CancellationToken ct)
+    {
+        RequireUsers();
+        var p = RequireSession(http);
+        var node = McpTokenNode(await store.McpTokenAsync(p.UserId, ct));
+        node["account"] = p.UserName;
+        return node;
+    }
+
+    private static async Task<JsonObject> McpTokenRotateAsync(
+        HttpContext http, IdentityStore store, JsonObject body, CancellationToken ct)
+    {
+        RequireUsers();
+        var p = RequireSession(http);
+        var (token, hint, created, rotated) = await store.RotateMcpTokenAsync(p.UserId, ct);
+        var result = new JsonObject
+        {
+            ["generated"] = true,
+            ["rotated"] = rotated,
+            ["token"] = token,
+            ["tokenType"] = "Bearer",
+            ["hint"] = hint,
+            ["createdAt"] = DateTimeOffset.FromUnixTimeSeconds(created)
+                .UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+            ["account"] = p.UserName,
+            ["authorizationModel"] = "account",
+            ["bearerHeader"] = "Authorization: Bearer " + token,
+            ["alternateHeader"] = "X-Episteme-Mcp-Token: " + token,
+            ["invalidated"] = rotated
+                ? "旧令牌已立即失效" : "此前没有令牌，本次为首次生成",
+            ["note"] = "明文只在此响应里出现一次，请立即复制保存；下次只能查看状态或再次重置",
+            ["usage"] = new JsonObject
+            {
+                ["mcp"] = "POST /mcp（JSON-RPC tools/list / tools/call）",
+                ["sse"] = "GET /mcp/sse",
+                ["gitSync"] = "python3 tools/git-sync.py --auth bearer --token <明文> --space <自己空间的 id>",
+                ["scope"] = "只能访问本账号名下的空间；不能管理令牌、不能进管理后台"
+            }
+        };
+        if (S(body, "action") == "reset") result["action"] = "reset";
+        return result;
+    }
+
+    private static async Task<JsonObject> McpTokenRevokeAsync(
+        HttpContext http, IdentityStore store, CancellationToken ct)
+    {
+        RequireUsers();
+        var p = RequireSession(http);
+        await store.RevokeMcpTokenAsync(p.UserId, ct);
+        return new JsonObject
+        {
+            ["revoked"] = true, ["account"] = p.UserName,
+            ["note"] = "令牌已停用且立即失效；需要时重新生成即可"
+        };
     }
 
     // ---------- admin ----------
@@ -270,16 +416,19 @@ public static class IdentityEndpoints
     {
         RequireAdmin(http);
         var users = await store.ListUsersAsync(ct);
-        var members = await store.ListMembersAsync(null, null, ct);
+        var owners = await store.ListOwnersAsync(ct);
         var spaces = await svc.ListSpacesAsync(ct);
         return new JsonObject
         {
             ["authMode"] = EpistemeConfig.AuthMode(),
+            ["authorizationModel"] = "account",
             ["users"] = users.Count,
             ["activeUsers"] = users.Count(u => u.IsActive),
             ["admins"] = users.Count(u => string.Equals(u.GlobalRole, "admin", StringComparison.OrdinalIgnoreCase)),
             ["spaces"] = spaces["total"]?.GetValue<int>() ?? 0,
-            ["grants"] = members.Count,
+            ["ownedSpaces"] = owners.Count,
+            ["grants"] = 0,
+            ["mcpTokens"] = await store.McpTokenCountAsync(ct),
             ["documents"] = (spaces["items"] as JsonArray ?? new JsonArray())
                 .OfType<JsonObject>().Sum(o => o["documentCount"]?.GetValue<int>() ?? 0),
             ["registrationEnabled"] = EpistemeConfig.AllowRegistration()
@@ -291,12 +440,13 @@ public static class IdentityEndpoints
     {
         RequireAdmin(http);
         var users = await store.ListUsersAsync(ct);
-        var members = await store.ListMembersAsync(null, null, ct);
+        var owners = await store.ListOwnersAsync(ct);
         var items = new JsonArray();
         foreach (var u in users)
         {
             var node = UserNode(u);
-            node["spaceCount"] = members.Count(m => m.UserId == u.Id);
+            node["spaceCount"] = owners.Count(o => o.UserId == u.Id);
+            node["hasMcpToken"] = (await store.McpTokenAsync(u.Id, ct)) is { Revoked: false };
             items.Add(node);
         }
         return new JsonObject { ["items"] = items, ["total"] = items.Count };
@@ -305,7 +455,7 @@ public static class IdentityEndpoints
     private static async Task<JsonObject> CreateUserAsync(
         HttpContext http, IdentityStore store, JsonObject body, CancellationToken ct)
     {
-        var admin = RequireAdminAndReturn(http);
+        RequireAdminAndReturn(http);
         var name = S(body, "userName");
         var password = Jsonx.Plain(body["password"]);
         ValidateName(name);
@@ -327,22 +477,18 @@ public static class IdentityEndpoints
         };
         await store.InsertUserPublicAsync(user, ct);
         var result = new JsonObject { ["created"] = true, ["user"] = UserNode(user) };
-        // Optional first grant so the console can create a user + authorize in one step.
+        // Optional: hand an existing space's OWNERSHIP to the new account. There is no
+        // per-space grant any more, so this is a transfer, not an additional share.
         var spaceId = S(body, "spaceId");
-        var spaceRole = IdentityRoles.Normalize(S(body, "spaceRole"));
         if (!string.IsNullOrWhiteSpace(spaceId))
         {
-            if (!IdentityRoles.IsValidSpace(spaceRole)) spaceRole = IdentityRoles.Viewer;
-            await store.GrantAsync(user.Id, spaceId, spaceRole, admin.UserName, ct);
-            result["granted"] = new JsonObject { ["spaceId"] = spaceId, ["role"] = spaceRole };
+            await store.SetOwnerAsync(spaceId, user.Id, ct);
+            result["ownershipTransferred"] = new JsonObject
+            {
+                ["spaceId"] = spaceId, ["ownerUserId"] = user.Id
+            };
         }
         return result;
-    }
-
-    private static UserPrincipal RequireAdminAndReturn(HttpContext http)
-    {
-        RequireAdmin(http);
-        return RequirePrincipal(http);
     }
 
     private static async Task<JsonObject> UpdateUserAsync(
@@ -380,7 +526,7 @@ public static class IdentityEndpoints
         return new JsonObject
         {
             ["updated"] = true, ["changed"] = changed, ["user"] = UserNode(user),
-            ["note"] = "角色变更对该用户后续请求立即生效；已签发的令牌在到期前仍携带旧 uid，但服务端每次都会重新读取数据库角色"
+            ["note"] = "全局角色变更对该账号名下所有空间立即生效；已签发令牌在到期前仍带旧 uid，但服务端每次都重新读取数据库角色"
         };
     }
 
@@ -392,7 +538,11 @@ public static class IdentityEndpoints
             throw new BusinessException("SELF_DELETE_FORBIDDEN", "不能删除当前登录的管理员账号", 400);
         if (!await store.DeleteUserAsync(id, ct))
             throw new BusinessException("USER_NOT_FOUND", "用户不存在", 404);
-        return new JsonObject { ["deleted"] = true, ["id"] = id, ["grantsRemoved"] = true };
+        return new JsonObject
+        {
+            ["deleted"] = true, ["id"] = id, ["grantsRemoved"] = true,
+            ["note"] = "该账号名下空间已自动转交其他管理员，MCP 令牌一并删除"
+        };
     }
 
     private static async Task<JsonObject> AdminSpacesAsync(
@@ -400,71 +550,89 @@ public static class IdentityEndpoints
     {
         RequireAdmin(http);
         var spaces = await svc.ListSpacesAsync(ct);
-        var members = await store.ListMembersAsync(null, null, ct);
+        var owners = await store.ListOwnersAsync(ct);
+        var names = (await store.ListUsersAsync(ct)).ToDictionary(u => u.Id, u => u.UserName);
         var items = new JsonArray();
         foreach (var s in (spaces["items"] as JsonArray ?? new JsonArray()).OfType<JsonObject>())
         {
             var node = (JsonObject)s.DeepClone();
-            node["memberCount"] = members.Count(m => m.SpaceId == Jsonx.Plain(s["id"]));
+            var ownerId = owners.FirstOrDefault(o => o.SpaceId == Jsonx.Plain(s["id"]))?.UserId ?? "";
+            node["ownerUserId"] = ownerId;
+            node["ownerUserName"] = names.GetValueOrDefault(ownerId, "");
+            node["memberCount"] = string.IsNullOrWhiteSpace(ownerId) ? 0 : 1;
             items.Add(node);
         }
-        return new JsonObject { ["items"] = items, ["total"] = items.Count };
-    }
-
-    private static async Task<JsonObject> ListMembersAsync(
-        HttpContext http, IdentityStore store, CancellationToken ct)
-    {
-        RequireAdmin(http);
-        var spaceId = http.Request.Query["spaceId"].ToString();
-        var userId = http.Request.Query["userId"].ToString();
-        var members = await store.ListMembersAsync(
-            string.IsNullOrWhiteSpace(spaceId) ? null : spaceId,
-            string.IsNullOrWhiteSpace(userId) ? null : userId, ct);
-        var names = (await store.ListUsersAsync(ct)).ToDictionary(u => u.Id, u => u.UserName);
-        var items = new JsonArray();
-        foreach (var m in members)
-            items.Add(new JsonObject
-            {
-                ["id"] = m.Id, ["userId"] = m.UserId,
-                ["userName"] = names.GetValueOrDefault(m.UserId, m.UserId),
-                ["spaceId"] = m.SpaceId, ["role"] = m.Role,
-                ["grantedBy"] = m.GrantedBy, ["createdAt"] = m.CreatedAt
-            });
-        return new JsonObject { ["items"] = items, ["total"] = items.Count };
-    }
-
-    private static async Task<JsonObject> GrantAsync(
-        HttpContext http, IdentityStore store, JsonObject body, CancellationToken ct)
-    {
-        var p = RequireAdminAndReturn(http);
-        var userId = S(body, "userId");
-        var spaceId = S(body, "spaceId");
-        var role = IdentityRoles.Normalize(S(body, "role"));
-        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(spaceId))
-            throw new BusinessException("BAD_REQUEST", "需要 userId 与 spaceId", 400);
-        if (!IdentityRoles.IsValidSpace(role))
-            throw new BusinessException("BAD_REQUEST", "role 必须是 owner/editor/agent/viewer", 400);
-        if (await store.FindByIdAsync(userId, ct) is null)
-            throw new BusinessException("USER_NOT_FOUND", "用户不存在", 404);
-        await store.GrantAsync(userId, spaceId, role, p.UserName, ct);
         return new JsonObject
         {
-            ["granted"] = true, ["userId"] = userId, ["spaceId"] = spaceId,
-            ["role"] = role, ["grantedBy"] = p.UserName
+            ["authorizationModel"] = "account", ["items"] = items, ["total"] = items.Count
         };
     }
 
-    private static async Task<JsonObject> RevokeAsync(
-        HttpContext http, IdentityStore store, JsonObject body, CancellationToken ct)
+    private static async Task<JsonObject> ListOwnersAsync(
+        HttpContext http, IdentityStore store, CancellationToken ct)
     {
         RequireAdmin(http);
+        var owners = await store.ListOwnersAsync(ct);
+        var names = (await store.ListUsersAsync(ct)).ToDictionary(u => u.Id, u => u.UserName);
+        var spaces = await store.OwnerMapAsync(ct);
+        var items = new JsonArray();
+        foreach (var o in owners)
+            items.Add(new JsonObject
+            {
+                ["spaceId"] = o.SpaceId, ["userId"] = o.UserId,
+                ["userName"] = names.GetValueOrDefault(o.UserId, o.UserId),
+                ["role"] = "owner", ["createdAt"] = o.CreatedAt
+            });
+        return new JsonObject
+        {
+            ["authorizationModel"] = "account", ["items"] = items,
+            ["total"] = items.Count, ["spaces"] = spaces.Count
+        };
+    }
+
+    private static async Task<JsonObject> TransferOwnerAsync(
+        HttpContext http, IdentityStore store, EpistemeService svc,
+        string spaceId, JsonObject body, CancellationToken ct)
+    {
+        var p = RequireAdminAndReturn(http);
         var userId = S(body, "userId");
-        if (string.IsNullOrWhiteSpace(userId)) userId = http.Request.Query["userId"].ToString();
-        var spaceId = S(body, "spaceId");
-        if (string.IsNullOrWhiteSpace(spaceId)) spaceId = http.Request.Query["spaceId"].ToString();
-        if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(spaceId))
-            throw new BusinessException("BAD_REQUEST", "需要 userId 与 spaceId", 400);
-        var removed = await store.RevokeAsync(userId, spaceId, ct);
-        return new JsonObject { ["revoked"] = removed, ["userId"] = userId, ["spaceId"] = spaceId };
+        if (string.IsNullOrWhiteSpace(userId))
+            throw new BusinessException("BAD_REQUEST", "需要 userId（新归属账号）", 400);
+        var user = await store.FindByIdAsync(userId, ct)
+                   ?? throw new BusinessException("USER_NOT_FOUND", "用户不存在", 404);
+        var space = await svc.GetSpaceAsync(spaceId, ct);
+        await store.SetOwnerAsync(Jsonx.Plain(space["id"]), userId, ct);
+        return new JsonObject
+        {
+            ["transferred"] = true, ["spaceId"] = Jsonx.Plain(space["id"]),
+            ["ownerUserId"] = userId, ["ownerUserName"] = user.UserName,
+            ["by"] = p.UserName,
+            ["note"] = "归属转让后，原账号立即失去该空间的读写权限"
+        };
+    }
+
+    private static async Task<JsonObject> ListLegacyMembersAsync(
+        HttpContext http, IdentityStore store, CancellationToken ct)
+    {
+        RequireAdmin(http);
+        // Read-only view of ownership, shaped like the old grant matrix so older
+        // clients keep working without ever influencing authorization.
+        var owners = await store.ListOwnersAsync(ct);
+        var names = (await store.ListUsersAsync(ct)).ToDictionary(u => u.Id, u => u.UserName);
+        var items = new JsonArray();
+        foreach (var o in owners)
+            items.Add(new JsonObject
+            {
+                ["id"] = o.SpaceId, ["userId"] = o.UserId,
+                ["userName"] = names.GetValueOrDefault(o.UserId, o.UserId),
+                ["spaceId"] = o.SpaceId, ["role"] = "owner",
+                ["grantedBy"] = "account-ownership", ["createdAt"] = o.CreatedAt
+            });
+        return new JsonObject
+        {
+            ["authorizationModel"] = "account", ["deprecated"] = true,
+            ["items"] = items, ["total"] = items.Count,
+            ["note"] = "已改为按账号授权：这里只展示空间归属，写入请使用 PUT /api/v1/admin/spaces/{id}/owner"
+        };
     }
 }

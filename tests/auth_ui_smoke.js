@@ -105,12 +105,15 @@ const visible = (dom, id) => {
   const booted = await waitFor(() => !!doc.getElementById('auth-overlay'));
   check('users 模式自动注入登录墙与管理后台容器', booted
     && !!doc.getElementById('admin-overlay'), !!doc.getElementById('auth-overlay'));
-  check('顶栏注入用户芯片 / 管理后台 / 登出按钮',
-    !!doc.getElementById('auth-user-chip') && !!doc.getElementById('btn-admin')
-    && !!doc.getElementById('btn-logout'));
+  check('顶栏注入用户芯片 / MCP Token / 管理后台 / 登出按钮',
+    !!doc.getElementById('auth-user-chip') && !!doc.getElementById('btn-token')
+    && !!doc.getElementById('btn-admin') && !!doc.getElementById('btn-logout'));
+  check('注入我的 MCP Token 面板容器',
+    !!doc.getElementById('token-overlay') && !!doc.getElementById('token-status'));
   check('未登录时显示登录墙且身份按钮隐藏',
     visible(dom, 'auth-overlay') && hidden(dom, 'auth-user-chip')
-    && hidden(dom, 'btn-admin') && hidden(dom, 'btn-logout'));
+    && hidden(dom, 'btn-admin') && hidden(dom, 'btn-logout')
+    && hidden(dom, 'btn-token'));
   check('auth.js 同步暴露 token provider',
     typeof dom.window.EpistemeAuth.token === 'function'
     && dom.window.EpistemeAuth.token() === '', dom.window.EpistemeAuth.mode);
@@ -154,8 +157,9 @@ const visible = (dom, id) => {
   check('身份芯片显示全局角色',
     (doc.getElementById('auth-user-chip').textContent || '').includes('admin'),
     doc.getElementById('auth-user-chip').textContent);
-  check('window.EpistemeAuth 暴露管理后台入口',
-    typeof dom.window.EpistemeAuth.openAdmin === 'function');
+  check('window.EpistemeAuth 暴露管理后台 / MCP Token 入口',
+    typeof dom.window.EpistemeAuth.openAdmin === 'function'
+    && typeof dom.window.EpistemeAuth.openToken === 'function');
 
   click(dom, '#btn-admin');
   const opened = await waitFor(() => visible(dom, 'admin-overlay')
@@ -168,13 +172,57 @@ const visible = (dom, id) => {
     && (doc.getElementById('admin-body').textContent || '').includes(ADMIN_USER),
     (doc.getElementById('admin-body').textContent || '').slice(0, 120));
 
-  click(dom, '[data-auth-action="admin-grants"]');
-  await sleep(220);
-  check('空间授权页签可切换',
-    (doc.getElementById('admin-body').textContent || '').length > 0,
-    (doc.getElementById('admin-body').textContent || '').slice(0, 120));
+  click(dom, '[data-auth-action="admin-ownership"]');
+  await sleep(240);
+  check('空间归属页签可切换且不再出现授权矩阵',
+    (doc.getElementById('admin-body').textContent || '').includes('空间归属')
+    && !(doc.getElementById('admin-body').textContent || '').includes('授权 / 更新'),
+    (doc.getElementById('admin-body').textContent || '').slice(0, 140));
   click(dom, '[data-auth-action="close-admin"]');
   check('管理后台可关闭', hidden(dom, 'admin-overlay'));
+
+  // ---- per-account MCP token panel ----
+  dom.window.confirm = () => true;
+  click(dom, '#btn-token');
+  const tokenOpened = await waitFor(() => visible(dom, 'token-overlay')
+    && (doc.getElementById('token-status').textContent || '').includes('状态'), 8000);
+  check('点击「我的 MCP Token」打开面板并渲染状态', tokenOpened,
+    (doc.getElementById('token-status').textContent || '').slice(0, 120));
+  const tokenStatusText = doc.getElementById('token-status').textContent || '';
+  check('MCP Token 面板展示状态与 Bearer 用法',
+    /状态(未生成|已启用|已停用)/.test(tokenStatusText)
+    && (doc.querySelector('.token-usage') || {}).textContent.includes('Authorization: Bearer'),
+    tokenStatusText.slice(0, 120));
+
+  // The instance may already have a token from an earlier suite; either way a
+  // generate/reset must yield a fresh one-time plaintext.
+  const rotateAction = visible(dom, 'btn-token-generate')
+    ? '[data-auth-action="token-generate"]' : '[data-auth-action="token-reset"]';
+  click(dom, rotateAction);
+  const generated = await waitFor(() => !!doc.getElementById('token-plain')
+    && (doc.getElementById('token-plain').textContent || '').startsWith('epm_'), 8000);
+  const firstToken = (doc.getElementById('token-plain') || {}).textContent || '';
+  check('生成/重置令牌后一次性明文可见', generated && firstToken.length > 40, firstToken.slice(0, 14));
+  check('生成后状态变为已启用且出现重置/停用按钮',
+    (doc.getElementById('token-status').textContent || '').includes('已启用')
+    && visible(dom, 'btn-token-reset') && visible(dom, 'btn-token-revoke'),
+    (doc.getElementById('token-status').textContent || '').slice(0, 120));
+
+  click(dom, '[data-auth-action="token-reset"]');
+  const reset = await waitFor(() => {
+    const el = doc.getElementById('token-plain');
+    return el && el.textContent && el.textContent !== firstToken;
+  }, 8000);
+  check('重置令牌返回新的明文', reset,
+    ((doc.getElementById('token-plain') || {}).textContent || '').slice(0, 14));
+
+  click(dom, '[data-auth-action="token-revoke"]');
+  const revoked = await waitFor(() => (doc.getElementById('token-status').textContent || '')
+    .includes('已停用'), 8000);
+  check('停用令牌后状态变为已停用', revoked,
+    (doc.getElementById('token-status').textContent || '').slice(0, 120));
+  click(dom, '[data-auth-action="close-token"]');
+  check('MCP Token 面板可关闭', hidden(dom, 'token-overlay'));
 
   dom.window.EpistemeAuth.onUnauthorized();
   check('401 时清除令牌并重新弹出登录墙',
@@ -216,9 +264,10 @@ const visible = (dom, id) => {
   });
   legacyDom.window.eval(AUTH_JS);
   await sleep(300);
-  check('legacy 模式不注入任何登录/管理 DOM',
+  check('legacy 模式不注入任何登录/管理/MCP Token DOM',
     !legacyDom.window.document.getElementById('auth-overlay')
     && !legacyDom.window.document.getElementById('admin-overlay')
+    && !legacyDom.window.document.getElementById('token-overlay')
     && legacyDom.window.EpistemeAuth.token() === '',
     legacyDom.window.EpistemeAuth.mode);
 

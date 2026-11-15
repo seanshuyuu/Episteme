@@ -137,9 +137,11 @@ check("auth/config 声明账号体系与自助注册",
 
 code, caps = http("GET", API + "/capabilities")
 sec = caps.get("security") or {}
-check("capabilities 公开且声明角色/空间授权/管理后台",
+check("capabilities 公开且声明按账号授权/MCP 令牌/管理后台",
       code == 200 and caps.get("auth", {}).get("mode") == "users"
-      and sec.get("adminConsole") is True and sec.get("perSpaceGrants") is True,
+      and sec.get("adminConsole") is True and sec.get("authorizationModel") == "account"
+      and sec.get("accountScoped") is True and sec.get("perAccountMcpTokens") is True
+      and sec.get("perSpaceGrants") is False,
       {"auth": caps.get("auth"), "security": sec})
 
 code, res = http("GET", API + "/spaces")
@@ -280,47 +282,25 @@ check("安装模板后动态派生 query/create 工具",
       and "episteme.create_space" in names2,
       {"total": len(names2), "dynamic": result2.get("dynamicToolCount")})
 
-# Per-space authorization boundary.
+# Account ownership boundary: admin's space is invisible to a different account.
 code, visible = http("GET", API + "/spaces", token=user_token)
 visible_ids = [s.get("id") for s in visible.get("items", [])]
-check("普通用户看不到未授权的空间", space_id not in visible_ids, visible_ids)
+check("普通用户看不到别人名下的空间", space_id not in visible_ids, visible_ids)
 code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_token)
-check("普通用户直读未授权空间被 403 SPACE_FORBIDDEN",
-      code == 403 and res.get("code") == "SPACE_FORBIDDEN", res)
+check("普通用户直读他人空间被 403 ACCOUNT_FORBIDDEN",
+      code == 403 and res.get("code") == "ACCOUNT_FORBIDDEN", res)
 code, res = mcp("tools/call", {"spaceId": space_id, "name": "episteme.tree",
                                "arguments": {}}, user_token)
-check("MCP 携带未授权 spaceId 同样被 403", code == 403, res)
-
-code, grant = http("PUT", ADMIN + "/members",
-                   {"userId": user_id, "spaceId": space_id, "role": "viewer"}, admin_token)
-check("管理员按空间授予 viewer", code == 200 and grant.get("granted") is not False, grant)
-code, visible = http("GET", API + "/spaces", token=user_token)
-check("授权后普通用户可见该空间",
-      space_id in [s.get("id") for s in visible.get("items", [])], visible.get("items"))
-code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_token)
-check("viewer 可读目录树", code == 200 and len(res.get("items", [])) > 0, res.get("total"))
-# Directory structure changes are owner-only; content writes honour editor/agent.
-project_node_id = paths.get("/代码项目/桌面端") or ""
-write_doc = {"title": "授权写入验证",
-             "fields": {"title": "授权写入验证", "appType": "桌面端"}}
-write_path = API + "/spaces/" + space_id + "/nodes/" + project_node_id + "/documents"
-code, res = http("POST", write_path, write_doc, user_token)
-check("viewer 在授权空间只读，写入文档被拒", code == 403, res)
+check("MCP 携带他人 spaceId 同样被 403", code == 403, res)
 
 code, res = http("PUT", ADMIN + "/members",
-                 {"userId": user_id, "spaceId": space_id, "role": "editor"}, admin_token)
-code, res2 = http("POST", write_path, write_doc, user_token)
-check("升级为 editor 后可在授权空间写入文档",
-      code == 200 and bool(res2.get("docId")), res2)
-code, members = http("GET", ADMIN + "/members", token=admin_token)
-check("授权矩阵可查询", code == 200 and any(
-      m.get("userId") == user_id and m.get("spaceId") == space_id
-      for m in members.get("items", [])), members.get("total"))
-code, res = http("DELETE", ADMIN + "/members",
-                 {"userId": user_id, "spaceId": space_id}, admin_token)
-check("管理员可撤销空间授权", code == 200, res)
-code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_token)
-check("撤销授权后再次被 403", code == 403 and res.get("code") == "SPACE_FORBIDDEN", res)
+                 {"userId": user_id, "spaceId": space_id, "role": "viewer"}, admin_token)
+check("旧空间授权矩阵已停用 GRANT_MODEL_REMOVED",
+      code == 409 and res.get("code") == "GRANT_MODEL_REMOVED", res)
+code, owners = http("GET", ADMIN + "/owners", token=admin_token)
+check("空间归属表可查询且该空间归属管理员",
+      code == 200 and any(o.get("spaceId") == space_id and o.get("userId") == admin_id
+                          for o in owners.get("items", [])), owners.get("items"))
 
 # Any authenticated account may create its own space through MCP.
 code, rpc = mcp("tools/call", {
@@ -331,17 +311,63 @@ own = structured(rpc)
 own_id = own.get("id", "")
 check("普通用户可用 MCP 创建自己的空间", code == 200 and bool(own_id), own)
 code, res = http("GET", API + "/spaces/" + own_id + "/tree", token=user_token)
-check("空间创建者自动获得 owner 权限", code == 200, res)
+check("空间创建者自动成为归属账号", code == 200, res)
+code, res = http("GET", API + "/spaces/" + own_id + "/tree", token=admin_token)
+check("管理员仍可查看所有账号的空间", code == 200, res)
+# Global role is effective inside the account's own spaces.
+project_node_id = paths.get("/代码项目/桌面端") or ""
+write_doc = {"title": "归属写入验证",
+             "fields": {"title": "归属写入验证", "appType": "桌面端"}}
+code, res = http("POST", API + "/spaces/" + space_id + "/nodes/" +
+                 project_node_id + "/documents", write_doc, user_token)
+check("普通用户不能向他人空间写文档", code == 403, res)
+
+# ---- per-account MCP token lifecycle ----
+code, st0 = http("GET", AUTH + "/me/mcp-token", token=user_token)
+check("普通用户可查看自己的 MCP token 状态（无明文）",
+      code == 200 and st0.get("hasToken") is False and "token" not in st0, st0)
+code, gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, user_token)
+user_mcp = gen.get("token", "")
+check("普通用户可生成自己的长期 MCP token",
+      code == 200 and user_mcp.startswith("epm_"), gen.get("rotated"))
+code, res = http("GET", API + "/spaces", token=user_mcp)
+check("MCP token 只看到本账号名下空间",
+      code == 200 and [i.get("id") for i in res.get("items", [])] == [own_id],
+      res.get("items"))
+code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_mcp)
+check("MCP token 读他人空间被 ACCOUNT_FORBIDDEN",
+      code == 403 and res.get("code") == "ACCOUNT_FORBIDDEN", res)
+code, res = http("POST", AUTH + "/me/mcp-token", {"action": "reset"}, user_mcp)
+check("MCP token 不能重置自己", code == 403 and
+      res.get("code") == "MCP_TOKEN_SESSION_REQUIRED", res)
+code, gen2 = http("POST", AUTH + "/me/mcp-token", {"action": "reset"}, user_token)
+user_mcp2 = gen2.get("token", "")
+check("登录会话可重置 MCP token 且返回新明文",
+      code == 200 and gen2.get("rotated") is True and user_mcp2 != user_mcp
+      and user_mcp2.startswith("epm_"), gen2.get("rotated"))
+code, res = http("GET", API + "/spaces", token=user_mcp)
+check("重置后旧 token 立即 401 MCP_TOKEN_INVALID",
+      code == 401 and res.get("code") == "MCP_TOKEN_INVALID", res)
+code, res = http("GET", API + "/spaces", token=user_mcp2)
+check("新 token 立即可用", code == 200, res)
+code, res = http("DELETE", AUTH + "/me/mcp-token", {}, user_token)
+check("登录会话可停用 MCP token", code == 200 and res.get("revoked") is True, res)
+code, res = http("GET", API + "/spaces", token=user_mcp2)
+check("停用后 token 立即失效", code == 401, res)
 
 # ---------------------------------------------------------------- D. 管理员后台
 qa_name = "qa" + stamp
 code, created_user = http("POST", ADMIN + "/users",
                           {"userName": qa_name, "password": "Qa-Pass-2026!",
-                           "globalRole": "viewer", "spaceId": own_id,
-                           "spaceRole": "editor"}, admin_token)
+                           "globalRole": "viewer", "spaceId": own_id}, admin_token)
 qa_id = ((created_user.get("user") or {}).get("id", ""))
-check("管理员创建用户并一步完成空间授权",
-      code == 200 and bool(qa_id) and created_user.get("granted") is not None, created_user)
+check("管理员创建用户并一步转让空间归属",
+      code == 200 and bool(qa_id)
+      and (created_user.get("ownershipTransferred") or {}).get("spaceId") == own_id,
+      created_user)
+code, res = http("GET", API + "/spaces/" + own_id + "/tree", token=user_token)
+check("归属转让后原账号立即失去该空间权限",
+      code == 403 and res.get("code") == "ACCOUNT_FORBIDDEN", res)
 code, res = http("PATCH", ADMIN + "/users/" + qa_id,
                  {"globalRole": "agent", "isActive": False}, admin_token)
 check("管理员可改全局角色并停用账号",
@@ -379,6 +405,11 @@ check("登录限流在阈值后返回 429 LOGIN_RATE_LIMITED",
       {"first": codes[0], "last": codes[-1], "limit": LOGIN_LIMIT})
 
 # ---------------------------------------------------------------- E. git 同步与在线预览
+code, adm_gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, admin_token)
+admin_mcp = adm_gen.get("token", "")
+check("管理员可生成自己的长期 MCP token",
+      code == 200 and admin_mcp.startswith("epm_"), adm_gen.get("rotated"))
+
 with tempfile.TemporaryDirectory(prefix="episteme-git-") as repo:
     def git(*args):
         return subprocess.run(["git", "-C", repo, *args],
@@ -401,22 +432,23 @@ with tempfile.TemporaryDirectory(prefix="episteme-git-") as repo:
 
     bearer = ["--auth", "bearer", "--token", admin_token]
     login = ["--auth", "login", "--user", ADMIN_USER, "--password", ADMIN_PASSWORD]
+    mcpauth = ["--auth", "mcp", "--token", admin_mcp]
     routes = [
-        ("desktop", "桌面端", "桌面客户端", bearer),
-        ("mobile", "移动端", "移动 App", bearer),
-        ("cross", "跨平台", "跨平台工具", login),
-        ("fullstack", "前后端分离", "订单中台", bearer),
+        ("desktop", "桌面端", "桌面客户端", bearer, "bearer"),
+        ("mobile", "移动端", "移动 App", mcpauth, "mcp-token"),
+        ("cross", "跨平台", "跨平台工具", login, "login"),
+        ("fullstack", "前后端分离", "订单中台", bearer, "bearer"),
     ]
     synced = {}
-    for app_type, label, project, auth_args in routes:
+    for app_type, label, project, auth_args, auth_label in routes:
         rc, events, detail = run_sync(repo, space_id, app_type, project, auth_args)
         events_synced = [e for e in events if e.get("event") == "synced"]
         synced[app_type] = events_synced[0] if events_synced else {}
-        check("git 同步归档到%s（%s 认证）" % (label, "login" if app_type == "cross" else "bearer"),
+        check("git 同步归档到%s（%s 认证）" % (label, auth_label),
               rc == 0 and bool(events_synced) and bool(synced[app_type].get("docId")),
               {"rc": rc, "detail": detail[:220]})
 
-    for app_type, label, project, _ in routes:
+    for app_type, label, project, _, _ in routes:
         node_path = "/Git 提交/" + label
         doc_id = (synced.get(app_type) or {}).get("docId", "")
         if not doc_id:
@@ -480,6 +512,13 @@ check("登录墙包含注册/登录/管理后台逻辑",
       and "request(ADMIN, '/users'" in auth_js
       and "function openAdmin" in auth_js
       and "AUTH + '/config'" in auth_js, len(auth_js))
+check("auth.js 注入每账号 MCP token 面板与空间归属页签",
+      "function openToken" in auth_js
+      and "AUTH, '/me/mcp-token'" in auth_js
+      and "data-auth-action=\"admin-ownership\"" in auth_js
+      and "btn-token" in auth_js, len(auth_js))
+_, app_css = text(BASE + "/app.css")
+check("app.css 提供 MCP token 面板样式", ".token-dialog" in app_css, len(app_css))
 _, app_js = text(BASE + "/app.js")
 check("阅读器实现按路径分组的代码文件树",
       "renderFileTree" in app_js and "select-git-file" in app_js, len(app_js))

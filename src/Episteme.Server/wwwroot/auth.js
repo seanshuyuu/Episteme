@@ -1,9 +1,10 @@
-/* Episteme · 知书 — accounts, login wall and admin console.
+/* Episteme · 知书 — accounts, login wall, per-account MCP token and admin console.
  *
  * Progressive enhancement: in legacy / secure mode this file does nothing at all
  * (token() returns ''), so every existing REST / MCP / UI regression is untouched.
  * In EPISTEME_AUTH_MODE=users it adds a login wall, a Bearer token to all API calls,
- * and an admin console for users / roles / per-space grants.
+ * a self-service "我的 MCP Token" panel and an admin console for users / roles /
+ * account-owned spaces.
  *
  * Zero build step, zero dependencies, no framework.
  */
@@ -15,12 +16,12 @@
   var API = '/api/v1/episteme';
   var KEY = 'episteme.auth.token';
   var ROLES = ['admin', 'owner', 'editor', 'agent', 'viewer'];
-  var SPACE_ROLES = ['owner', 'editor', 'agent', 'viewer'];
 
   var state = {
     mode: 'legacy', token: '', user: null, isAdmin: false,
-    config: null, users: [], spaces: [], members: [],
-    adminOpen: false, tab: 'login', busy: false
+    config: null, users: [], spaces: [], owners: [],
+    adminOpen: false, tokenOpen: false, tokenInfo: null, tokenPlain: '',
+    tab: 'login', busy: false
   };
 
   function $(id) { return document.getElementById(id); }
@@ -88,20 +89,44 @@
       '      <button data-auth-action="register" class="primary full">注册并登录</button>' +
       '    </div>' +
       '    <p id="auth-hint" class="hint"></p>' +
-      '    <p class="auth-foot">账号与空间授权由服务端校验；令牌仅保存在本浏览器。</p>' +
+      '    <p class="auth-foot">按账号授权：空间归属与 MCP 令牌均由服务端校验；登录令牌仅保存在本浏览器。</p>' +
       '  </div>' +
       '</section>' +
       '<section id="admin-overlay" class="admin-overlay hidden" role="dialog" aria-modal="true" aria-label="管理后台">' +
       '  <div class="admin-dialog">' +
-      '    <header class="admin-head"><strong>管理后台 · 用户与授权</strong>' +
+      '    <header class="admin-head"><strong>管理后台 · 账号与空间归属</strong>' +
       '      <button data-auth-action="close-admin" class="ghost">关闭 ×</button></header>' +
       '    <div id="admin-overview" class="admin-overview"></div>' +
       '    <nav class="admin-tabs">' +
       '      <button data-auth-action="admin-users" class="active">用户与角色</button>' +
-      '      <button data-auth-action="admin-grants">空间授权</button>' +
+      '      <button data-auth-action="admin-ownership">空间归属</button>' +
       '    </nav>' +
       '    <div id="admin-body"></div>' +
       '    <p id="admin-hint" class="hint"></p>' +
+      '  </div>' +
+      '</section>' +
+      '<section id="token-overlay" class="admin-overlay hidden" role="dialog" aria-modal="true" aria-label="我的 MCP Token">' +
+      '  <div class="token-dialog">' +
+      '    <header class="admin-head"><strong>我的 MCP Token</strong>' +
+      '      <button data-auth-action="close-token" class="ghost">关闭 ×</button></header>' +
+      '    <p class="token-lead">按账号授权：这个长期令牌只能读写 <strong id="token-account">本账号</strong> 名下的空间，' +
+      '      与浏览器登录 JWT 相互独立。重置后旧令牌立即失效。</p>' +
+      '    <div id="token-status" class="token-status"></div>' +
+      '    <div id="token-reveal" class="token-reveal hidden"></div>' +
+      '    <div class="token-ops">' +
+      '      <button data-auth-action="token-generate" id="btn-token-generate" class="primary">生成令牌</button>' +
+      '      <button data-auth-action="token-reset" id="btn-token-reset" class="ghost hidden">重置令牌</button>' +
+      '      <button data-auth-action="token-revoke" id="btn-token-revoke" class="ghost danger hidden">停用</button>' +
+      '      <button data-auth-action="token-copy" id="btn-token-copy" class="ghost hidden">复制</button>' +
+      '    </div>' +
+      '    <div class="token-usage">' +
+      '      <div class="subhead">用法</div>' +
+      '      <pre>Authorization: Bearer &lt;epm_...&gt;\n' +
+      'POST /mcp        JSON-RPC tools/list / tools/call\n' +
+      'GET  /mcp/sse    SSE 传输\n' +
+      'python3 tools/git-sync.py --auth bearer --token &lt;明文&gt; --space &lt;自己空间的 id&gt;</pre>' +
+      '    </div>' +
+      '    <p id="token-hint" class="hint"></p>' +
       '  </div>' +
       '</section>';
     document.body.appendChild(wrap);
@@ -117,7 +142,9 @@
       if (ev.key === 'Escape') { /* handled globally below */ }
     });
     document.addEventListener('keydown', function (ev) {
-      if (ev.key === 'Escape' && state.adminOpen) closeAdmin();
+      if (ev.key !== 'Escape') return;
+      if (state.tokenOpen) closeToken();
+      else if (state.adminOpen) closeAdmin();
     });
     // topbar identity chip placed after the help button
     var topbar = document.querySelector('.topbar-meta');
@@ -126,6 +153,12 @@
       chip.id = 'auth-user-chip';
       chip.className = 'chip auth-chip hidden';
       topbar.appendChild(chip);
+      var tok = document.createElement('button');
+      tok.id = 'btn-token';
+      tok.className = 'ghost hidden';
+      tok.setAttribute('data-auth-action', 'open-token');
+      tok.textContent = '我的 MCP Token';
+      topbar.appendChild(tok);
       var btn = document.createElement('button');
       btn.id = 'btn-admin';
       btn.className = 'ghost hidden';
@@ -243,23 +276,31 @@
   }
 
   function renderIdentity() {
-    var chip = $('auth-user-chip'), adminBtn = $('btn-admin'), out = $('btn-logout');
+    var chip = $('auth-user-chip'), tokBtn = $('btn-token'), adminBtn = $('btn-admin'), out = $('btn-logout');
     if (!chip) return;
     if (!state.user) {
-      hide(chip); hide(adminBtn); hide(out);
+      hide(chip); hide(tokBtn); hide(adminBtn); hide(out);
       return;
     }
     chip.textContent = state.user.displayName + ' · ' + state.user.globalRole;
     show(chip);
+    show(tokBtn);
     show(out);
     if (state.isAdmin) show(adminBtn); else hide(adminBtn);
+  }
+
+  // jsdom has no native dialogs; a guarded helper keeps the DOM regression headless.
+  function confirmAction(message) {
+    try { return window.confirm ? window.confirm(message) : true; }
+    catch (e) { return true; }
   }
 
   function logout() {
     try { request(AUTH, '/logout', { method: 'POST', body: '{}' }); } catch (e) { /* best effort */ }
     saveToken('');
     state.user = null; state.isAdmin = false;
-    closeAdmin();
+    state.tokenInfo = null; state.tokenPlain = '';
+    closeAdmin(); closeToken();
     renderIdentity();
     openLogin('已登出');
   }
@@ -269,12 +310,129 @@
     if (!EpistemeConfigUsers()) return;
     saveToken('');
     state.user = null; state.isAdmin = false;
+    state.tokenInfo = null; state.tokenPlain = '';
     renderIdentity();
-    closeAdmin();
+    closeAdmin(); closeToken();
     openLogin('登录已失效，请重新登录');
   }
 
   function EpistemeConfigUsers() { return state.mode === 'users'; }
+
+  // ---------- per-account MCP token (self-service) ----------
+
+  async function openToken() {
+    if (!state.token || !state.user) { openLogin('请先登录，再管理自己的 MCP Token'); return; }
+    state.tokenOpen = true;
+    state.tokenPlain = '';
+    show($('token-overlay'));
+    renderTokenReveal();
+    hint('token-hint', '');
+    await loadTokenStatus();
+  }
+
+  function closeToken() {
+    state.tokenOpen = false;
+    hide($('token-overlay'));
+    state.tokenPlain = '';
+    renderTokenReveal();
+  }
+
+  function fmtTime(value) {
+    if (!value) return '—';
+    var d = new Date(value);
+    return isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+  }
+
+  async function loadTokenStatus() {
+    try {
+      var info = await request(AUTH, '/me/mcp-token');
+      state.tokenInfo = info;
+      renderTokenPanel();
+      hint('token-hint', '');
+    } catch (e) { hint('token-hint', e.message, 'error'); }
+  }
+
+  function renderTokenPanel() {
+    var info = state.tokenInfo || {};
+    var box = $('token-status');
+    if (!box) return;
+    var label = !info.hasToken ? '未生成' : (info.revoked ? '已停用' : '已启用');
+    var rows = [
+      ['状态', label],
+      ['令牌提示', info.hint || '—'],
+      ['创建时间', fmtTime(info.createdAt)],
+      ['最后使用', fmtTime(info.lastUsedAt)],
+      ['作用范围', '仅本账号名下的空间'],
+      ['令牌前缀', info.prefix || 'epm_']
+    ];
+    box.innerHTML = rows.map(function (r) {
+      return '<div class="token-row"><span>' + esc(r[0]) + '</span><strong>' + esc(r[1]) + '</strong></div>';
+    }).join('');
+    var acc = $('token-account');
+    if (acc) acc.textContent = state.user ? state.user.userName : (info.account || '本账号');
+    var gen = $('btn-token-generate');
+    if (info.hasToken && !info.revoked) {
+      hide(gen); show($('btn-token-reset')); show($('btn-token-revoke'));
+    } else {
+      show(gen); hide($('btn-token-reset')); hide($('btn-token-revoke'));
+      if (gen) gen.textContent = info.revoked ? '重新生成令牌' : '生成令牌';
+    }
+  }
+
+  function renderTokenReveal() {
+    var box = $('token-reveal'), copy = $('btn-token-copy');
+    if (!box) return;
+    if (!state.tokenPlain) {
+      box.innerHTML = ''; hide(box); if (copy) hide(copy); return;
+    }
+    box.innerHTML =
+      '<div class="token-once-title">新令牌（仅显示这一次，请立即复制）</div>' +
+      '<code id="token-plain">' + esc(state.tokenPlain) + '</code>' +
+      '<div class="token-once-note">服务端只保存 SHA-256 摘要；关闭窗口后无法再次查看明文。</div>';
+    show(box);
+    if (copy) show(copy);
+  }
+
+  async function rotateToken() {
+    if (state.busy) return;
+    var had = !!(state.tokenInfo && state.tokenInfo.hasToken && !state.tokenInfo.revoked);
+    if (had && !confirmAction(
+        '重置后旧 MCP 令牌立即失效，正在使用它的 MCP 客户端 / CI 需要更新。确定重置？')) return;
+    state.busy = true;
+    try {
+      var res = await request(AUTH, '/me/mcp-token', {
+        method: 'POST', body: JSON.stringify({ action: had ? 'reset' : 'generate' })
+      });
+      state.tokenPlain = res.token || '';
+      renderTokenReveal();
+      await loadTokenStatus();
+      hint('token-hint', had ? '已重置，旧令牌已失效' : '已生成专属 MCP 令牌', 'ok');
+    } catch (e) { hint('token-hint', e.message, 'error'); }
+    finally { state.busy = false; }
+  }
+
+  async function revokeToken() {
+    if (!confirmAction('停用后该令牌立即失效且不能恢复（只能重新生成）。确定停用？')) return;
+    try {
+      await request(AUTH, '/me/mcp-token', { method: 'DELETE' });
+      state.tokenPlain = '';
+      renderTokenReveal();
+      await loadTokenStatus();
+      hint('token-hint', '已停用 MCP 令牌', 'ok');
+    } catch (e) { hint('token-hint', e.message, 'error'); }
+  }
+
+  function copyToken() {
+    if (!state.tokenPlain) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(state.tokenPlain);
+        hint('token-hint', '已复制到剪贴板', 'ok');
+        return;
+      }
+    } catch (e) { /* clipboard unavailable */ }
+    hint('token-hint', '请选中上方令牌文本手动复制', 'ok');
+  }
 
   // ---------- admin console ----------
 
@@ -291,16 +449,16 @@
 
   async function loadAdmin() {
     try {
-      var [overview, users, spaces, members] = await Promise.all([
+      var [overview, users, spaces, owners] = await Promise.all([
         request(ADMIN, '/overview'),
         request(ADMIN, '/users'),
         request(ADMIN, '/spaces'),
-        request(ADMIN, '/members')
+        request(ADMIN, '/owners')
       ]);
       state.configOverview = overview;
       state.users = users.items || [];
       state.spaces = spaces.items || [];
-      state.members = members.items || [];
+      state.owners = owners.items || [];
       renderOverview();
       renderAdminBody();
       hint('admin-hint', '');
@@ -313,11 +471,13 @@
     if (!box) return;
     box.innerHTML = [
       ['用户', o.users], ['在用', o.activeUsers], ['管理员', o.admins],
-      ['空间', o.spaces], ['授权', o.grants], ['文档', o.documents]
+      ['空间', o.spaces], ['归属', o.ownedSpaces], ['MCP 令牌', o.mcpTokens],
+      ['文档', o.documents]
     ].map(function (pair) {
       return '<div class="stat"><strong>' + esc(pair[1] == null ? '–' : pair[1]) + '</strong>' +
         '<span>' + esc(pair[0]) + '</span></div>';
-    }).join('') + '<div class="stat"><strong>' + esc(o.authMode) + '</strong><span>鉴权模式</span></div>';
+    }).join('') + '<div class="stat"><strong>' + esc(o.authorizationModel || o.authMode) +
+      '</strong><span>鉴权模式</span></div>';
   }
 
   function roleOptions(current, roles) {
@@ -329,7 +489,7 @@
   function renderAdminBody() {
     var body = $('admin-body');
     if (!body) return;
-    if (state.adminTab === 'grants') { renderGrants(body); return; }
+    if (state.adminTab === 'ownership') { renderOwnership(body); return; }
     var rows = state.users.map(function (u) {
       return '<tr data-user-id="' + esc(u.id) + '">' +
         '<td><strong>' + esc(u.userName) + '</strong><br><small>' + esc(u.displayName || '') + '</small></td>' +
@@ -337,6 +497,7 @@
         '<td><select data-field="globalRole">' + roleOptions(u.globalRole, ROLES) + '</select></td>' +
         '<td>' + (u.isActive ? '<span class="badge">启用</span>' : '<span class="badge warn">停用</span>') + '</td>' +
         '<td>' + esc(u.spaceCount == null ? '–' : u.spaceCount) + '</td>' +
+        '<td>' + (u.hasMcpToken ? '<span class="badge">已启用</span>' : '<span class="muted">未生成</span>') + '</td>' +
         '<td class="admin-ops">' +
         '<button data-auth-action="save-user" class="ghost">保存</button>' +
         '<button data-auth-action="toggle-user" class="ghost">' + (u.isActive ? '停用' : '启用') + '</button>' +
@@ -345,42 +506,40 @@
         '</td></tr>';
     }).join('');
     body.innerHTML =
-      '<div class="subhead">用户列表 · 角色即时生效</div>' +
+      '<div class="subhead">用户列表 · 全局角色对该账号名下所有空间即时生效</div>' +
       '<table class="admin-table"><thead><tr><th>账号</th><th>邮箱</th><th>全局角色</th>' +
-      '<th>状态</th><th>空间</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<th>状态</th><th>名下空间</th><th>MCP 令牌</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="subhead">新建用户</div>' +
       '<div class="admin-form">' +
       '<input id="new-user-name" placeholder="用户名" aria-label="新用户名">' +
       '<input id="new-user-pass" type="password" placeholder="初始密码（≥8）" aria-label="初始密码">' +
       '<input id="new-user-display" placeholder="显示名称" aria-label="显示名称">' +
       '<select id="new-user-role">' + roleOptions('viewer', ROLES) + '</select>' +
-      '<button data-auth-action="create-user" class="primary">创建</button></div>';
+      '<button data-auth-action="create-user" class="primary">创建</button></div>' +
+      '<p class="muted">按账号授权：新建账号默认没有任何空间，可在「空间归属」转让一个已有空间，或让账号自行创建。</p>';
   }
 
-  function renderGrants(body) {
+  function renderOwnership(body) {
     var userOptions = state.users.map(function (u) {
       return '<option value="' + esc(u.id) + '">' + esc(u.userName) + '</option>';
     }).join('');
-    var spaceOptions = state.spaces.map(function (s) {
-      return '<option value="' + esc(s.id) + '">' + esc(s.name) + ' · ' + esc(s.slug) + '</option>';
-    }).join('');
-    var rows = state.members.map(function (m) {
-      var space = state.spaces.filter(function (s) { return s.id === m.spaceId; })[0];
-      return '<tr><td>' + esc(m.userName) + '</td><td>' + esc(space ? space.name : m.spaceId) + '</td>' +
-        '<td><span class="badge">' + esc(m.role) + '</span></td><td>' + esc(m.grantedBy || '–') + '</td>' +
-        '<td><button data-auth-action="revoke" data-user="' + esc(m.userId) +
-        '" data-space="' + esc(m.spaceId) + '" class="ghost danger">撤销</button></td></tr>';
+    var rows = state.spaces.map(function (s) {
+      var owner = state.users.filter(function (u) { return u.id === s.ownerUserId; })[0];
+      return '<tr data-space-id="' + esc(s.id) + '">' +
+        '<td><strong>' + esc(s.name) + '</strong><br><small>' + esc(s.slug) + '</small></td>' +
+        '<td>' + esc(owner ? owner.userName : (s.ownerUserId || '未归属')) + '</td>' +
+        '<td>' + esc(s.documentCount == null ? '–' : s.documentCount) + '</td>' +
+        '<td class="admin-ops">' +
+        '<select data-field="newOwner" aria-label="新归属账号">' + userOptions + '</select>' +
+        '<button data-auth-action="transfer-owner" data-space="' + esc(s.id) +
+        '" class="ghost">转让归属</button></td></tr>';
     }).join('');
     body.innerHTML =
-      '<div class="subhead">空间授权矩阵 · 未授权用户看不到该空间</div>' +
-      '<div class="admin-form">' +
-      '<select id="grant-user" aria-label="选择用户">' + userOptions + '</select>' +
-      '<select id="grant-space" aria-label="选择空间">' + spaceOptions + '</select>' +
-      '<select id="grant-role" aria-label="空间角色">' + roleOptions('viewer', SPACE_ROLES) + '</select>' +
-      '<button data-auth-action="grant" class="primary">授权 / 更新</button></div>' +
-      '<table class="admin-table"><thead><tr><th>用户</th><th>空间</th><th>角色</th>' +
-      '<th>授权人</th><th>操作</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="5" class="muted">暂无授权记录</td></tr>') + '</tbody></table>';
+      '<div class="subhead">空间归属 · 每个空间只属于一个账号，其他账号完全不可见</div>' +
+      '<table class="admin-table"><thead><tr><th>空间</th><th>归属账号</th>' +
+      '<th>文档</th><th>转让归属（管理员）</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="4" class="muted">暂无空间</td></tr>') + '</tbody></table>' +
+      '<p class="muted">不再支持「把某空间授权给另一个账号」；如需共享数据，请先转让归属或由账号自行复制内容。</p>';
   }
 
   function rowUser(el) {
@@ -410,14 +569,30 @@
       else if (action === 'logout') logout();
       else if (action === 'open-admin') await openAdmin();
       else if (action === 'close-admin') closeAdmin();
+      else if (action === 'open-token') await openToken();
+      else if (action === 'close-token') closeToken();
+      else if (action === 'token-generate' || action === 'token-reset') await rotateToken();
+      else if (action === 'token-revoke') await revokeToken();
+      else if (action === 'token-copy') copyToken();
       else if (action === 'admin-users') {
         state.adminTab = 'users';
         document.querySelectorAll('.admin-tabs button').forEach(function (b) { b.classList.remove('active'); });
         el.classList.add('active'); renderAdminBody();
-      } else if (action === 'admin-grants') {
-        state.adminTab = 'grants';
+      } else if (action === 'admin-ownership') {
+        state.adminTab = 'ownership';
         document.querySelectorAll('.admin-tabs button').forEach(function (b) { b.classList.remove('active'); });
         el.classList.add('active'); renderAdminBody();
+      } else if (action === 'transfer-owner') {
+        var spaceId = el.getAttribute('data-space');
+        var sel = el.closest('tr') && el.closest('tr').querySelector('[data-field="newOwner"]');
+        var newOwner = sel && sel.value;
+        if (!spaceId || !newOwner) { hint('admin-hint', '请选择新的归属账号', 'error'); return; }
+        await request(ADMIN, '/spaces/' + encodeURIComponent(spaceId) + '/owner', {
+          method: 'PUT', body: JSON.stringify({ userId: newOwner })
+        });
+        await loadAdmin();
+        state.adminTab = 'ownership'; renderAdminBody();
+        hint('admin-hint', '空间归属已转让，原账号立即失去权限', 'ok');
       } else if (action === 'save-user') {
         var u = rowUser(el);
         if (u) {
@@ -453,28 +628,11 @@
         });
         await loadAdmin();
         hint('admin-hint', '已创建用户「' + name + '」', 'ok');
-      } else if (action === 'grant') {
-        var userId = $('grant-user') && $('grant-user').value;
-        var spaceId = $('grant-space') && $('grant-space').value;
-        var grantRole = $('grant-role') && $('grant-role').value;
-        if (!userId || !spaceId) { hint('admin-hint', '请先选择用户与空间', 'error'); return; }
-        await request(ADMIN, '/members', {
-          method: 'PUT', body: JSON.stringify({ userId: userId, spaceId: spaceId, role: grantRole })
-        });
-        await loadAdmin();
-        state.adminTab = 'grants'; renderAdminBody();
-        hint('admin-hint', '授权已保存', 'ok');
-      } else if (action === 'revoke') {
-        await request(ADMIN, '/members', {
-          method: 'DELETE', body: JSON.stringify({
-            userId: el.getAttribute('data-user'), spaceId: el.getAttribute('data-space')
-          })
-        });
-        await loadAdmin();
-        state.adminTab = 'grants'; renderAdminBody();
-        hint('admin-hint', '授权已撤销', 'ok');
       }
-    } catch (e) { hint('admin-hint', e.message, 'error'); }
+    } catch (e) {
+      if (state.tokenOpen) hint('token-hint', e.message, 'error');
+      else hint('admin-hint', e.message, 'error');
+    }
   }
 
   // ---------- bootstrap ----------
@@ -496,7 +654,7 @@
     scaffold();
     window.EpistemeAuth = {
       token: token, onUnauthorized: onUnauthorized, mode: state.mode,
-      refreshMe: refreshMe, openAdmin: openAdmin, logout: logout
+      refreshMe: refreshMe, openAdmin: openAdmin, openToken: openToken, logout: logout
     };
     state.adminTab = 'users';
     var stored = loadToken();

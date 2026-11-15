@@ -19,13 +19,18 @@ public static class EpistemeConfig
     public static string AuthMode() => Env("EPISTEME_AUTH_MODE", "legacy").ToLowerInvariant();
     /// <summary>Shared-secret gateway (HS256 JWT / HMAC), no user database.</summary>
     public static bool Secure => AuthMode() == "secure";
-    /// <summary>Real accounts: registration, login, global roles, per-space grants, admin console.</summary>
+    /// <summary>Real accounts: registration, login, account-owned spaces, per-account MCP token, admin console.</summary>
     public static bool Users => AuthMode() == "users";
     /// <summary>Any auth-enabled mode registers the security middleware.</summary>
     public static bool Guarded => Secure || Users;
     public static string DbProvider() => Env("EPISTEME_DB_PROVIDER", "sqlite").ToLowerInvariant();
     public static string AuthSecret() => Env("EPISTEME_AUTH_SECRET", "");
     public static string FetchWorkerUrl() => Env("EPISTEME_FETCH_WORKER_URL", "").TrimEnd('/');
+    /// <summary>
+    /// Optional account binding for the legacy HMAC channel in users mode. Empty means
+    /// the identity-less super-user credential is disabled (account authorization).
+    /// </summary>
+    public static string MachineUser() => Env("EPISTEME_MACHINE_USER", "");
 
     public static bool AllowRegistration() =>
         !Env("EPISTEME_ALLOW_REGISTRATION", "true").Equals("false", StringComparison.OrdinalIgnoreCase);
@@ -91,7 +96,11 @@ public static class EpistemeConfig
             ["active"] = Guarded,
             ["accounts"] = Users,
             ["registration"] = Users && AllowRegistration(),
-            ["perSpaceGrants"] = Users,
+            ["authorizationModel"] = Users ? "account" : "role-header",
+            ["accountScoped"] = Users,
+            ["perSpaceGrants"] = false,
+            ["perAccountMcpTokens"] = Users,
+            ["machineChannelAccountBound"] = Users && MachineUser().Length > 0,
             ["adminConsole"] = Users
         },
         ["auth"] = new JsonObject
@@ -99,12 +108,15 @@ public static class EpistemeConfig
             ["mode"] = AuthMode(),
             ["registrationEnabled"] = Users && AllowRegistration(),
             ["roles"] = new JsonArray("admin", "owner", "editor", "agent", "viewer"),
-            ["spaceRoles"] = new JsonArray("owner", "editor", "agent", "viewer"),
+            ["authorizationModel"] = "account",
+            ["credentials"] = new JsonArray("login-jwt", "mcp-token"),
             ["endpoints"] = new JsonObject
             {
                 ["config"] = "/api/v1/auth/config", ["register"] = "/api/v1/auth/register",
                 ["login"] = "/api/v1/auth/login", ["me"] = "/api/v1/auth/me",
-                ["logout"] = "/api/v1/auth/logout", ["admin"] = "/api/v1/admin/users"
+                ["logout"] = "/api/v1/auth/logout",
+                ["mcpToken"] = "/api/v1/auth/me/mcp-token",
+                ["admin"] = "/api/v1/admin/users"
             }
         },
         ["note"] = "生产化能力均为环境变量开关；默认 legacy，不破坏既有契约"

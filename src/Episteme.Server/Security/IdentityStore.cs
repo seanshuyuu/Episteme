@@ -15,12 +15,18 @@ namespace Episteme.Server;
 /// the EF DbConnection, so it works on both SQLite and PostgreSQL and — critically — on
 /// databases created by an older Episteme version where EnsureCreated would never add
 /// the new tables. No migrations, no new NuGet packages.
+///
+/// Authorization model (v0.6): ACCOUNT-scoped. ep_space_owners binds every space to
+/// exactly one account; ep_mcp_tokens holds one revocable machine credential per
+/// account. ep_space_members is legacy data, kept only for ownership backfill.
 /// </summary>
 public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
 {
     private const int Pbkdf2Iterations = 120_000;
     private const int SaltBytes = 16;
     private const int HashBytes = 32;
+
+    public const string McpTokenPrefix = "epm_";
 
     private static string Iso(DateTime value) =>
         value.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
@@ -87,7 +93,23 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
                 created_at TEXT NOT NULL)",
             @"CREATE UNIQUE INDEX IF NOT EXISTS ix_ep_members_user_space
                 ON ep_space_members (user_id, space_id)",
-            @"CREATE INDEX IF NOT EXISTS ix_ep_members_space ON ep_space_members (space_id)"
+            @"CREATE INDEX IF NOT EXISTS ix_ep_members_space ON ep_space_members (space_id)",
+            // Account ownership: the single authorization boundary. One row per space.
+            @"CREATE TABLE IF NOT EXISTS ep_space_owners (
+                space_id TEXT NOT NULL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL)",
+            @"CREATE INDEX IF NOT EXISTS ix_ep_space_owners_user ON ep_space_owners (user_id)",
+            // One revocable MCP credential per account. Only a SHA-256 digest is stored.
+            @"CREATE TABLE IF NOT EXISTS ep_mcp_tokens (
+                user_id TEXT NOT NULL PRIMARY KEY,
+                token_hash TEXT NOT NULL,
+                token_hint TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                created_unix INTEGER NOT NULL DEFAULT 0,
+                last_used_unix INTEGER NOT NULL DEFAULT 0,
+                revoked INTEGER NOT NULL DEFAULT 0)",
+            @"CREATE UNIQUE INDEX IF NOT EXISTS ix_ep_mcp_tokens_hash ON ep_mcp_tokens (token_hash)"
         };
         foreach (var sql in ddls)
         {
@@ -125,6 +147,52 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
         };
         await InsertUserPublicAsync(user, ct);
         return name;
+    }
+
+    /// <summary>
+    /// Upgrade path: every pre-existing space (created in legacy/secure or by v0.5 users
+    /// mode) must gain an owner. Prefer the legacy owner grant; otherwise hand it to the
+    /// first admin so no data becomes invisible. Idempotent: never overwrites an owner.
+    /// </summary>
+    public async Task<int> BackfillOwnersAsync(CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        var spaceIds = await db.Spaces.Select(s => s.Id).ToListAsync(ct);
+        var added = 0;
+        foreach (var spaceId in spaceIds)
+        {
+            await using (var exists = Cmd(conn,
+                "SELECT user_id FROM ep_space_owners WHERE space_id=@s", ("@s", spaceId)))
+            {
+                var found = await exists.ExecuteScalarAsync(ct);
+                if (found is not null && found != DBNull.Value) continue;
+            }
+
+            var ownerId = "";
+            await using (var legacy = Cmd(conn,
+                "SELECT user_id FROM ep_space_members WHERE space_id=@s AND role='owner' " +
+                "ORDER BY created_at LIMIT 1", ("@s", spaceId)))
+            {
+                var found = await legacy.ExecuteScalarAsync(ct);
+                if (found is not null && found != DBNull.Value) ownerId = found.ToString() ?? "";
+            }
+            if (string.IsNullOrWhiteSpace(ownerId))
+            {
+                await using var admin = Cmd(conn,
+                    "SELECT id FROM ep_users WHERE global_role='admin' ORDER BY created_at LIMIT 1");
+                var found = await admin.ExecuteScalarAsync(ct);
+                ownerId = found?.ToString() ?? "";
+            }
+            if (string.IsNullOrWhiteSpace(ownerId)) continue;
+
+            await using var insert = Cmd(conn,
+                "INSERT INTO ep_space_owners (space_id,user_id,created_at) VALUES (@s,@u,@c)",
+                ("@s", spaceId), ("@u", ownerId), ("@c", Iso(DateTime.UtcNow)));
+            await insert.ExecuteNonQueryAsync(ct);
+            added++;
+        }
+        return added;
     }
 
     // ---------- password ----------
@@ -232,8 +300,27 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var conn = await OpenAsync(db, ct);
-        await using var del = Cmd(conn, "DELETE FROM ep_space_members WHERE user_id=@id", ("@id", id));
-        await del.ExecuteNonQueryAsync(ct);
+        // Never orphan a space: hand the deleted account's spaces to another admin.
+        await using (var q = Cmd(conn,
+            "SELECT id FROM ep_users WHERE global_role='admin' AND id<>@id " +
+            "AND is_active=1 ORDER BY created_at LIMIT 1", ("@id", id)))
+        {
+            var adminId = (await q.ExecuteScalarAsync(ct))?.ToString() ?? "";
+            await using var move = string.IsNullOrWhiteSpace(adminId)
+                ? Cmd(conn, "DELETE FROM ep_space_owners WHERE user_id=@id", ("@id", id))
+                : Cmd(conn, "UPDATE ep_space_owners SET user_id=@admin WHERE user_id=@id",
+                    ("@admin", adminId), ("@id", id));
+            await move.ExecuteNonQueryAsync(ct);
+        }
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM ep_mcp_tokens WHERE user_id=@id",
+                     "DELETE FROM ep_space_members WHERE user_id=@id"
+                 })
+        {
+            await using var clean = Cmd(conn, sql, ("@id", id));
+            await clean.ExecuteNonQueryAsync(ct);
+        }
         await using var cmd = Cmd(conn, "DELETE FROM ep_users WHERE id=@id", ("@id", id));
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
@@ -248,20 +335,72 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    // ---------- space grants ----------
+    // ---------- account ownership (the authorization boundary) ----------
 
-    public async Task<Dictionary<string, string>> SpaceRolesAsync(string userId, CancellationToken ct)
+    public async Task<HashSet<string>> OwnedSpaceIdsAsync(string userId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var conn = await OpenAsync(db, ct);
         await using var cmd = Cmd(conn,
-            "SELECT space_id, role FROM ep_space_members WHERE user_id=@id", ("@id", userId));
+            "SELECT space_id FROM ep_space_owners WHERE user_id=@u", ("@u", userId));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        while (await r.ReadAsync(ct)) set.Add(Str(r, 0) ?? "");
+        return set;
+    }
+
+    public async Task<Dictionary<string, string>> OwnerMapAsync(CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn, "SELECT space_id, user_id FROM ep_space_owners");
         await using var r = await cmd.ExecuteReaderAsync(ct);
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        while (await r.ReadAsync(ct)) map[Str(r, 0) ?? ""] = Str(r, 1) ?? "viewer";
+        while (await r.ReadAsync(ct)) map[Str(r, 0) ?? ""] = Str(r, 1) ?? "";
         return map;
     }
 
+    public async Task<bool> IsOwnerAsync(string userId, string spaceId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "SELECT user_id FROM ep_space_owners WHERE space_id=@s", ("@s", spaceId));
+        var raw = await cmd.ExecuteScalarAsync(ct);
+        return raw is not null && raw != DBNull.Value &&
+               string.Equals(raw.ToString(), userId, StringComparison.Ordinal);
+    }
+
+    /// <summary>Portable upsert (delete + insert). Used on space creation and admin transfer.</summary>
+    public async Task SetOwnerAsync(string spaceId, string userId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using (var del = Cmd(conn, "DELETE FROM ep_space_owners WHERE space_id=@s", ("@s", spaceId)))
+            await del.ExecuteNonQueryAsync(ct);
+        await using var cmd = Cmd(conn,
+            "INSERT INTO ep_space_owners (space_id,user_id,created_at) VALUES (@s,@u,@c)",
+            ("@s", spaceId), ("@u", userId), ("@c", Iso(DateTime.UtcNow)));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<List<SpaceOwner>> ListOwnersAsync(CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "SELECT space_id, user_id, created_at FROM ep_space_owners ORDER BY created_at");
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        var list = new List<SpaceOwner>();
+        while (await r.ReadAsync(ct))
+            list.Add(new SpaceOwner
+            {
+                SpaceId = Str(r, 0) ?? "", UserId = Str(r, 1) ?? "", CreatedAt = Str(r, 2) ?? ""
+            });
+        return list;
+    }
+
+    /// <summary>Legacy grant rows; kept for read-only compatibility + backfill, never for auth.</summary>
     public async Task<List<SpaceMember>> ListMembersAsync(string? spaceId, string? userId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -285,37 +424,122 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
         return list;
     }
 
-    public async Task GrantAsync(string userId, string spaceId, string role, string grantedBy, CancellationToken ct)
+    // ---------- per-account MCP token ----------
+
+    public static string NewMcpToken()
     {
-        await using var db = await factory.CreateDbContextAsync(ct);
-        var conn = await OpenAsync(db, ct);
-        // Portable upsert: delete-then-insert inside the same connection keeps both
-        // providers identical without relying on ON CONFLICT (SQLite/PG syntax differs).
-        await using (var del = Cmd(conn,
-            "DELETE FROM ep_space_members WHERE user_id=@u AND space_id=@s",
-            ("@u", userId), ("@s", spaceId)))
-            await del.ExecuteNonQueryAsync(ct);
-        await using var cmd = Cmd(conn,
-            "INSERT INTO ep_space_members (id,user_id,space_id,role,granted_by,created_at) " +
-            "VALUES (@id,@u,@s,@role,@by,@created)",
-            ("@id", Ids.New("mem")), ("@u", userId), ("@s", spaceId), ("@role", role),
-            ("@by", grantedBy), ("@created", Iso(DateTime.UtcNow)));
-        await cmd.ExecuteNonQueryAsync(ct);
+        var raw = RandomNumberGenerator.GetBytes(32);
+        return McpTokenPrefix + Convert.ToBase64String(raw)
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
-    public async Task<bool> RevokeAsync(string userId, string spaceId, CancellationToken ct)
+    public static string HashMcpToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+    private static string HintOf(string token) =>
+        token.Length >= 6 ? "…" + token[^6..] : "…";
+
+    private static McpTokenRecord ReadToken(DbDataReader r) => new()
+    {
+        UserId = Str(r, 0) ?? "", TokenHash = Str(r, 1) ?? "", TokenHint = Str(r, 2) ?? "",
+        CreatedAt = Str(r, 3) ?? "", CreatedUnix = Long(r, 4),
+        LastUsedUnix = Long(r, 5), Revoked = Int(r, 6) != 0
+    };
+
+    private const string TokenColumns =
+        "user_id, token_hash, token_hint, created_at, created_unix, last_used_unix, revoked";
+
+    public async Task<McpTokenRecord?> McpTokenAsync(string userId, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         var conn = await OpenAsync(db, ct);
         await using var cmd = Cmd(conn,
-            "DELETE FROM ep_space_members WHERE user_id=@u AND space_id=@s",
-            ("@u", userId), ("@s", spaceId));
+            "SELECT " + TokenColumns + " FROM ep_mcp_tokens WHERE user_id=@u", ("@u", userId));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        return await r.ReadAsync(ct) ? ReadToken(r) : null;
+    }
+
+    public async Task<int> McpTokenCountAsync(CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn, "SELECT COUNT(*) FROM ep_mcp_tokens WHERE revoked=0");
+        var raw = await cmd.ExecuteScalarAsync(ct);
+        return Convert.ToInt32(raw ?? 0, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Generate or reset the credential. Replacing the digest invalidates the previous
+    /// plaintext immediately (no revocation list needed). Plaintext is returned once.
+    /// </summary>
+    public async Task<(string Token, string Hint, long CreatedUnix, bool Rotated)> RotateMcpTokenAsync(
+        string userId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        var existing = await McpTokenAsync(userId, ct);
+        var token = NewMcpToken();
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        await using (var del = Cmd(conn, "DELETE FROM ep_mcp_tokens WHERE user_id=@u", ("@u", userId)))
+            await del.ExecuteNonQueryAsync(ct);
+        await using var cmd = Cmd(conn,
+            "INSERT INTO ep_mcp_tokens (" + TokenColumns + ") VALUES (@u,@h,@hint,@c,@now,@used,@revoked)",
+            ("@u", userId), ("@h", HashMcpToken(token)), ("@hint", HintOf(token)),
+            ("@c", Iso(DateTime.UtcNow)), ("@now", now), ("@used", 0), ("@revoked", 0));
+        await cmd.ExecuteNonQueryAsync(ct);
+        return (token, HintOf(token), now, existing is not null);
+    }
+
+    public async Task<bool> RevokeMcpTokenAsync(string userId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "UPDATE ep_mcp_tokens SET revoked=1 WHERE user_id=@u", ("@u", userId));
         return await cmd.ExecuteNonQueryAsync(ct) > 0;
     }
 
-    public async Task<UserPrincipal> PrincipalAsync(AppUser user, CancellationToken ct) =>
+    public async Task TouchMcpTokenAsync(string userId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "UPDATE ep_mcp_tokens SET last_used_unix=@now WHERE user_id=@u AND revoked=0",
+            ("@now", DateTimeOffset.UtcNow.ToUnixTimeSeconds()), ("@u", userId));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>
+    /// Resolve an opaque MCP token to its account. Returns null for unknown / revoked /
+    /// disabled accounts. The digest comparison is additionally constant-time.
+    /// </summary>
+    public async Task<AppUser?> FindUserByMcpTokenAsync(string token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token) ||
+            !token.StartsWith(McpTokenPrefix, StringComparison.Ordinal)) return null;
+        var hash = HashMcpToken(token);
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "SELECT " + TokenColumns + " FROM ep_mcp_tokens WHERE token_hash=@h", ("@h", hash));
+        await using var r = await cmd.ExecuteReaderAsync(ct);
+        if (!await r.ReadAsync(ct)) return null;
+        var record = ReadToken(r);
+        if (record.Revoked) return null;
+        var expected = Encoding.UTF8.GetBytes(hash);
+        var actual = Encoding.UTF8.GetBytes(record.TokenHash);
+        if (expected.Length != actual.Length ||
+            !CryptographicOperations.FixedTimeEquals(expected, actual)) return null;
+        var userId = record.UserId;
+        r.Close();
+        var user = await FindByIdAsync(userId, ct);
+        return user is { IsActive: true } ? user : null;
+    }
+
+    public async Task<UserPrincipal> PrincipalAsync(AppUser user, CancellationToken ct,
+        string authChannel = "jwt") =>
         new(user.Id, user.UserName, user.DisplayName, user.GlobalRole,
-            await SpaceRolesAsync(user.Id, ct));
+            await OwnedSpaceIdsAsync(user.Id, ct), authChannel);
 }
 
 /// <summary>Server-issued HS256 JWT for the users auth mode.</summary>
@@ -364,7 +588,6 @@ public static class IdentityTokens
             var expected = FromB64Url(Sign(parts[0] + "." + parts[1], secret));
             if (!CryptographicOperations.FixedTimeEquals(expected, FromB64Url(parts[2])))
                 return (false, "JWT_SIGNATURE_INVALID", "", "");
-
             using var payload = JsonDocument.Parse(FromB64Url(parts[1]));
             var root = payload.RootElement;
             if (root.TryGetProperty("exp", out var exp) &&

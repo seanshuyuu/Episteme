@@ -119,9 +119,13 @@ public static class EpistemeSecurity
     }
 
     /// <summary>
-    /// users mode: server-issued JWT + live DB lookup. HMAC machine credentials remain
-    /// available for git-sync / CI. The role written downstream is the principal's
-    /// effective role in the requested space, never a client-supplied value.
+    /// users mode is ACCOUNT-scoped. Three credential channels all resolve to a live
+    /// server-side principal:
+    ///   - login JWT (browser session; the only channel allowed to manage credentials)
+    ///   - per-account MCP token, epm_... (MCP / git-sync / CI; account-owned spaces only)
+    ///   - HMAC, only when explicitly bound to an account via EPISTEME_MACHINE_USER
+    /// The role written downstream is always derived from the account, never from a
+    /// client-supplied header or a per-space grant.
     /// </summary>
     private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
         AuthenticateUsersAsync(HttpContext ctx)
@@ -136,56 +140,134 @@ public static class EpistemeSecurity
             return Ok("viewer");
 
         var store = ctx.RequestServices.GetRequiredService<IdentityStore>();
+        var ct = ctx.RequestAborted;
 
-        // Machine channel (git-sync / CI) has NO user identity, so it is deliberately a
-        // super-user path. EPISTEME_MACHINE_SPACES optionally pins it to explicit spaces.
+        // 1) HMAC machine channel. In users mode an identity-less super-user credential
+        //    contradicts account authorization, so it is off unless explicitly bound.
         var keyId = ctx.Request.Headers["X-Episteme-Key"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(keyId))
-        {
-            var machine = await VerifyHmacAsync(ctx, keyId, secret);
-            if (!machine.Ok) return machine;
-            var scoped = await MachineSpaceIdsAsync(ctx);
-            if (scoped is not null)
-            {
-                // ToolsCall re-checks the FINAL resolved space, which also covers MCP
-                // requests that omit spaceId and would otherwise hit the default space.
-                ctx.Items["EpistemeMachineSpaceIds"] = scoped;
-                var (_, resolved) = await SpaceIdForRequestAsync(ctx, store);
-                if (!string.IsNullOrWhiteSpace(resolved) &&
-                    !Array.Exists(scoped, s => string.Equals(s, resolved, StringComparison.OrdinalIgnoreCase)))
-                    return Fail(403, "MACHINE_SPACE_FORBIDDEN",
-                        "机器密钥被限定在指定空间内，拒绝访问该空间");
-            }
-            return machine;
-        }
+            return await AuthenticateMachineAsync(ctx, keyId, secret, store);
 
         var authorization = ctx.Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(authorization) ||
-            !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return Fail(401, "UNAUTHORIZED", "需要 Authorization: Bearer <登录令牌>");
+        var bearer = !string.IsNullOrWhiteSpace(authorization) &&
+                     authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? authorization[7..].Trim() : "";
+        var headerToken = ctx.Request.Headers["X-Episteme-Mcp-Token"].FirstOrDefault()?.Trim() ?? "";
 
-        var (valid, code, userId, _) = IdentityTokens.Verify(authorization[7..].Trim(), secret);
+        // 2) Per-account MCP token: Bearer epm_... or the dedicated header.
+        var mcpToken = bearer.StartsWith(IdentityStore.McpTokenPrefix, StringComparison.Ordinal)
+            ? bearer
+            : (headerToken.StartsWith(IdentityStore.McpTokenPrefix, StringComparison.Ordinal)
+                ? headerToken : "");
+        if (!string.IsNullOrWhiteSpace(mcpToken))
+            return await AuthenticateMcpTokenAsync(ctx, mcpToken, store);
+
+        // 3) Login JWT (browser session).
+        if (string.IsNullOrWhiteSpace(bearer))
+            return Fail(401, "UNAUTHORIZED",
+                "需要 Authorization: Bearer <登录 JWT 或 epm_ MCP 令牌>");
+
+        var (valid, code, userId, _) = IdentityTokens.Verify(bearer, secret);
         if (!valid) return Fail(401, code, "登录令牌无效或已过期，请重新登录");
 
-        var user = await store.FindByIdAsync(userId, ctx.RequestAborted);
+        var user = await store.FindByIdAsync(userId, ct);
         if (user is null || !user.IsActive)
             return Fail(401, "USER_DISABLED", "账号不存在或已被停用");
 
-        var principal = await store.PrincipalAsync(user, ctx.RequestAborted);
+        var principal = await store.PrincipalAsync(user, ct, "jwt");
         ctx.Items["EpistemePrincipal"] = principal;
         ctx.Items["EpistemeUserId"] = user.Id;
         ctx.Items["EpistemeUserName"] = user.UserName;
+        ctx.Items["EpistemeAuthChannel"] = "jwt";
+        return await CompleteUsersAuthAsync(ctx, principal, store);
+    }
 
-        // Admin console is a global-only capability.
-        if (path.StartsWith("/api/v1/admin", StringComparison.OrdinalIgnoreCase) && !principal.IsAdmin)
+    /// <summary>
+    /// Opaque per-account MCP token. Reset/revoke takes effect on the very next request
+    /// because the stored digest is replaced / flagged; no revocation list is needed.
+    /// </summary>
+    private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
+        AuthenticateMcpTokenAsync(HttpContext ctx, string token, IdentityStore store)
+    {
+        var path = ctx.Request.Path.Value ?? "";
+        if (path.StartsWith("/api/v1/admin", StringComparison.OrdinalIgnoreCase))
+            return Fail(403, "ADMIN_REQUIRED", "MCP 令牌不能访问管理后台，请用账号登录");
+        // A leaked machine credential must not be able to rotate itself and lock the
+        // account owner out: credential management requires a login session.
+        if (path.StartsWith("/api/v1/auth/me/mcp-token", StringComparison.OrdinalIgnoreCase))
+            return Fail(403, "MCP_TOKEN_SESSION_REQUIRED",
+                "管理或重置 MCP 令牌需要账号登录会话，MCP 令牌本身不能操作自己");
+
+        var user = await store.FindUserByMcpTokenAsync(token, ctx.RequestAborted);
+        if (user is null)
+            return Fail(401, "MCP_TOKEN_INVALID", "MCP 令牌无效、已重置或已停用，请在账号设置里重新生成");
+
+        var principal = await store.PrincipalAsync(user, ctx.RequestAborted, "mcp-token");
+        ctx.Items["EpistemePrincipal"] = principal;
+        ctx.Items["EpistemeUserId"] = user.Id;
+        ctx.Items["EpistemeUserName"] = user.UserName;
+        ctx.Items["EpistemeAuthChannel"] = "mcp-token";
+        await store.TouchMcpTokenAsync(user.Id, ctx.RequestAborted);
+        return await CompleteUsersAuthAsync(ctx, principal, store);
+    }
+
+    /// <summary>
+    /// Legacy HMAC channel in users mode. Only available when EPISTEME_MACHINE_USER names
+    /// an existing account; the request is then scoped to THAT account's spaces.
+    /// </summary>
+    private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
+        AuthenticateMachineAsync(HttpContext ctx, string keyId, string secret, IdentityStore store)
+    {
+        var machineUser = EpistemeConfig.MachineUser();
+        if (string.IsNullOrWhiteSpace(machineUser))
+            return Fail(401, "MACHINE_CHANNEL_DISABLED",
+                "users 模式已改为按账号授权：无账号身份的 HMAC 通道已停用。请在「我的 MCP Token」生成令牌并以 Bearer 使用，或设置 EPISTEME_MACHINE_USER 显式绑定账号");
+
+        var machine = await VerifyHmacAsync(ctx, keyId, secret);
+        if (!machine.Ok) return machine;
+
+        var user = await store.FindByNameAsync(machineUser, ctx.RequestAborted);
+        if (user is null || !user.IsActive)
+            return Fail(401, "MACHINE_USER_INVALID", "EPISTEME_MACHINE_USER 指向的账号不存在或已停用");
+        var principal = await store.PrincipalAsync(user, ctx.RequestAborted, "machine");
+        ctx.Items["EpistemePrincipal"] = principal;
+        ctx.Items["EpistemeUserId"] = user.Id;
+        ctx.Items["EpistemeUserName"] = user.UserName;
+        ctx.Items["EpistemeAuthChannel"] = "machine";
+
+        var scoped = await MachineSpaceIdsAsync(ctx);
+        if (scoped is not null)
+        {
+            ctx.Items["EpistemeMachineSpaceIds"] = scoped;
+            var (_, resolved) = await SpaceIdForRequestAsync(ctx, store);
+            if (!string.IsNullOrWhiteSpace(resolved) &&
+                !Array.Exists(scoped, s => string.Equals(s, resolved, StringComparison.OrdinalIgnoreCase)))
+                return Fail(403, "MACHINE_SPACE_FORBIDDEN",
+                    "机器密钥被限定在指定空间内，拒绝访问该空间");
+        }
+        // The declared X-Episteme-Role is intentionally ignored: the account's global
+        // role is the only authority under account-based authorization.
+        return Ok(principal.EffectiveRole(null, true));
+    }
+
+    /// <summary>Shared post-authentication checks: target-space ownership + admin guard.</summary>
+    private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
+        CompleteUsersAuthAsync(HttpContext ctx, UserPrincipal principal, IdentityStore store)
+    {
+        var path = ctx.Request.Path.Value ?? "";
+        if (path.StartsWith("/api/v1/admin", StringComparison.OrdinalIgnoreCase) &&
+            (!principal.IsAdmin || principal.IsMcpToken))
             return Fail(403, "ADMIN_REQUIRED", "需要管理员权限");
+        if (path.StartsWith("/api/v1/auth/me/mcp-token", StringComparison.OrdinalIgnoreCase) &&
+            principal.IsMcpToken)
+            return Fail(403, "MCP_TOKEN_SESSION_REQUIRED",
+                "管理或重置 MCP 令牌需要账号登录会话，MCP 令牌本身不能操作自己");
 
-        var (_, rawSpace) = await SpaceIdForRequestAsync(ctx, store);
-        var globalEndpoint = string.IsNullOrWhiteSpace(rawSpace);
-        if (!globalEndpoint && !principal.IsAdmin && !principal.SpaceRoles.ContainsKey(rawSpace!))
-            return Fail(403, "SPACE_FORBIDDEN", "当前账号未被授权访问该空间");
-
-        return Ok(principal.EffectiveRole(rawSpace, globalEndpoint));
+        var (rawSpace, resolvedSpace) = await SpaceIdForRequestAsync(ctx, store);
+        if (!string.IsNullOrWhiteSpace(rawSpace) && !principal.Owns(resolvedSpace))
+            return Fail(403, "ACCOUNT_FORBIDDEN",
+                "该空间归属其他账号；按账号授权，只能访问自己名下的空间");
+        return Ok(principal.EffectiveRole(resolvedSpace, string.IsNullOrWhiteSpace(rawSpace)));
     }
 
     /// <summary>

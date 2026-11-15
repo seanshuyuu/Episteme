@@ -77,17 +77,17 @@ public sealed partial class EpistemeService(
             : null;
 
     /// <summary>
-    /// Per-space read boundary. Admin sees everything; ordinary users only see spaces
-    /// explicitly granted to them. This filters GET /spaces, which in turn bounds MCP's
-    /// ResolveSpaceId fallback (an agent can never silently land in a foreign space).
+    /// ACCOUNT-level read boundary. Admin sees everything; every other credential
+    /// (login JWT, per-account MCP token, bound HMAC) sees only spaces owned by that
+    /// account. This filters GET /spaces, which in turn bounds MCP's ResolveSpaceId
+    /// fallback: a token can never silently land in somebody else's space.
     /// </summary>
     private async Task<List<Space>> VisibleSpacesAsync(EpistemeDbContext db, CancellationToken ct)
     {
         var spaces = await db.Spaces.OrderBy(s => s.CreatedAt).ToListAsync(ct);
         var principal = Principal();
         if (principal is null || principal.IsAdmin) return spaces;
-        var allowed = principal.SpaceRoles.Keys.ToHashSet(StringComparer.Ordinal);
-        return spaces.Where(s => allowed.Contains(s.Id)).ToList();
+        return spaces.Where(s => principal.OwnedSpaceIds.Contains(s.Id)).ToList();
     }
 
     private static async Task<Space> RequireSpace(EpistemeDbContext db, string id, CancellationToken ct) =>
@@ -131,18 +131,21 @@ public sealed partial class EpistemeService(
     {
         await using var db = await Db(ct);
         var spaces = await VisibleSpacesAsync(db, ct);
+        var owners = EpistemeConfig.Users ? await identity.OwnerMapAsync(ct) : null;
         var items = new JsonArray();
         foreach (var s in spaces)
         {
             var docs = await db.Documents.CountAsync(d => d.SpaceId == s.Id, ct);
             var commits = await db.Commits.CountAsync(c => c.SpaceId == s.Id, ct);
-            items.Add(new JsonObject
+            var node = new JsonObject
             {
                 ["id"] = s.Id, ["slug"] = s.Slug, ["name"] = s.Name,
                 ["description"] = s.Description, ["headRef"] = s.HeadRef,
                 ["toolsVersion"] = s.ToolsVersion, ["documentCount"] = docs,
                 ["commitCount"] = commits, ["createdAt"] = s.CreatedAt
-            });
+            };
+            if (owners is not null) node["ownerUserId"] = owners.GetValueOrDefault(s.Id, "");
+            items.Add(node);
         }
         return new JsonObject { ["items"] = items, ["total"] = items.Count, ["empty"] = items.Count == 0 };
     }
@@ -190,16 +193,17 @@ public sealed partial class EpistemeService(
         });
         await db.SaveChangesAsync(ct);
 
-        // Auto-grant the creator as owner. Without this, a freshly created space would
-        // be invisible even to its creator on the very next request.
+        // Bind the new space to the creating account. Under account authorization this
+        // single row IS the access boundary; without it the space would be invisible
+        // even to its creator on the very next request.
         if (EpistemeConfig.Users && principal is not null)
-            await identity.GrantAsync(principal.UserId, space.Id, IdentityRoles.Owner,
-                principal.UserName, ct);
+            await identity.SetOwnerAsync(space.Id, principal.UserId, ct);
 
         return new JsonObject
         {
             ["id"] = space.Id, ["slug"] = space.Slug, ["name"] = space.Name,
             ["toolsVersion"] = space.ToolsVersion, ["headCommitId"] = initial.Id,
+            ["ownerUserId"] = principal?.UserId ?? "",
             ["ownerGranted"] = EpistemeConfig.Users && principal is not null
         };
     }

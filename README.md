@@ -7,7 +7,7 @@ Episteme（ἐπιστήμη，希腊语「经论证的知识」）由「商业�
 | 项 | 内容 |
 |---|---|
 | 当前版本 | v0.5（`0.5.0-polish`，P1–P5 全部落地） |
-| 本轮增量 | 账号体系（注册 / 登录 / 全局角色 / 按空间授权 / 管理员后台，`users` 模式）、MCP `create_space`、`pack_code-workspace` 代码工作空间模板、按应用类型归档的 git 同步与代码文件树在线预览（见第 11 节）；git 旁路同步与公网样例见第 10 节 |
+| 本轮增量 | **按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助管理 / 重置 MCP token**、账号体系（注册 / 登录 / 全局角色 / 管理员后台，`users` 模式）、MCP `create_space`、`pack_code-workspace` 代码工作空间模板、按应用类型归档的 git 同步与代码文件树在线预览（见第 11 节）；git 旁路同步与公网样例见第 10 节 |
 | 服务端 | .NET 10 / ASP.NET Core Minimal API / EF Core 10（SQLite 默认，PostgreSQL 可选） |
 | Web 前端 | 原生 SPA（`wwwroot/app.js`）+ 本地 vendored pdf.js 4.10.38 / Monaco 0.52.2，零 CDN |
 | Agent 协议 | MCP JSON-RPC 2.0（`2025-06-18`）：Streamable HTTP / SSE / stdio bridge |
@@ -35,7 +35,7 @@ curl http://127.0.0.1:5080/health
 
 浏览器打开 `http://127.0.0.1:5080/` —— 你会看到一个空壳首页。想先不装 Docker 体验交互，直接用浏览器打开单文件原型 `prototype/index.html`，建议按「创建空间 → 装模板 → 自定义目录 / Schema → 四类阅读器 → 版本管理 → MCP 面板 → 主题与窄屏」顺序体验。
 
-> **安全提醒**：`deploy/.env` 的 `EPISTEME_BIND_IP=0.0.0.0` 允许局域网访问。模板默认是 `EPISTEME_AUTH_MODE=legacy`（无鉴权，仅靠可伪造的 `X-Episteme-Role` 头声明角色），只适合本机离线回归；本工作区已切到 `users`（真实账号 + JWT + 空间授权，见第 11 节），对公网开放前仍应配置 TLS 终止、更换 `EPISTEME_AUTH_SECRET` 与管理员密码，并收紧绑定地址。
+> **安全提醒**：`deploy/.env` 的 `EPISTEME_BIND_IP=0.0.0.0` 允许局域网访问。模板默认是 `EPISTEME_AUTH_MODE=legacy`（无鉴权，仅靠可伪造的 `X-Episteme-Role` 头声明角色），只适合本机离线回归；本工作区已切到 `users`（真实账号 + JWT + 按账号授权 + 每账号 MCP 令牌，见第 11 节），对公网开放前仍应配置 TLS 终止、更换 `EPISTEME_AUTH_SECRET` 与管理员密码，并收紧绑定地址。
 
 常用运维命令：
 
@@ -190,9 +190,9 @@ Pack 是**纯数据**（目录 + 内容类型 + 视图 + 可选示例数据）�
 ### 2.10 安全与持久化
 
 - **legacy（模板默认）**：不注册任何鉴权中间件，写请求以 `X-Episteme-Role` 声明角色（缺省 `owner`），便于本地开发与回归。
-- **users（本工作区启用）**：`EPISTEME_AUTH_MODE=users` + `EPISTEME_AUTH_SECRET` 启用真实账号表（PBKDF2 密码哈希）、服务端签发 HS256 JWT、全局角色与按空间授权。角色由服务端 principal 决定，客户端伪造的 `X-Episteme-Role` 会被覆盖；未授权空间返回 `403 SPACE_FORBIDDEN`。详见第 11 节。
+- **users（本工作区启用）**：`EPISTEME_AUTH_MODE=users` + `EPISTEME_AUTH_SECRET` 启用真实账号表（PBKDF2 密码哈希）、服务端签发 HS256 JWT、**按账号授权**（`ep_space_owners`：每个空间归属唯一账号，其他账号一律 `403 ACCOUNT_FORBIDDEN`）与**每账号可自助重置的长期 MCP 令牌**（`ep_mcp_tokens`，仅存 SHA-256 摘要）。角色由服务端 principal 决定，客户端伪造的 `X-Episteme-Role` 会被覆盖；无账号身份的 HMAC 超级通道默认停用。详见第 11 节。
 - **secure（可选）**：`EPISTEME_AUTH_MODE=secure` + `EPISTEME_AUTH_SECRET` 启用 JWT HS256、API Key + HMAC-SHA256 签名（`X-Episteme-Key/Timestamp/Nonce/Signature`）、Nonce 单次使用（重放 `409`）、全局固定窗口限流（`429`）；`/health` 与 `GET /capabilities` 仍公开。`EPISTEME_API_KEYS` 可登记 `keyId:role`，角色不匹配返回 `403 ROLE_MISMATCH`。
-- **数据**：EF Core 11 个 DbSet（Space / Node / ContentType / Document / Part / Annotation / Blob / Tree / Commit / Ref / AuditLog）；身份表 `ep_users` / `ep_space_members` 由 `IdentityStore` 用可移植 raw SQL 幂等创建，避免旧库 `EnsureCreatedAsync()` 不建新表；默认 SQLite 文件位于 `EPISTEME_DATA_DIR`（容器内 `/app/data`），可切 PostgreSQL；PDF 二进制单独存内容寻址 blob，最大 20 MiB，通过 `GET .../parts/{partId}/binary` 以 `application/pdf` 支持 Range 读回。
+- **数据**：EF Core 11 个 DbSet（Space / Node / ContentType / Document / Part / Annotation / Blob / Tree / Commit / Ref / AuditLog）；身份表 `ep_users` / `ep_space_owners` / `ep_mcp_tokens`（以及仅作历史兼容的 `ep_space_members`）由 `IdentityStore` 用可移植 raw SQL 幂等创建，并在启动时为旧空间回填归属，避免旧库 `EnsureCreatedAsync()` 不建新表；默认 SQLite 文件位于 `EPISTEME_DATA_DIR`（容器内 `/app/data`），可切 PostgreSQL；PDF 二进制单独存内容寻址 blob，最大 20 MiB，通过 `GET .../parts/{partId}/binary` 以 `application/pdf` 支持 Range 读回。
 - **前端**：所有阅读器引擎本地打包，零 CDN、离线可加载；Monaco / pdf.js 不可用时自动降级，而不是白屏。
 
 ---
@@ -220,7 +220,7 @@ Pack 是**纯数据**（目录 + 内容类型 + 视图 + 可选示例数据）�
 
 ### 3.2 服务端能力
 
-- **REST**：`/api/v1/episteme` 前缀下 53 条路由，另有 `/api/v1/auth` 6 条与 `/api/v1/admin` 9 条账号 / 角色 / 空间授权端点，覆盖空间、目录、Schema、文档 / Part / 标注 / 检索、版本、Pack、MCP 调试、审计、能力自检、真实媒介导入。统一响应为 JSON，业务错误为 `{ "code", "message", "traceId" }`；写响应回写 `X-Tools-Version`。
+- **REST**：`/api/v1/episteme` 前缀下 53 条路由，另有 `/api/v1/auth` 10 条（含每账号 MCP 令牌的查看 / 生成重置 / 停用）与 `/api/v1/admin` 10 条账号 / 角色 / 空间归属端点，覆盖空间、目录、Schema、文档 / Part / 标注 / 检索、版本、Pack、MCP 调试、审计、能力自检、真实媒介导入。统一响应为 JSON，业务错误为 `{ "code", "message", "traceId" }`；写响应回写 `X-Tools-Version`。
 - **MCP**：三种传输 + 31 个静态工具（含 `episteme.create_space`）+ 按类型动态派生工具 + Resources + `toolsVersion` 版本化清单；空库时 `tools/list` 返回 5 个引导工具，让 Agent 先创建空间。
 - **能力自检**：`GET /health`、`GET /api/v1/episteme/capabilities`、`GET /api/v1/episteme/fetch-worker/health`。
 - **客户端**：Avalonia 桌面端具备动态目录树、Schema 表单、文档读写、版本 diff、标注、MCP 工具调用、Pack 与四套主题；`Episteme.Client.Probe` 提供无 GUI 客户端层冒烟；`Episteme.McpStdio` 供本地 Agent 以 stdio 接入。
@@ -296,7 +296,7 @@ EPISTEME_FETCH_PORT=8090 node server.mjs
 | `EPISTEME_BIND_IP` | compose `127.0.0.1`，`.env` 为 `0.0.0.0` | 宿主绑定地址 |
 | `EPISTEME_HTTP_PORT` | `5080` | 宿主端口（容器 8080） |
 | `EPISTEME_DATA_DIR` | `AppContext.BaseDirectory/data`，容器 `/app/data` | SQLite 数据库与 PDF blob 目录 |
-| `EPISTEME_AUTH_MODE` | `legacy` | `secure` 启用 JWT/HMAC/Nonce/限流；`users` 启用账号体系与按空间授权 |
+| `EPISTEME_AUTH_MODE` | `legacy` | `secure` 启用 JWT/HMAC/Nonce/限流；`users` 启用账号体系、按账号授权与每账号 MCP 令牌 |
 | `EPISTEME_AUTH_SECRET` | 空 | HS256 JWT 与 HMAC 密钥，secure / users 模式必填 |
 | `EPISTEME_ALLOW_REGISTRATION` | `true` | users 模式是否开放自助注册；`false` 时只能由管理员建号 |
 | `EPISTEME_ADMIN_USER` / `EPISTEME_ADMIN_PASSWORD` | `admin` / 空 | 首启种子管理员，仅用户表为空时创建一次 |
@@ -557,27 +557,32 @@ MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET
 
 ## 7. 测试与验收
 
-历史验收记录（`docs/10`）：v0.5 阶段连续三轮 **213 项 / 轮**（六套）全绿；加入 git 旁路同步后为七套 235 项；合并应用内帮助手册后为八套 **267 项**（含 `help_smoke` 35 项）。账号体系与代码工作空间增量在同一镜像上复跑 **267 / 267**，并新增 users 专项 **97 项**（`auth_smoke.py` 76 + `auth_ui_smoke.js` 21），合计 364 项。跨账户隔离审计后再次全量复跑 **12 轮 / 413 项**（legacy 八套 267 + users 两套 97 + `isolation_smoke.py` 无范围 24 / 有范围 25），全部 **0 失败**。服务端 `dotnet publish` 与客户端 `dotnet build` 均为 0 警告 0 错误。
+历史验收记录（`docs/10`）：v0.5 阶段连续三轮 **213 项 / 轮**（六套）全绿；加入 git 旁路同步后为七套 235 项；合并应用内帮助手册后为八套 **267 项**（含 `help_smoke` 35 项）。账号体系与代码工作空间增量在同一镜像上复跑 **267 / 267**，并新增 users 专项 **97 项**，合计 364 项。按「空间授权矩阵」实施跨账户隔离审计时全量复跑 **12 轮 / 413 项**，全部 **0 失败**；该模型本轮已被按账号授权取代。
+
+本轮（**按账号授权 + 每账号 MCP token**）在五个独立 Docker Compose 项目上从空库全量复跑 **10 套 / 426 项，0 失败**：legacy 主回归 104、Web UI 47、git 旁路同步 22（含 secure HMAC 3 项）、帮助手册 35、secure 鉴权 12、PostgreSQL 13、users 账号与工作空间 86、users 登录墙 DOM 29、MCP token 生命周期 42、跨账号隔离 36。回归镜像 `episteme-api:acct-dev` / `episteme-fetch-worker:acct-dev` 均为 `docker build` **0 警告 0 错误**；端口 5090（users）/ 5091（legacy）/ 5092（secure 限流）/ 5093（PostgreSQL）/ 5094（secure HMAC）各自独立，避免鉴权模式与限流窗口串扰。另有 3 套（客户端 Probe 30、MCP stdio 7、原型浏览器 28）依赖本机 dotnet SDK / Chromium，本轮未改动客户端代码，保留历史结果。\n\n正式 5080 实例也用同一镜像从**旧 users 库在线升级**：启动日志出现 `Backfilled account ownership for 2 existing spaces`，并额外完成 10 项只读升级验证（管理员原密码登录、`/admin/owners` 归属视图、空间列表 `ownerUserId`、MCP token 状态、未登录拦截、前端 token 面板与空间归属 tab），**0 失败**；升级前数据卷已备份。若旧空间原本属于普通账号，可由管理员在后台「空间归属」中转让。
 
 | 套件 | 命令（仓库根） | 项数 | 前置条件 |
 |---|---|---|---|
 | REST / MCP 主回归 | `python3 tests/api_smoke.py` | 104 | 5080 实例，legacy 模式；仅用 Python 标准库 |
 | Web UI jsdom 交互 | `NODE_PATH=<node_modules> node tests/ui_smoke.js` | 47 | 需 jsdom + 5080 实例 |
-| 客户端无 GUI | `dotnet src/Episteme.Client.Probe/bin/Release/net10.0/Episteme.Client.Probe.dll` | 30 | 已构建客户端 + `EPISTEME_API` |
+| 客户端无 GUI | `dotnet src/Episteme.Client.Probe/bin/Release/net10.0/Episteme.Client.Probe.dll` | 30 | 已构建客户端 + `EPISTEME_API`；本轮未复跑，保留历史结果 |
 | secure 鉴权 / 限流 | `EPISTEME_TEST_BASE=http://127.0.0.1:5081 EPISTEME_TEST_RATE_LIMIT=20 python3 tests/secure_smoke.py` | 12 | 另起 5081 的 secure 实例 |
-| MCP stdio 传输 | `EPISTEME_DOTNET_CMD=dotnet python3 tests/stdio_smoke.py` | 7 | 已编译 McpStdio DLL |
+| MCP stdio 传输 | `EPISTEME_DOTNET_CMD=dotnet python3 tests/stdio_smoke.py` | 7 | 已编译 McpStdio DLL；本轮未复跑，保留历史结果 |
 | PostgreSQL provider | `EPISTEME_TEST_BASE=http://127.0.0.1:5082 python3 tests/postgres_smoke.py` | 13 | 另起 PG17 + 5082 的 postgres 实例 |
-| git 旁路同步 | `python3 tests/git_sync_smoke.py`（可配 `EPISTEME_SECURE_BASE` / `EPISTEME_SECURE_SECRET` 跑 HMAC） | 19 | 5080 实例；Pack 安装、head / hook / range、幂等；3 项 secure HMAC 需另起签名实例 |
+| git 旁路同步 | `python3 tests/git_sync_smoke.py`（可配 `EPISTEME_SECURE_BASE` / `EPISTEME_SECURE_SECRET` 跑 HMAC） | 22 | legacy 实例；Pack 安装、head / hook / range、幂等、19 项主链路 + 3 项 secure HMAC |
 | 应用内帮助手册 | `NODE_PATH=<node_modules> node tests/help_smoke.js` | 35 | 需 jsdom；页内手册的分组导航 / 搜索 / 降级 |
-| users 账号与代码工作空间 | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> python3 tests/auth_smoke.py` | 76 | 需 users 模式实例；注册登录、角色授权、管理后台、MCP create_space、四类 git 归档与代码预览 |
-| users 登录墙 / 管理后台 DOM | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> node tests/auth_ui_smoke.js` | 21 | 需 jsdom + users 实例；渐进增强在 legacy 下不注入 DOM |
-| 原型浏览器回归 | `NODE_PATH=<node_modules> node tests/ui_test.js` | 28 | 需 Playwright + Chromium；输出 `tests/ui_report.md` / `.json` |
+| users 账号与代码工作空间 | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> python3 tests/auth_smoke.py` | 86 | 需 users 模式实例；注册登录、按账号授权、`/admin/owners`、MCP create_space、四类 git 归档与代码预览、`--auth mcp` 同步 |
+| users 登录墙 / 管理后台 DOM | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> node tests/auth_ui_smoke.js` | 29 | 需 jsdom + users 实例；「我的 MCP Token」面板生成 / 重置 / 停用、空间归属 tab；legacy 下不注入 DOM |
+| 每账号 MCP token 生命周期 | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> python3 tests/mcp_token_smoke.py` | 42 | 空库 users 实例；状态 / 生成 / 重置 / 停用、Bearer 与 `X-Episteme-Mcp-Token`、令牌不可自管理、后台总览 |
+| 跨账号越权矩阵 | `EPISTEME_TEST_BASE=<users 实例> EPISTEME_ADMIN_PASSWORD=<pw> EPISTEME_MACHINE_SECRET=<secret> python3 tests/isolation_smoke.py` | 36 | 空库 users 实例；JWT / MCP token / HMAC 三通道、`ACCOUNT_FORBIDDEN` |
+| 原型浏览器回归 | `NODE_PATH=<node_modules> node tests/ui_test.js` | 28 | 需 Playwright + Chromium；输出 `tests/ui_report.md` / `.json`；本轮保留历史结果 |
 
 复跑注意：
 
-- `tests/api_smoke.py`、`tests/ui_smoke.js`、`tests/help_smoke.js`、`tests/auth_ui_smoke.js`、`tests/isolation_smoke.py` 均支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`ui_smoke.js` 的 `WWW` 已改为 `__dirname` 相对定位，换机器无需改动。secure / postgres 套件默认 5081 / 5082，桌面 Probe 可用 `EPISTEME_API` 改基址。
-- `tests/isolation_smoke.py` 需要空库 users 实例，并传 `EPISTEME_ADMIN_PASSWORD`；测机器通道时再传 `EPISTEME_MACHINE_SECRET`，实例配了 `EPISTEME_MACHINE_SPACES` 时设 `EPISTEME_MACHINE_SPACES_SET=1` 与固定 `EPISTEME_TEST_SUFFIX`。
-- users 专项会真实创建账号与空间，建议在独立 compose 项目（`docker compose -p <name> --env-file ...`）的空库上跑；legacy 八套必须保持 `EPISTEME_AUTH_MODE=legacy`，否则会因缺少 Bearer 令牌而 401。
+- `tests/api_smoke.py`、`tests/ui_smoke.js`、`tests/help_smoke.js`、`tests/auth_ui_smoke.js`、`tests/mcp_token_smoke.py`、`tests/isolation_smoke.py` 均支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`ui_smoke.js` 的 `WWW` 已改为 `__dirname` 相对定位，换机器无需改动。secure / postgres 套件默认 5081 / 5082，桌面 Probe 可用 `EPISTEME_API` 改基址。
+- `tests/mcp_token_smoke.py` 与 `tests/isolation_smoke.py` 都要求**空库 users 实例**并传 `EPISTEME_ADMIN_PASSWORD`；验证「无账号身份的 HMAC 通道默认停用」时另传 `EPISTEME_MACHINE_SECRET`，若实例启动了 `EPISTEME_MACHINE_USER=<账号>` 绑定，则给 isolation 套件设 `EPISTEME_MACHINE_USER_SET=1`。
+- users 专项会真实创建账号、空间与令牌，建议在独立 compose 项目（`docker compose -p <name> --env-file ...`）的空库上跑；legacy 四套（`api_smoke` / `ui_smoke` / `help_smoke` / `git_sync_smoke` 主链路）必须保持 `EPISTEME_AUTH_MODE=legacy`，否则会因缺少 Bearer 令牌而 401。
+- secure 限流套件会把 20 次/分窗口打满，且 HMAC 用的 `X-Episteme-Key: desktop-1` 与 git-sync 用的 `git-sync` 是两个 keyId：**必须另起一个高阈值 secure 实例**给 `git_sync_smoke.py` 的 3 项 HMAC 用例，并在两个实例的 `EPISTEME_API_KEYS` 里分别登记，否则会得到 `429 RATE_LIMITED` / `API_KEY_UNKNOWN`。
 - `tests/ui_test.js` 用 `__dirname` 相对定位 `../prototype/index.html`，无需服务器；本机若因内存限制无法启动 Chromium，可只跑 jsdom 套件。
 - `tests/ui_report.md` 保留 2026-11-09 的 28/28 历史结果；仓库内没有 `requirements.txt` 或测试用 `package.json`，依赖靠 `NODE_PATH` 外部提供。
 
@@ -602,8 +607,8 @@ Episteme/
 │   ├── Episteme.slnx          Core + Server
 │   └── Episteme.Client.slnx   四个可编译客户端项目
 ├── worker/           Node 22 fetch-worker（Dockerfile、package.json、server.mjs）
-├── tools/            git-sync.py：旁路 git 同步（head / hook / range、legacy / HMAC / JWT / bearer / login、--app-type 按类型归档、幂等）
-├── tests/            十套回归脚本（含 auth_smoke.py / auth_ui_smoke.js / help_smoke.js）+ 原型 ui_test.js + 报告
+├── tools/            git-sync.py：旁路 git 同步（head / hook / range、legacy / HMAC / JWT / bearer / login / mcp、--app-type 按类型归档、幂等）
+├── tests/            十二套回归脚本（含 auth_smoke.py / auth_ui_smoke.js / mcp_token_smoke.py / isolation_smoke.py / help_smoke.js）+ 报告
 ├── SPEC.md           v0.1 平台化规格说明书
 └── README.md         本文
 ```
@@ -628,7 +633,7 @@ Episteme/
 
 ## 9. 当前边界与后续路线
 
-**已实现**：P1–P5 全部落地；真实 pdf.js / Monaco / Readability 阅读器、内容寻址 PDF blob、交互式锚点重绑定、secure 鉴权与限流、PostgreSQL provider、三种 MCP 传输、桌面端读写补全、git 旁路同步（4 套内置模板 + 四类 git 元数据 + 文件内容 Part）；users 账号体系（注册 / 登录 / 角色 / 空间授权 / 管理后台）、MCP `create_space`、代码工作空间模板、按应用类型归档与代码文件树在线预览。
+**已实现**：P1–P5 全部落地；真实 pdf.js / Monaco / Readability 阅读器、内容寻址 PDF blob、交互式锚点重绑定、secure 鉴权与限流、PostgreSQL provider、三种 MCP 传输、桌面端读写补全、git 旁路同步（4 套内置模板 + 四类 git 元数据 + 文件内容 Part）；users 账号体系（注册 / 登录 / 角色 / 管理后台）、**按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助生成 / 重置 / 停用长期 MCP 令牌**、MCP `create_space`、代码工作空间模板、按应用类型归档与代码文件树在线预览。
 
 **明确边界**（详见 `docs/07 §7`、`docs/08 §8`、`docs/09 §9`、`docs/10 §7`）：
 
@@ -698,7 +703,7 @@ git push archive main
 
 ## 11. 账号体系与个人代码管理工作空间
 
-这一节覆盖「普通用户注册 / 登录、角色与授权、管理员后台」以及「通过 MCP 创建个人代码管理工作空间、按应用类型归档 git 代码、在线预览源码」。
+这一节覆盖「普通用户注册 / 登录、按账号授权、每账号 MCP 令牌、管理员后台」以及「通过 MCP 创建个人代码管理工作空间、按应用类型归档 git 代码、在线预览源码」。
 
 ### 11.1 三种鉴权模式
 
@@ -708,7 +713,7 @@ git push archive main
 | `secure` | `EPISTEME_AUTH_MODE=secure` + 共享密钥 | 自签 JWT / HMAC 机器通道 | 无人值守同步、CI |
 | `users` | `EPISTEME_AUTH_MODE=users` + 共享密钥 + 管理员密码 | 服务端账号表 + 服务端签发 JWT | 多人使用、需要登录与后台管理 |
 
-`users` 与 `legacy` / `secure` 互斥，切换后重建 `api` 容器即可；已有空间、文档与提交历史不受影响。身份表 `ep_users` / `ep_space_members` 在每次启动时幂等创建，种子管理员**只在用户表为空时**创建一次。
+`users` 与 `legacy` / `secure` 互斥，切换后重建 `api` 容器即可；已有空间、文档与提交历史不受影响。身份表 `ep_users` / `ep_space_owners` / `ep_mcp_tokens` 在每次启动时幂等创建，并为旧空间自动回填归属（优先取历史 owner 授权，否则归种子管理员）；种子管理员**只在用户表为空时**创建一次。
 
 最小启用（`deploy/users.env.example` 是完整样例）：
 
@@ -722,20 +727,22 @@ cd .. && docker compose -p episteme -f deploy/docker-compose.yml --env-file depl
 
 浏览器打开首页即出现登录墙。`/health`、`GET /api/v1/episteme/capabilities`、静态 SPA 资源与 `/api/v1/auth/config|register|login` 无需令牌；其余 `/api/` 与 `/mcp` 请求都要带 `Authorization: Bearer <token>`。
 
-### 11.2 账号、角色与授权模型
+### 11.2 账号、角色与授权模型（按账号，不按空间）
 
 | 层 | 取值 | 说明 |
 |---|---|---|
-| 全局角色 | `admin` / `owner` / `editor` / `agent` / `viewer` | 决定全局端点（如创建空间、列举 Pack）的有效角色 |
-| 空间角色 | `owner` / `editor` / `agent` / `viewer` | 由 `ep_space_members` 按空间授予；无授权则 `403 SPACE_FORBIDDEN` |
-| 目录结构变更 | 仅 `owner` | 新建 / 移动 / 删除目录 |
+| 空间归属 | `ep_space_owners(space_id → user_id)` | **唯一授权边界**，一个空间只属于一个账号；他人访问一律 `403 ACCOUNT_FORBIDDEN` |
+| 全局角色 | `admin` / `owner` / `editor` / `agent` / `viewer` | 就是该账号在自己名下**所有**空间的有效角色，不再有空间角色 |
+| 目录结构变更 | 仅 `owner` / `admin` | 新建 / 移动 / 删除目录、安装 Pack |
 | 内容写入 | `owner` / `editor` / `agent` | 新建文档、追加 Part、标注 |
+| MCP 凭据 | 每账号一个 `epm_...` 长期令牌 | 与登录 JWT 独立；本人登录后自助生成 / 重置 / 停用 |
 
-- `admin` 全局可见所有空间、独享 `/api/v1/admin/*`；普通用户只看到被授予的空间。
-- 任何已登录账号都可以创建**自己的**空间，创建者自动成为该空间 `owner`。
-- 自助注册默认 `editor`；管理员可在后台改全局角色、启停账号、重置密码、删除账号（不能删除自己）。
+- `admin` 全局可见所有空间、独享 `/api/v1/admin/*`，可在「空间归属」里转让某个空间给别的账号（转让后原账号立即失去权限）。
+- 任何已登录账号都可以创建**自己的**空间，创建者自动成为归属账号；后台**不再提供**「把空间授权给另一账号」的入口，`PUT/DELETE /api/v1/admin/members` 会返回 `409 GRANT_MODEL_REMOVED`。
+- 自助注册默认 `editor`；管理员可在后台改全局角色、启停账号、重置密码、删除账号（不能删除自己；删除时名下空间自动转交其他管理员）。
 - 角色由服务端 principal 计算并覆盖 `X-Episteme-Role`，客户端无法提权；停用账号在下次请求立即生效。
 - 登录有独立限流（默认 30 次 / 分钟 / IP + 账号），超限返回 `429 LOGIN_RATE_LIMITED`。
+- 升级兼容：旧库的 `ep_space_members` 只作为历史数据保留，启动时按 owner 授权回填归属，不再参与鉴权。
 
 ### 11.3 用 MCP 创建个人代码管理工作空间
 
@@ -786,41 +793,78 @@ python3 tools/git-sync.py --mode head --api http://127.0.0.1:5080 \
 
 ### 11.5 管理员后台
 
-以 `admin` 登录后，顶栏出现「管理后台」：
+以 `admin` 登录后，顶栏出现「管理后台」；**每个登录账号**（含普通用户）都会看到「我的 MCP Token」：
 
-- **用户与角色**：列表、全局角色下拉、启停、重置密码、删除、新建用户（可一步指定初始空间授权）。
-- **空间授权**：按用户 × 空间查看 / 授予 / 撤销角色。
-- **总览**：账号数、在用数、管理员数、空间数、授权数、文档数。
+- **用户与角色**：列表、全局角色下拉、启停、重置密码、删除、新建用户；并显示名下空间数与 MCP 令牌状态。
+- **空间归属**：查看每个空间归属哪个账号，管理员可把空间**转让**给另一账号（原账号立即失去权限）。不再有「按用户 × 空间授予角色」的矩阵。
+- **总览**：账号数、在用数、管理员数、空间数、归属数、启用中的 MCP 令牌数、文档数。
+- **我的 MCP Token**：状态 / 令牌提示 / 创建时间 / 最后使用时间、生成、重置（旧令牌立即失效）、停用，明文一次性展示与复制。
 
-对应 REST（均需管理员 Bearer 令牌）：
+对应 REST：
 
-| 方法 | 路径 | 用途 |
-|---|---|---|
-| `GET/POST` | `/api/v1/auth/config` / `register` / `login` | 公开：配置 / 注册 / 登录 |
-| `GET` / `POST` | `/api/v1/auth/me` / `password` / `logout` | 我的身份 / 改密 / 登出 |
-| `GET` | `/api/v1/admin/overview` / `users` / `spaces` / `members` | 总览与四类列表 |
-| `POST` / `PATCH` / `DELETE` | `/api/v1/admin/users[/{id}]` | 建号 / 改角色启停重置 / 删号 |
-| `PUT` / `DELETE` | `/api/v1/admin/members` | 授权 / 撤销 |
+| 方法 | 路径 | 用途 | 身份 |
+|---|---|---|---|
+| `GET` / `POST` | `/api/v1/auth/config` / `register` / `login` | 公开：配置 / 注册 / 登录 | 无需令牌 |
+| `GET` / `POST` | `/api/v1/auth/me` / `password` / `logout` | 我的身份 / 改密 / 登出 | 登录 JWT |
+| `GET` / `POST\|PUT` / `DELETE` | `/api/v1/auth/me/mcp-token` | 查看状态 / 生成或重置 / 停用 MCP 令牌 | **仅登录会话** |
+| `GET` | `/api/v1/admin/overview` / `users` / `spaces` / `owners` | 总览与账号 / 空间 / 归属列表 | 管理员 JWT |
+| `POST` / `PATCH` / `DELETE` | `/api/v1/admin/users[/{id}]` | 建号 / 改角色启停重置 / 删号 | 管理员 JWT |
+| `PUT` | `/api/v1/admin/spaces/{id}/owner` | 转让空间归属 | 管理员 JWT |
+| `GET` / `PUT` / `DELETE` | `/api/v1/admin/members` | 只读兼容视图 / 变更一律 `409 GRANT_MODEL_REMOVED` | 管理员 JWT |
 
-### 11.6 边界
+### 11.6 每账号 MCP token（自助管理 / 重置）
 
-- JWT 无状态、无刷新令牌与主动吊销列表；改密后旧令牌在到期前仍可用，但停用账号会被服务端实时拒绝。
-- 无邮箱 / 手机验证、密码找回、SSO、审计归档；密码用 PBKDF2-SHA256 加盐存储，不落明文。
-- 空间授权在中间件按 URL / `?space=` / MCP `params.spaceId`（含 `arguments.spaceId`）校验，并在 `tools/call` 用最终落点做二次校验；空间内的**单个文档**不再做二次跨空间校验（所有文档端点都带空间前缀）。
-- HMAC 机器通道（`X-Episteme-Key`）没有用户身份，默认可写全库；用 `EPISTEME_MACHINE_SPACES` 限定，或让 CI 改走 `--auth login` 的真实账号。
-- 前端是渐进增强：`auth.js` 只在 `users` 模式注入登录墙与后台，legacy / secure 下 `window.EpistemeAuth.token()` 恒为空字符串，既有 UI 回归不受影响。
-- 完整验证见 `tests/auth_smoke.py`（76 项）、`tests/auth_ui_smoke.js`（21 项）与 `tests/isolation_smoke.py`（跨账户越权矩阵，无范围 24 项 / 有范围 25 项）。
+登录后点顶栏「我的 MCP Token」，或直接用 API：
 
-### 11.7 MCP 为什么只能写到当前账号的空间
+```bash
+# 1) 查看状态（永远不返回明文）
+curl -sS -H 'Authorization: Bearer <登录JWT>' \
+  http://127.0.0.1:5080/api/v1/auth/me/mcp-token
+
+# 2) 生成 / 重置：返回一次性明文 epm_...，旧令牌立即失效
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <登录JWT>' \
+  -d '{"action":"reset"}' http://127.0.0.1:5080/api/v1/auth/me/mcp-token
+
+# 3) 用令牌调用 MCP（只能写这个账号名下的空间）
+curl -sS -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer epm_...' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
+  http://127.0.0.1:5080/mcp
+
+# 4) 停用（立即失效，之后可重新生成）
+curl -sS -X DELETE -H 'Authorization: Bearer <登录JWT>' \
+  http://127.0.0.1:5080/api/v1/auth/me/mcp-token
+```
+
+也可用 `X-Episteme-Mcp-Token: epm_...` 头；`git-sync.py` 用 `--auth mcp --token epm_...`（或 `EPISTEME_MCP_TOKEN` 环境变量），`--auth bearer --token epm_...` 同样有效。
+
+规则：
+
+- 明文只在生成 / 重置响应里出现一次；服务端 `ep_mcp_tokens` 只存 SHA-256 摘要、令牌尾缀提示、创建 / 最后使用时间与停用标志。
+- 重置 = 替换摘要，**旧令牌下一个请求就 401**；停用 = 置 `revoked=1`，同样立即生效。无需吊销列表。
+- 令牌与登录 JWT 相互独立：登出、改密都不影响它；只有本人登录会话能管理它。令牌本身调用管理端点返回 `403 MCP_TOKEN_SESSION_REQUIRED`，也不能访问 `/api/v1/admin/*`（`403 ADMIN_REQUIRED`）。
+- 令牌按**账号归属**隔离：只能读写该账号名下空间，省略 `spaceId` 时回退到该账号自己的空间；指向他人空间返回 `403 ACCOUNT_FORBIDDEN`。
+
+### 11.7 边界
+
+- JWT 无状态、无刷新令牌与主动吊销列表；改密后旧登录令牌在到期前仍可用，但停用账号会被服务端实时拒绝。**MCP 令牌可随时自助重置 / 停用，立即生效**。
+- 无邮箱 / 手机验证、密码找回、SSO、审计归档；密码用 PBKDF2-SHA256 加盐存储，令牌用 SHA-256 摘要存储，都不落明文。
+- 空间归属在中间件按 URL / `?space=` / MCP `params.spaceId`（含 `arguments.spaceId`）校验，并在 `tools/call` 用最终落点做二次校验；空间内的**单个文档**不再做二次跨空间校验（所有文档端点都带空间前缀）。
+- users 模式下 HMAC 机器通道（`X-Episteme-Key`）**默认停用**（`401 MACHINE_CHANNEL_DISABLED`），因为它没有账号身份、与按账号授权冲突。只有设置 `EPISTEME_MACHINE_USER=<账号>` 显式绑定后才启用，并按该账号归属隔离；`EPISTEME_MACHINE_SPACES` 可再附加空间限制。secure 模式保留原 HMAC 行为。
+- 前端是渐进增强：`auth.js` 只在 `users` 模式注入登录墙、MCP 令牌面板与后台，legacy / secure 下 `window.EpistemeAuth.token()` 恒为空字符串，既有 UI 回归不受影响。
+- 完整验证见 `tests/auth_smoke.py`、`tests/auth_ui_smoke.js`、`tests/mcp_token_smoke.py` 与 `tests/isolation_smoke.py`。
+
+### 11.8 MCP 为什么只能写到当前账号的空间
 
 隔离不靠「客户端自觉传 spaceId」，而是三层服务端校验叠加：
 
-1. **身份不可伪造**：`POST /mcp` 必须带登录后由服务端签发的 HS256 JWT；中间件用 `EPISTEME_AUTH_SECRET` 验签，再查库确认账号仍启用，得到 `UserPrincipal`（含 `SpaceRoles` 授权字典）。客户端自带的 `X-Episteme-Role` 会被中间件覆盖，无法提权。
-2. **入口拦截**：中间件从路径 `/spaces/{id}`、`?space=`、`params.spaceId` 或 `params.arguments.spaceId` 提取目标空间，把 slug 解析成 id；普通账号若 `SpaceRoles` 中无该空间，直接 `403 SPACE_FORBIDDEN`。
-3. **落点复核**：`tools/call` 在 `Dispatch` 之前拿到 `ResolveSpaceId` 的**最终结果**（省略 spaceId 时会回退到该账号可见的第一个空间），再用 principal 复核一次：无授权即拒绝，并**用空间角色覆盖 `WriteContext.Role`**、用登录名覆盖审计 `actor`。因此省略 spaceId 不能继承全局角色，管理员把账号在某空间降为 `viewer` 后，该空间的写入立即失效。
+1. **身份不可伪造**：`POST /mcp` 必须带服务端签发的登录 JWT，或该账号自己的 `epm_...` MCP 令牌；中间件验签 / 查摘要，再查库确认账号仍启用，得到 `UserPrincipal`（含该账号**名下空间集合** `OwnedSpaceIds` 与凭据通道）。客户端自带的 `X-Episteme-Role` 会被中间件覆盖，无法提权。
+2. **入口拦截**：中间件从路径 `/spaces/{id}`、`?space=`、`params.spaceId` 或 `params.arguments.spaceId` 提取目标空间，把 slug 解析成 id；普通账号若不是该空间的归属账号，直接 `403 ACCOUNT_FORBIDDEN`。
+3. **落点复核**：`tools/call` 在 `Dispatch` 之前拿到 `ResolveSpaceId` 的**最终结果**（省略 spaceId 时会回退到该账号名下第一个空间），再用 principal 复核一次：非本人空间即拒绝，并**用账号全局角色覆盖 `WriteContext.Role`**、用登录名覆盖审计 `actor`。因此省略 spaceId 不能落到别人空间，角色被降为 `viewer` 后该账号名下所有写入立即失效。
 
-「只写在自己账户下」的空间归属来自两处：`create_space` 会自动给创建者插入一条 `ep_space_members(owner)` 记录；`ListSpacesAsync` 对普通用户只返回已授权空间，所以 `ResolveSpaceId` 的回退目标也永远在自己的可见集合内。
+空间归属来自两处：`create_space` 会写入 `ep_space_owners(space_id, creator_user_id)`；升级时 `BackfillOwnersAsync` 为旧空间按历史 owner 授权或种子管理员回填。`ListSpacesAsync` 对普通账号只返回名下空间，所以 `ResolveSpaceId` 的回退目标也永远在自己的集合内。管理员可在后台转让归属，转让即时生效。
 
-跨账户越权矩阵（`tests/isolation_smoke.py`，两个真实账号 + 两个 MCP 创建的空间）覆盖：直接 REST 读写、MCP `params.spaceId`、`?space=`、`arguments.spaceId`、伪造 owner 头、省略 spaceId 回退、viewer 降级后写入、普通账号调管理端点。结论：**所有指向他人空间的写入均被拒绝，对方空间文档数保持 0**。
+跨账户越权矩阵（`tests/isolation_smoke.py` + `tests/mcp_token_smoke.py`，两个真实账号 + 两个 MCP 创建的空间）覆盖：直接 REST 读写、MCP `params.spaceId`、`?space=`、`arguments.spaceId`、伪造 owner 头、省略 spaceId 回退、viewer 降级后写入、普通账号调管理端点、MCP 令牌越权别的账号空间、重置后旧令牌复用。结论：**所有指向他人空间的写入均被拒绝，对方空间文档数保持 0**。
 
-明确的设计边界：这是**空间级**隔离，不是账户级私有库——管理员可看全部空间；被管理员授予同一空间的多个账号可共同读写该空间（按各自空间角色）；HMAC 机器密钥是共享超级用户，需用 `EPISTEME_MACHINE_SPACES` 收紧。没有单文档 ACL、没有行级加密、没有跨空间引用隔离。
+明确的设计边界：这是**账号级**隔离，不是行级私有库——管理员仍可读全部空间并转让归属；同一空间同一时刻只有一个归属账号，没有共享成员。仍没有单文档 ACL、没有行级加密、没有跨空间引用隔离。

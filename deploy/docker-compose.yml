@@ -23,8 +23,10 @@ services:
       EPISTEME_JWT_AUDIENCE: ${EPISTEME_JWT_AUDIENCE:-episteme-clients}
       EPISTEME_LOGIN_RATE_LIMIT: ${EPISTEME_LOGIN_RATE_LIMIT:-30}
       EPISTEME_API_KEYS: ${EPISTEME_API_KEYS:-}
-      # Empty = HMAC machine credentials may write any space (legacy behaviour).
-      # Set to a comma-separated list of space ids/slugs to pin CI credentials.
+      # users 模式是按账号授权：无账号身份的 HMAC 超级通道默认停用。
+      # 只有显式设置 EPISTEME_MACHINE_USER=<账号> 时才启用，且按该账号的空间归属隔离。
+      EPISTEME_MACHINE_USER: ${EPISTEME_MACHINE_USER:-}
+      # 可选：进一步把绑定的 HMAC 通道钉死在指定空间（id / slug，逗号分隔）。
       EPISTEME_MACHINE_SPACES: ${EPISTEME_MACHINE_SPACES:-}
       EPISTEME_DB_PROVIDER: ${EPISTEME_DB_PROVIDER:-sqlite}
       EPISTEME_PG_CONNECTION: ${EPISTEME_PG_CONNECTION:-}

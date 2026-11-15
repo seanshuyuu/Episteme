@@ -251,7 +251,7 @@
       },
       {
         id: 'safety', group: '注意事项', title: '安全与部署注意事项',
-        lead: '生产化能力全部是环境变量开关。模板默认 legacy + SQLite + 不鉴权；多人在内网使用请切 users 模式（真实账号与空间授权），公网无人值守同步可用 secure 模式，见「账号、角色与代码工作空间」。',
+        lead: '生产化能力全部是环境变量开关。模板默认 legacy + SQLite + 不鉴权；多人在内网使用请切 users 模式（真实账号、按账号授权与每账号 MCP 令牌），公网无人值守同步可用 secure 模式，见「账号、角色与代码工作空间」。',
         blocks: [
           { type: 'warn', title: '上线前必须处理', items: [
             'deploy/.env 默认 EPISTEME_BIND_IP=0.0.0.0 且模板 AUTH_MODE 为 legacy。至少改成 127.0.0.1 或前置反向代理，并把 AUTH_MODE 设为 users（多人）或 secure（机器通道）。',
@@ -270,13 +270,14 @@
       },
       {
         id: 'accounts', group: '注意事项', title: '账号、角色与代码工作空间',
-        lead: 'users 模式下的登录、授权与「个人代码管理工作空间」怎么用；legacy / secure 模式不会出现登录墙。',
+        lead: 'users 模式下的登录、按账号授权、每账号 MCP 令牌与「个人代码管理工作空间」怎么用；legacy / secure 模式不会出现登录墙。',
         blocks: [
           { type: 'list', items: [
             '启用：deploy/.env 设置 EPISTEME_AUTH_MODE=users、EPISTEME_AUTH_SECRET（openssl rand -hex 32）、EPISTEME_ADMIN_PASSWORD，重建 api 容器；完整样例见 deploy/users.env.example。',
             '普通用户可在登录墙自助注册（默认 editor），管理员由首启种子账号创建；之后所有 /api/ 与 /mcp 请求都要带 Authorization: Bearer <token>。',
-            '全局角色 admin / owner / editor / agent / viewer；空间角色 owner / editor / agent / viewer，由管理员在「管理后台 → 空间授权」逐空间授予，未授权空间返回 403 SPACE_FORBIDDEN。',
-            '任何已登录账号都能创建自己的空间并自动成为该空间 owner；目录结构变更仅 owner，内容写入允许 owner / editor / agent。'
+            '按账号授权：每个空间只属于一个账号（ep_space_owners），只有归属账号本人与管理员能读写；其他账号一律 403 ACCOUNT_FORBIDDEN。后台不再有「把空间授权给别人」的入口，改为「空间归属」管理与转让。',
+            '全局角色 admin / owner / editor / agent / viewer 就是该账号在自己名下所有空间的有效角色；目录结构变更仅 owner，内容写入允许 owner / editor / agent。',
+            '任何已登录账号都能创建自己的空间并自动成为归属账号；旧库升级时会按历史 owner 授权或种子管理员自动回填归属，已有数据不会消失。'
           ] },
           { type: 'note', title: '通过 MCP 建代码工作空间', items: [
             '空库时 tools/list 只返回 5 个引导工具；先调 episteme.create_space，参数带 packId=pack_code-workspace 与 includeSamples=true，一次建好四类项目目录与四类提交归档目录。',
@@ -287,16 +288,22 @@
             '每个变更文件是一个 Part，meta 里带 gitPath / name / language / appType / projectName；阅读器按真实路径分组显示文件树，Monaco 按语言高亮。',
             '同一个 commit 归档到不同 --app-type 时互不覆盖（幂等键包含归档节点）；hook 重跑或 CI 重试不会产生重复文档。'
           ] },
+          { type: 'note', title: '我的 MCP Token（每人一个，自助管理）', items: [
+            '登录后顶栏点「我的 MCP Token」：可查看状态 / 令牌提示 / 创建时间 / 最后使用时间，并可生成、重置（旧令牌立即失效）、停用；明文只在生成或重置时显示一次。',
+            '令牌形如 epm_...，服务端只保存 SHA-256 摘要。用法：Authorization: Bearer epm_... 或 X-Episteme-Mcp-Token: epm_...，访问 POST /mcp、GET /mcp/sse；git-sync.py 用 --auth mcp --token <明文> 或环境变量 EPISTEME_MCP_TOKEN。',
+            '令牌与浏览器登录 JWT 相互独立：登出不影响令牌，改密不影响令牌；只有本人登录后才能在「我的 MCP Token」里重置或停用。令牌本身不能管理令牌、不能进管理后台。',
+            '端点：GET / POST|PUT / DELETE /api/v1/auth/me/mcp-token（仅登录会话可用）；MCP 令牌调用会返回 403 MCP_TOKEN_SESSION_REQUIRED。'
+          ] },
           { type: 'note', title: 'MCP 为什么只能写进自己的空间', items: [
-            '三层校验：JWT 验签 + 查库得到服务端 principal；中间件按路径 / ?space= / params.spaceId / arguments.spaceId 比对空间授权；tools/call 在派发前用最终落点再校验一次。',
-            '最终落点会用空间角色覆盖 WriteContext.Role，并用登录名覆盖审计 actor：省略 spaceId 不会继承全局角色，被降为 viewer 后该空间立即只读。',
-            'ResolveSpaceId 的回退目标只来自「当前账号可见空间」列表，因此不带 spaceId 也永远落不到别人的空间；客户端伪造 X-Episteme-Role 会被服务端覆盖。',
-            '跨账户越权矩阵见 tests/isolation_smoke.py：直接 REST、多种 MCP 传参、伪造角色头、省略 spaceId 全部被拒，对方空间文档数保持 0。'
+            '三层校验：凭据验签 / 摘要查库得到服务端 principal（含该账号名下空间集合）；中间件按路径 / ?space= / params.spaceId / arguments.spaceId 比对空间归属；tools/call 在派发前用最终落点再校验一次。',
+            '最终落点会用账号全局角色覆盖 WriteContext.Role，并用登录名覆盖审计 actor：省略 spaceId 不会借用别的账号空间，角色被降为 viewer 后该账号名下所有空间立即只读。',
+            'ResolveSpaceId 的回退目标只来自「当前账号名下空间」列表，因此不带 spaceId 也永远落不到别人的空间；客户端伪造 X-Episteme-Role 会被服务端覆盖。',
+            '跨账户越权矩阵见 tests/isolation_smoke.py 与 tests/mcp_token_smoke.py：直接 REST、多种 MCP 传参、伪造角色头、省略 spaceId、重置前旧令牌复用全部被拒，对方空间文档数保持 0。'
           ] },
           { type: 'warn', title: '边界', items: [
-            'JWT 无刷新令牌与主动吊销列表；改密后旧令牌到期前仍可用，停用账号会被服务端实时拒绝。',
-            'HMAC 机器密钥（X-Episteme-Key）没有用户身份，默认可写全库；用 EPISTEME_MACHINE_SPACES 限定空间，或让 CI 改用 --auth login 的真实账号。',
-            '这是空间级隔离，不是账户级私有库：管理员可读全部空间，被授予同一空间的多个账号按各自角色共享读写；没有单文档 ACL。',
+            'JWT 无刷新令牌与主动吊销列表；改密后登录令牌到期前仍可用，停用账号会被服务端实时拒绝。MCP 令牌可随时自助重置 / 停用，立即生效。',
+            'users 模式下无账号身份的 HMAC 机器通道默认停用（MACHINE_CHANNEL_DISABLED）；只有设置 EPISTEME_MACHINE_USER 显式绑定账号后才启用，且按该账号归属隔离。secure 模式保留原 HMAC 行为。',
+            '这是账号级隔离：管理员仍可读全部空间并转让归属；同一空间同一时刻只有一个归属账号，没有共享成员。仍没有单文档 ACL、没有行级加密。',
             '无邮箱验证、密码找回与 SSO；身份表用 raw SQL 幂等建表，不是 EF Migration。',
             '前端是渐进增强：auth.js 只在 users 模式注入 DOM，legacy / secure 下行为不变。'
           ] }
@@ -313,7 +320,7 @@
             ['SSE / 多实例', '会话只在单进程内存；未接 Redis 背板、对象存储、密钥托管与审计归档'],
             ['阅读器', 'Monaco / pdf.js 加载失败自动降级；老式 \\f PDF 文本层保持兼容显示'],
             ['secure 模式', '最小实现：无 JWT 刷新 / 撤销、无 TLS 终止、无限流按用户分区'],
-            ['users 模式', '无会话表 / 邮箱验证 / 密码找回 / SSO；JWT 到期前不因改密主动失效，停用账号实时拒绝'],
+            ['users 模式', '无会话表 / 邮箱验证 / 密码找回 / SSO；登录 JWT 到期前不因改密主动失效（MCP 令牌可即时重置），停用账号实时拒绝'],
             ['MCP', '自实现最小 JSON-RPC；resources/read 仅提示；无 tools/list_changed 主动推送'],
             ['在线抓取', '回归基于离线 /extract 快照，公网 /fetch 需在受控环境复验']
           ] },

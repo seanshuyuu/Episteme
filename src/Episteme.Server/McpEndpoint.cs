@@ -207,24 +207,28 @@ public static class McpEndpoint
 
         // Defense in depth for users mode: spaceId above is the FINAL space that Dispatch
         // will actually touch (ResolveSpaceId may fall back to the first visible space).
-        // Re-check it here with the server-side principal so that (a) omitting spaceId
-        // cannot inherit the caller's global role, and (b) a grant downgrade inside the
-        // space always wins over the role the middleware computed for a global endpoint.
+        // Re-check account ownership here so that (a) omitting spaceId can never land in
+        // a foreign space, (b) the account's global role always wins over any header or
+        // arguments value, and (c) the audit actor is the authenticated account.
         if (EpistemeConfig.Users && !string.IsNullOrWhiteSpace(spaceId))
         {
             var principal = http.Items["EpistemePrincipal"] as UserPrincipal;
-            if (principal is not null && !principal.IsAdmin)
+            if (principal is not null)
             {
-                if (!principal.SpaceRoles.TryGetValue(spaceId, out var spaceRole))
-                    throw new BusinessException("SPACE_FORBIDDEN", "当前账号未被授权访问该空间", 403);
-                ctx.Role = spaceRole;
-                // Audit actor must be the authenticated account, never a client-supplied
-                // "actor" field in the tool arguments.
+                if (!principal.Owns(spaceId))
+                    throw new BusinessException("ACCOUNT_FORBIDDEN",
+                        "该空间归属其他账号；按账号授权，只能写自己名下的空间", 403);
+                ctx.Role = principal.EffectiveRole(spaceId, false);
                 ctx.Actor = principal.UserName;
+                if (principal.AuthChannel == "machine" &&
+                    http.Items["EpistemeMachineSpaceIds"] is string[] machineScope &&
+                    !Array.Exists(machineScope,
+                        s => string.Equals(s, spaceId, StringComparison.OrdinalIgnoreCase)))
+                    throw new BusinessException("MACHINE_SPACE_FORBIDDEN",
+                        "机器密钥被限定在指定空间内，拒绝访问该空间", 403);
             }
-            else if (principal is null
-                     && http.Items["EpistemeMachineSpaceIds"] is string[] machineScope
-                     && !Array.Exists(machineScope,
+            else if (http.Items["EpistemeMachineSpaceIds"] is string[] machineScope &&
+                     !Array.Exists(machineScope,
                          s => string.Equals(s, spaceId, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new BusinessException("MACHINE_SPACE_FORBIDDEN",
@@ -340,8 +344,11 @@ public static class McpEndpoint
 
     /// <summary>
     /// create_space is a bootstrap tool: it works with zero spaces and can install a Pack
-    /// in the same call. Authentication has already happened in the middleware; the
-    /// new space's creator is its owner, so the install step legitimately runs as owner.
+    /// in the same call. Authentication has already happened in the middleware and the
+    /// new space is bound to the calling account. The one deliberate role exception is
+    /// the initial template install: it is part of creating YOUR OWN brand-new space,
+    /// so it runs as owner even for an editor account. All later writes use the
+    /// account's global role (set in ToolsCall), never this elevated context.
     /// </summary>
     private static async Task<JsonObject> CreateSpaceViaMcp(
         EpistemeService svc, JsonObject args, WriteContext ctx, CancellationToken ct)

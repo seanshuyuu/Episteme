@@ -25,16 +25,42 @@ public sealed class AppUser
     public long LastLoginUnix { get; set; }
 }
 
-/// <summary>Per-space grant. This is the real "按空间授权" boundary.</summary>
+/// <summary>
+/// LEGACY, read-only compatibility with databases created by v0.5. Since the
+/// authorization model moved to accounts (see SpaceOwner), these rows no longer
+/// grant access. They are kept only to backfill ownership on upgrade.
+/// </summary>
 public sealed class SpaceMember
 {
     public string Id { get; set; } = "";
     public string UserId { get; set; } = "";
     public string SpaceId { get; set; } = "";
-    /// <summary>Role inside this space: owner | editor | agent | viewer.</summary>
     public string Role { get; set; } = "viewer";
     public string GrantedBy { get; set; } = "";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>Account ownership of a space. Exactly one owner per space; this is THE boundary.</summary>
+public sealed class SpaceOwner
+{
+    public string SpaceId { get; set; } = "";
+    public string UserId { get; set; } = "";
+    public string CreatedAt { get; set; } = "";
+}
+
+/// <summary>
+/// Per-account MCP credential. Only the SHA-256 digest is stored; the plaintext is
+/// shown once when it is generated / reset and can never be recovered afterwards.
+/// </summary>
+public sealed class McpTokenRecord
+{
+    public string UserId { get; set; } = "";
+    public string TokenHash { get; set; } = "";
+    public string TokenHint { get; set; } = "";
+    public string CreatedAt { get; set; } = "";
+    public long CreatedUnix { get; set; }
+    public long LastUsedUnix { get; set; }
+    public bool Revoked { get; set; }
 }
 
 /// <summary>Authenticated principal attached to HttpContext.Items.</summary>
@@ -43,18 +69,27 @@ public sealed record UserPrincipal(
     string UserName,
     string DisplayName,
     string GlobalRole,
-    IReadOnlyDictionary<string, string> SpaceRoles)
+    IReadOnlySet<string> OwnedSpaceIds,
+    string AuthChannel = "jwt")
 {
+    /// <summary>jwt = browser session, mcp-token = per-account machine token, machine = bound HMAC.</summary>
+    public bool IsMcpToken => string.Equals(AuthChannel, "mcp-token", StringComparison.Ordinal);
+    public bool IsSession => !IsMcpToken;
     public bool IsAdmin => string.Equals(GlobalRole, "admin", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Role that downstream RequireRole sees for the current space.</summary>
+    /// <summary>Account-scoped ownership check. Admin retains global visibility.</summary>
+    public bool Owns(string? spaceId) =>
+        IsAdmin || (!string.IsNullOrWhiteSpace(spaceId) && OwnedSpaceIds.Contains(spaceId!));
+
+    /// <summary>
+    /// Role that downstream RequireRole sees. Under account authorization there is no
+    /// per-space role: the account's global role is effective everywhere the account
+    /// is allowed to go, and admins act as owner.
+    /// </summary>
     public string EffectiveRole(string? spaceId, bool globalEndpoint)
     {
         if (IsAdmin) return "owner";
-        if (!globalEndpoint && !string.IsNullOrWhiteSpace(spaceId)
-            && SpaceRoles.TryGetValue(spaceId, out var role)) return role;
-        if (globalEndpoint) return NormalizeGlobal(GlobalRole);
-        return "viewer";
+        return NormalizeGlobal(GlobalRole);
     }
 
     private static string NormalizeGlobal(string role) => role.ToLowerInvariant() switch
@@ -74,7 +109,7 @@ public static class IdentityRoles
     public const string Viewer = "viewer";
 
     public static readonly string[] All = { Admin, Owner, Editor, Agent, Viewer };
-    /// <summary>Roles assignable to a SpaceMember (admin is a global-only flag).</summary>
+    /// <summary>Kept for compatibility with old clients; no longer used for authorization.</summary>
     public static readonly string[] SpaceRoles = { Owner, Editor, Agent, Viewer };
 
     public static bool IsValidGlobal(string role) => All.Contains(role, StringComparer.OrdinalIgnoreCase);

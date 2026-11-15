@@ -109,6 +109,12 @@ async function assertPublicUrl(raw, allowlist) {
     throw workerError('SSRF_BLOCKED', '内部 / 保留域名被拒绝：' + host);
   if (!matchAllowlist(host, GLOBAL_ALLOWLIST) || !matchAllowlist(host, allowlist))
     throw workerError('SSRF_BLOCKED', '域名不在抓取白名单内：' + host);
+  // Static checks must run BEFORE any DNS lookup: in an offline deployment a bad
+  // port / scheme should still be reported as SSRF_BLOCKED rather than an
+  // environment-dependent DNS_FAILED 502.
+  const port = url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80);
+  if (port !== 80 && port !== 443)
+    throw workerError('SSRF_BLOCKED', '只允许标准 80 / 443 端口');
 
   if (isIP(host)) {
     if (forbiddenIp(host))
@@ -122,9 +128,6 @@ async function assertPublicUrl(raw, allowlist) {
       if (forbiddenIp(item.address))
         throw workerError('SSRF_BLOCKED', 'DNS 解析到内网 / 保留地址：' + item.address);
   }
-  const port = url.port ? Number(url.port) : (url.protocol === 'https:' ? 443 : 80);
-  if (port !== 80 && port !== 443)
-    throw workerError('SSRF_BLOCKED', '只允许标准 80 / 443 端口');
   return url.toString();
 }
 

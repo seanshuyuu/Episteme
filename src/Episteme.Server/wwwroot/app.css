@@ -433,3 +433,47 @@ button.ghost.danger:hover { background: #fdf1f0; }
   .admin-dialog { padding: 14px; max-height: 94vh; }
   .admin-overview .stat { flex-basis: 30%; }
 }
+
+/* ---------- per-account MCP token panel ---------- */
+.token-dialog {
+  width: min(620px, 100%); max-height: 90vh; overflow: auto;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 24px;
+}
+.token-lead {
+  font-size: 12px; color: var(--muted); margin: 0 0 14px;
+  background: var(--surface2); border: 1px solid var(--line);
+  border-radius: var(--radiusSm); padding: 10px 12px;
+}
+.token-lead strong { color: var(--primaryDeep); }
+.token-status {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px;
+}
+.token-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--surface2); border: 1px solid var(--line);
+  border-radius: var(--radiusSm); padding: 9px 11px; font-size: 12px;
+}
+.token-row span { color: var(--muted); }
+.token-row strong { font-weight: 600; word-break: break-all; text-align: right; }
+.token-ops { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.token-reveal {
+  background: #fffaf0; border: 1px solid #f0dcae; border-radius: var(--radiusSm);
+  padding: 12px 14px; margin-bottom: 14px;
+}
+.token-once-title { font-size: 12px; font-weight: 600; color: #8a6416; margin-bottom: 8px; }
+.token-reveal code {
+  display: block; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+  background: var(--surface); border: 1px solid #ecd9af; border-radius: 8px;
+  padding: 10px; word-break: break-all; user-select: all;
+}
+.token-once-note { font-size: 11px; color: #9a7a35; margin-top: 8px; }
+.token-usage pre {
+  margin: 0; background: var(--surface2); border: 1px solid var(--line);
+  border-radius: var(--radiusSm); padding: 12px; overflow: auto;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; line-height: 1.7;
+}
+@media (max-width: 768px) {
+  .token-dialog { padding: 14px; max-height: 94vh; }
+  .token-status { grid-template-columns: 1fr; }
+}

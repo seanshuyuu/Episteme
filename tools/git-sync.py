@@ -11,13 +11,15 @@ What is recorded (install the `pack_git-ingest` Pack first):
   - change     : subject, body, changed file list, unified diff
   - contents   : changed text files become md / code / web / attachment Parts
 
-Authentication (matches Episteme v0.5 secure / users modes):
+Authentication (matches Episteme secure / users modes):
   --auth legacy  X-Episteme-Role header (default, local/LAN only)
   --auth jwt     HS256 Bearer token built from --secret
   --auth hmac    X-Episteme-Key / Timestamp / Nonce / Signature / Role,
                  canonical = method\\npath\\nquery\\ntimestamp\\nnonce\\nrole\\nbodySha256
-  --auth bearer  --token <登录令牌>：users 模式由服务端签发的 JWT
+  --auth bearer  --token <登录 JWT 或 epm_ MCP 令牌>
   --auth login   --user / --password 调 /api/v1/auth/login 自动换取令牌
+  --auth mcp     --token / EPISTEME_MCP_TOKEN：每账号长期 MCP 令牌（推荐用于 CI），
+                 令牌只能写该账号名下的空间
 
 Application-type routing (pack_code-workspace):
   --app-type desktop|mobile|cross|fullstack 自动把 --node-path 指向对应归档目录
@@ -158,6 +160,12 @@ class Client:
         self.token = token or env_default("EPISTEME_AUTH_TOKEN")
         self.user = user or env_default("EPISTEME_USER")
         self.password = password or env_default("EPISTEME_PASSWORD")
+        if self.auth == "mcp":
+            self.token = self.token or env_default("EPISTEME_MCP_TOKEN")
+            if not self.token:
+                raise SyncError("--auth mcp 需要 --token / EPISTEME_MCP_TOKEN（在「我的 MCP Token」生成）")
+            if not self.token.startswith("epm_"):
+                raise SyncError("MCP 令牌应以 epm_ 开头；登录 JWT 请改用 --auth bearer")
         if self.auth == "login" and (not self.user or not self.password):
             raise SyncError("--auth login 需要 --user / --password")
         if self.auth == "login":
@@ -194,7 +202,7 @@ class Client:
         split = urllib.parse.urlsplit(url)
         if self.auth == "legacy":
             headers["X-Episteme-Role"] = self.role
-        elif self.auth in ("bearer", "login"):
+        elif self.auth in ("bearer", "login", "mcp"):
             headers["Authorization"] = "Bearer " + self.token
         elif self.auth == "jwt":
             if not self.secret:
@@ -219,7 +227,7 @@ class Client:
                 "X-Episteme-Signature": signature,
                 "X-Episteme-Role": self.role,
             })
-        elif self.auth not in ("legacy", "jwt", "hmac", "bearer", "login"):
+        elif self.auth not in ("legacy", "jwt", "hmac", "bearer", "login", "mcp"):
             raise SyncError("未知认证模式：" + self.auth)
 
         req = urllib.request.Request(
@@ -480,7 +488,8 @@ def parse_args(argv=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="环境变量：EPISTEME_API / EPISTEME_SPACE_ID / EPISTEME_NODE_ID / "
                "EPISTEME_AUTH_MODE / EPISTEME_AUTH_SECRET / EPISTEME_API_KEY_ID / "
-               "EPISTEME_GIT_DIR / EPISTEME_GIT_REPO / EPISTEME_GIT_NODE_PATH")
+               "EPISTEME_MCP_TOKEN / EPISTEME_GIT_DIR / EPISTEME_GIT_REPO / "
+               "EPISTEME_GIT_NODE_PATH")
     p.add_argument("--mode", choices=["head", "hook", "range"], default="head")
     p.add_argument("--range", default="", help="range 模式下的 A..B")
     p.add_argument("--api", default=env_default("EPISTEME_API", "http://127.0.0.1:5080"))
@@ -495,9 +504,9 @@ def parse_args(argv=None):
                    help="bare 仓库 GIT_DIR（hook 中通常无需指定，会继承环境）")
     p.add_argument("--repo-url", default=env_default("EPISTEME_GIT_REPO"))
     p.add_argument("--branch", default="")
-    p.add_argument("--auth", choices=["legacy", "secure", "jwt", "hmac", "bearer", "login"],
+    p.add_argument("--auth", choices=["legacy", "secure", "jwt", "hmac", "bearer", "login", "mcp"],
                    default=env_default("EPISTEME_AUTH_MODE", "legacy"),
-                   help="secure 等价于 hmac；bearer/login 用于 users 账号模式；默认 legacy")
+                   help="secure 等价于 hmac；bearer/login/mcp 用于 users 账号模式；默认 legacy")
     p.add_argument("--secret", default=env_default("EPISTEME_AUTH_SECRET"))
     p.add_argument("--key-id", default=env_default("EPISTEME_API_KEY_ID", "git-sync"))
     p.add_argument("--role", default=env_default("EPISTEME_SYNC_ROLE", "owner"))
@@ -531,7 +540,7 @@ def main(argv=None) -> int:
     auth = opts.auth
     if auth == "secure":
         auth = "hmac"
-    elif auth not in ("legacy", "jwt", "hmac", "bearer", "login"):
+    elif auth not in ("legacy", "jwt", "hmac", "bearer", "login", "mcp"):
         auth = "legacy"
     opts.auth = auth
 
