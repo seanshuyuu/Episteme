@@ -7,11 +7,11 @@ Episteme（ἐπιστήμη，希腊语「经论证的知识」）由「商业�
 | 项 | 内容 |
 |---|---|
 | 当前版本 | v0.5（`0.5.0-polish`，P1–P5 全部落地） |
-| 本轮增量 | **按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助管理 / 重置 MCP token**、账号体系（注册 / 登录 / 全局角色 / 管理员后台，`users` 模式）、MCP `create_space`、`pack_code-workspace` 代码工作空间模板、按应用类型归档的 git 同步与代码文件树在线预览（见第 11 节）；git 旁路同步与公网样例见第 10 节 |
+| 本轮增量 | **按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助管理 / 重置 MCP token**、账号体系（注册 / 登录 / 全局角色 / 管理员后台，`users` 模式）、MCP `create_space`、`pack_code-workspace` 代码工作空间模板、按应用类型归档的 git 同步与代码文件树在线预览（见第 11 节）；git 旁路同步与公网样例见第 10 节。追加：**默认工作空间**（刷新 / 换设备自动进入）、**工作空间与目录完整管理 UI**（改名 / 删除 / 设默认 / 目录增删改与排序）、**登录态与 token 缓存竞态修复**。追加：**项目范围收敛为仅 Web + 服务端，清理全部客户端与 SSE / stdio MCP 传输** |
 | 服务端 | .NET 10 / ASP.NET Core Minimal API / EF Core 10（SQLite 默认，PostgreSQL 可选） |
 | Web 前端 | 原生 SPA（`wwwroot/app.js`）+ 本地 vendored pdf.js 4.10.38 / Monaco 0.52.2，零 CDN |
-| Agent 协议 | MCP JSON-RPC 2.0（`2025-06-18`）：Streamable HTTP / SSE / stdio bridge |
-| 客户端 | Avalonia 12.1.5 共享壳：Desktop、Android 骨架、无 GUI Probe、McpStdio |
+| Agent 协议 | MCP JSON-RPC 2.0（`2025-06-18`）：仅 Streamable HTTP（`POST /mcp`） |
+| 项目范围 | **仅 Web 前端 + 服务端**；已移除 Android / Desktop / Avalonia / Probe / McpStdio 客户端，以及 SSE / stdio MCP 传输 |
 | 抓取 | 独立 Node 22 worker：Mozilla Readability 0.6.0 + linkedom 0.18.15 + SSRF 防护 |
 | 部署 | Docker Compose：`api` + `fetch-worker`，可选 `postgres` profile |
 | 规格与验收 | `SPEC.md`、`docs/01`–`docs/10`（本轮验收见 `docs/10-v0.5完善与全量验收报告.md`） |
@@ -72,7 +72,7 @@ docker compose -p episteme -f deploy/docker-compose.yml --env-file deploy/.env d
 3. **版本是一等公民**：界面、REST、MCP 三条写路径共享同一条 Commit 链，AI 的每次编辑都可 diff / revert。
 4. **MCP 动态生成**：`tools/list` 依据当前目录树与 Schema 实时生成；新建内容类型后 Agent 立刻获得对应工具，无需重启。
 5. **Agent 改动默认可隔离**：写操作可指定 `branch` 在隔离分支进行，人工审阅后合并；配合 `reason` / `agentId` / `expectParent` / 幂等键避免静默覆盖。
-6. **复用而非重写**：鉴权、幂等、审计、三端、Docker、主题令牌均在既有体系上渐进增强，所有生产化开关默认关闭，不破坏 legacy 契约。
+6. **复用而非重写**：鉴权、幂等、审计、Web 前端、Docker、主题令牌均在既有体系上渐进增强，所有生产化开关默认关闭，不破坏 legacy 契约。
 
 ### 2.3 概念模型
 
@@ -97,7 +97,6 @@ Space 空间（独立版本 DAG 根 / 权限 / MCP 上下文）
 flowchart LR
   subgraph 客户端
     B[浏览器 SPA]
-    D[Avalonia Desktop / Android 骨架]
     A[MCP Agent]
   end
   subgraph Docker Compose
@@ -108,8 +107,7 @@ flowchart LR
   V[(具名卷 /app/data<br/>episteme.db + blobs/)]
   B -->|REST /api/v1/episteme| S
   B -->|POST /mcp| S
-  D -->|REST / MCP| S
-  A -->|HTTP / SSE / stdio| S
+  A -->|POST /mcp| S
   S --> V
   S -.->|EPISTEME_DB_PROVIDER=postgres| P
   S -->|内网 /fetch 或 /extract| W
@@ -118,9 +116,9 @@ flowchart LR
 | 组件 | 路径 | 职责 |
 |---|---|---|
 | `Episteme.Core` | `src/Episteme.Core/` | 零 NuGet 依赖的领域内核：实体、SchemaEngine、内容寻址 diff、PackEngine、Viewer/锚点契约、MCP 工具派生 |
-| `Episteme.Server` | `src/Episteme.Server/` | 53 条 REST 路由、MCP JSON-RPC / SSE、EF Core 持久化、secure 中间件、SPA 静态资源与 vendored 阅读器 |
+| `Episteme.Server` | `src/Episteme.Server/` | 53 条 REST 路由、MCP Streamable HTTP、EF Core 持久化、secure 中间件、SPA 静态资源与 vendored 阅读器 |
 | `worker` | `worker/` | 独立抓取容器：`/fetch` 在线抓取、`/extract` 离线 HTML 快照、正文抽取与白名单清洗，仅 compose 内网可达 |
-| 客户端 | `src/Episteme.Client.slnx` | Avalonia 共享 UI / ViewModel、Desktop 入口、无 GUI Probe、MCP stdio 转发桥 |
+| Web 前端 | `src/Episteme.Server/wwwroot/` | 原生 SPA（`app.js` / `auth.js` / `help-content.js`）+ 本地 vendored pdf.js / Monaco + 四套主题；无独立客户端项目 |
 | 原型 | `prototype/index.html` | 单文件零依赖高保真交互原型，与实现同源的四套浅色主题 |
 
 ### 2.5 动态 Schema
@@ -150,7 +148,7 @@ flowchart LR
 | 静态工具 | 30 个，均以 `episteme.` 为前缀：`list_spaces` / `tree` / `read` / `search` / `create_document` / `append_part` / `annotate` / `viewers` / `read_part` / `export_notes` / `log` / `diff` / `branch` / `merge` / `revert` / `list_packs` / `install_pack` / `export_pack` / `capabilities` / `fetch_web` / `upload_pdf_base64` / `rebind_annotation` 等 |
 | 动态工具 | 每个 `exposeToMcp=true` 的类型派生 `episteme.query_{slug}` / `create_{slug}` / `update_{slug}`，JSON Schema 由 FieldDef 直接映射 |
 | Resources | 当前实现 `resources/list` 只列 `exposeToMcp` 节点，URI 形如 `episteme://{spaceId}{nodePath}`；`resources/read` 返回提示文本，实际内容读取请用 `episteme.tree` / `episteme.read`。`docs/03` 中 `.../{docId}[/part/{kind}]` 的细粒度 URI 属于设计目标 |
-| 传输 | `POST /mcp`（主，JSON-RPC 2.0）、`GET /mcp/sse` + `POST /mcp/messages?sessionId=...`、`src/Episteme.McpStdio`（一行请求 / 一行响应转发） |
+| 传输 | 仅 `POST /mcp`（Streamable HTTP，JSON-RPC 2.0，协议版本 `2025-06-18`）；无 SSE / stdio |
 | 版本 | `toolsVersion` 单调递增并通过 `X-Tools-Version` 回写；`tools/list` 实时重建，不依赖推送通知 |
 | 权限 | 角色经 `X-Episteme-Role` 传递；`agent` 角色默认无权 `define_content_type`（`FORBIDDEN_SCOPE`） |
 | 审计 | 每次工具调用记录 `action` / `agentId` / `commitId` / `idempotencyKey`，可经 `GET /spaces/{id}/audit` 查询 |
@@ -203,14 +201,16 @@ Pack 是**纯数据**（目录 + 内容类型 + 视图 + 可选示例数据）�
 
 | 区域 | 功能 |
 |---|---|
-| 顶栏 | 空间切换 / 新建空间、`toolsVersion` 与能力芯片、四套浅色主题（浅绿 / 浅蓝 / 浅紫 / 浅粉）、「帮助」入口、窄屏抽屉 + 底部导航；users 模式追加身份芯片 / 「管理后台」/「登出」 |
-| 左栏「目录」 | 无限层级物化路径树，新建目录并绑定内容类型 |
+| 顶栏 | 空间切换 / 新建空间 /「管理工作空间」、`toolsVersion` 与能力芯片、四套浅色主题（浅绿 / 浅蓝 / 浅紫 / 浅粉）、「帮助」入口、窄屏抽屉 + 底部导航；users 模式追加身份芯片 / 「管理后台」/「登出」。刷新后自动进入默认工作空间 |
+| 左栏「目录」 | 无限层级物化路径树；新建、重命名 / 移动、改绑定类型 / 图标 / MCP 暴露、删除（含子目录）与上移 / 下移排序 |
 | 中栏「内容类型」 | Schema Builder：增删字段、类型切换、必填 / 索引 / 枚举 / MCP 暴露开关；下方即时渲染动态表单并创建文档 |
 | Tab「文档」 | Schema 驱动的文档列表与刷新 |
 | Tab「阅读器」 | md / code / pdf / web 四 Part 切换、Markdown 与代码编辑、网页抓取与离线 HTML 快照、PDF 上传、高亮 / 批注 / 锚点重定位、导出标注笔记；git 代码文档按真实路径分组显示文件树并按语言高亮 |
 | Tab「版本」 | 提交时间线、并排 diff、撤销选中提交 |
 | Tab「MCP 工具」 | 实时 `tools/list` 清单与 `toolsVersion`，Schema 改动后可观察到新工具 |
 | Tab「模板」 | 内置模板预览 / 安装 / 导出 / 导入自定义 Pack JSON |
+
+**默认工作空间与登录态**：users 模式下，默认空间按账号保存在服务端 `ep_user_prefs`（`GET/PUT /api/v1/auth/me/prefs`），legacy / secure 模式保存在浏览器本地；切换空间或新建空间即更新默认，主页刷新、换浏览器或换设备都会直接进入该空间。登录 JWT、用户身份与默认空间在 `auth.js` 中同步缓存，`app.js` 等待鉴权初始化完成后才加载空间，只有服务端明确的 401 或主动登出才清令牌；网络抖动不再导致刷新后掉登录。
 
 **内置帮助模块**：点顶栏「帮助」（或空壳首页的「查看完整使用方法与注意事项」）打开页内手册，无需联网、无需后端 API。手册由 `wwwroot/help-content.js` 以纯数据形式提供、`app.js` 渲染，包含 17 个主题，分「入门 / 核心操作 / AI 与接口 / 注意事项」四组：
 
@@ -223,7 +223,7 @@ Pack 是**纯数据**（目录 + 内容类型 + 视图 + 可选示例数据）�
 - **REST**：`/api/v1/episteme` 前缀下 53 条路由，另有 `/api/v1/auth` 10 条（含每账号 MCP 令牌的查看 / 生成重置 / 停用）与 `/api/v1/admin` 10 条账号 / 角色 / 空间归属端点，覆盖空间、目录、Schema、文档 / Part / 标注 / 检索、版本、Pack、MCP 调试、审计、能力自检、真实媒介导入。统一响应为 JSON，业务错误为 `{ "code", "message", "traceId" }`；写响应回写 `X-Tools-Version`。
 - **MCP**：三种传输 + 31 个静态工具（含 `episteme.create_space`）+ 按类型动态派生工具 + Resources + `toolsVersion` 版本化清单；空库时 `tools/list` 返回 5 个引导工具，让 Agent 先创建空间。
 - **能力自检**：`GET /health`、`GET /api/v1/episteme/capabilities`、`GET /api/v1/episteme/fetch-worker/health`。
-- **客户端**：Avalonia 桌面端具备动态目录树、Schema 表单、文档读写、版本 diff、标注、MCP 工具调用、Pack 与四套主题；`Episteme.Client.Probe` 提供无 GUI 客户端层冒烟；`Episteme.McpStdio` 供本地 Agent 以 stdio 接入。
+- **Web 前端**：浏览器 SPA 提供动态目录树、Schema 表单、文档读写、版本 diff、标注、MCP 工具调试、Pack 与四套主题；单文件原型见 `prototype/index.html`。
 
 ---
 
@@ -234,11 +234,10 @@ Pack 是**纯数据**（目录 + 内容类型 + 视图 + 可选示例数据）�
 | 依赖 | 版本 / 用途 | 是否必需 |
 |---|---|---|
 | Docker + Compose v2 | 一键运行 api + fetch-worker | 推荐方式必需 |
-| .NET 10 SDK | `dotnet build` / `dotnet run`；服务端与桌面项目目标 `net10.0`，Android 为 `net10.0-android` | 源码方式必需 |
+| .NET 10 SDK | `dotnet build` / `dotnet run`；服务端目标 `net10.0` | 源码方式必需 |
 | Node.js 22 | `worker/` 抓取服务；UI 回归脚本 | 源码方式 / 跑 UI 测试需要 |
 | Python 3 | 回归脚本只用标准库，无 `requirements.txt` | 跑回归需要 |
 | jsdom / Playwright + Chromium | `tests/ui_smoke.js` / `tests/ui_test.js`，通过 `NODE_PATH` 外部提供 | 跑 UI 回归需要 |
-| Android SDK + `android` workload + JDK 17+ | 仅编译 Android head | 可选 |
 
 ### 4.2 方式 A：Docker Compose（推荐）
 
@@ -312,7 +311,6 @@ EPISTEME_FETCH_PORT=8090 node server.mjs
 | `EPISTEME_FETCH_PORT` / `EPISTEME_FETCH_MAX_BYTES` / `EPISTEME_FETCH_TIMEOUT_MS` | `8090` / 2 MiB / 9000 ms | worker 监听端口、抓取大小与超时上限 |
 | `POSTGRES_IMAGE` | `public.ecr.aws/docker/library/postgres:17-alpine` | 可选 PG 镜像 |
 | `EPISTEME_API` | `http://127.0.0.1:5080` | 客户端 API 基址（兼容旧别名 `WORKBENCH_API`） |
-| `EPISTEME_MCP_HTTP_URL` / `EPISTEME_MCP_SPACE` / `EPISTEME_MCP_ROLE` / `EPISTEME_AUTH_TOKEN` | `http://127.0.0.1:5080/mcp` / 空 / `owner` / 空 | stdio bridge 的转发目标、空间、角色与 Bearer token |
 
 启用 secure 的最小改法：编辑 `deploy/.env`，设置 `EPISTEME_AUTH_MODE=secure` 与一个足够长的 `EPISTEME_AUTH_SECRET`，然后 `docker compose ... up -d --force-recreate api`。之后所有 `/api/` 与 `/mcp` 请求都要携带 JWT 或 HMAC 签名头。
 
@@ -320,29 +318,14 @@ EPISTEME_FETCH_PORT=8090 node server.mjs
 
 切换到 PostgreSQL 时，把 `EPISTEME_DB_PROVIDER=postgres` 与 `EPISTEME_PG_CONNECTION=Host=postgres;Port=5432;Database=episteme;Username=episteme;Password=...` 写入 `.env`，用 `--profile postgres` 启动并重建 `api`；PG 容器只在 compose 内网可达，宿主机上的 `dotnet run` 需自行发布端口或改写连接串。
 
-### 4.5 客户端构建与运行
+### 4.5 Web 前端
 
-```bash
-dotnet build src/Episteme.Client.slnx -c Release       # UI.Avalonia / Desktop / Probe / McpStdio
-dotnet run --project src/Episteme.Desktop              # 桌面 GUI（需图形环境）
-dotnet src/Episteme.Client.Probe/bin/Release/net10.0/Episteme.Client.Probe.dll   # 无 GUI 冒烟
-dotnet run --project src/Episteme.McpStdio             # stdio MCP bridge
-```
+Web SPA 随服务端一起发布，由 `Episteme.Server` 直接托管，无需单独构建或启动客户端进程：
 
-- 客户端通过 `EPISTEME_API` 连接服务端；无 GUI 冒烟要求服务已在 5080 运行。
-- Android head（`src/Episteme.Android/`）**不在任何 slnx**，需 `dotnet workload install android`、Android SDK API 35 与 JDK 17+，单独执行：
-  ```bash
-  dotnet build src/Episteme.Android/Episteme.Android.csproj -c Release -f net10.0-android
-  ```
-  该工程为骨架，从未编译 APK、未做真机验证；详见 `src/Episteme.Android/README.md`。
-- 首次容器化编译客户端可用 SDK 镜像 + NuGet 缓存卷加速：
-  ```bash
-  docker run --rm --network episteme_default -e EPISTEME_API=http://api:8080 \
-    -v "$PWD":/src -v episteme-nuget-cache:/root/.nuget/packages -w /src \
-    mcr.microsoft.com/dotnet/sdk:10.0 bash -lc 'set -o pipefail; \
-      dotnet build src/Episteme.Client.slnx -c Release --nologo && \
-      dotnet src/Episteme.Client.Probe/bin/Release/net10.0/Episteme.Client.Probe.dll'
-  ```
+- 正常访问：按 §4.2 启动 Docker Compose 后打开 `http://127.0.0.1:5080/`。
+- 本地源码方式：按 §4.3 启动服务端后打开 `http://localhost:5080/`；静态资源来自 `src/Episteme.Server/wwwroot/`。
+- 单文件原型：浏览器直接打开 `prototype/index.html`，无需服务器与依赖。
+- 项目只保留 `src/Episteme.slnx`（Core + Server）；不再有客户端解决方案、桌面 / Android 工程与 stdio 转发桥。
 
 ---
 
@@ -362,6 +345,7 @@ dotnet run --project src/Episteme.McpStdio             # stdio MCP bridge
 8. **版本与回滚**：「版本」Tab 看提交时间线、选择两个提交看并排 diff、点「撤销选中提交」生成反向提交。界面、REST、Agent 的写入都在同一条链上。
 9. **用模板加速**：「模板」Tab 安装「通用阅读台」或「商业短篇创作工作台」，一次生成整套目录与 Schema；也可导出当前空间为 Pack JSON 分享，或粘贴自定义 Pack 导入。
 10. **外观与移动端**：顶栏切四套浅色主题；窄屏自动切换为抽屉 + 底部导航。
+11. **管理工作空间与目录**：顶栏「管理工作空间」（或「配置 → 工作空间」）可对全部空间改名、改 slug / 说明、设为默认、进入与删除；左栏目录项右侧的「↑ / ↓ / 改 / 删」分别用于排序（顺序保存在服务端）、重命名或移动（改路径会带走整个子树）与删除。切换空间会自动设为默认，刷新后直接进入；users 模式默认空间按账号保存在服务端。
 
 ### 5.2 REST 端到端示例
 
@@ -465,28 +449,21 @@ curl -sS -H 'Content-Type: application/json' -H 'MCP-Protocol-Version: 2025-06-1
   'http://127.0.0.1:5080/mcp?space=my-lib'
 ```
 
-**SSE**：`GET /mcp/sse` 会先下发 `event: endpoint`，其中包含 `/mcp/messages?sessionId=...`，之后向该地址 POST JSON-RPC；`GET /mcp/sessions` 可查看会话（**仅单进程内存，多实例部署需共享背板**）。
+**唯一传输：Streamable HTTP**。`POST /mcp` 是服务端提供的唯一 MCP 传输，兼容 `MCP-Protocol-Version: 2025-06-18`；SSE 与 stdio 传输已移除。MCP 客户端（含浏览器 Web UI 的「MCP 工具」抽屉）统一通过 `POST /mcp` 调用，无需本地桥接进程。
 
-**stdio（本地 Agent / 桌面客户端）**：先 `dotnet build src/Episteme.Client.slnx -c Release`，再在支持 MCP 的客户端里注册：
+客户端配置 JSON 由「我的 MCP Token」面板在生成令牌时一次性给出，只含 HTTP 配置：
 
 ```json
 {
   "mcpServers": {
     "episteme": {
-      "command": "dotnet",
-      "args": ["F:/Code/Episteme/src/Episteme.McpStdio/bin/Release/net10.0/Episteme.McpStdio.dll"],
-      "env": {
-        "EPISTEME_MCP_HTTP_URL": "http://127.0.0.1:5080/mcp",
-        "EPISTEME_MCP_SPACE": "my-lib",
-        "EPISTEME_MCP_ROLE": "agent",
-        "EPISTEME_AUTH_TOKEN": ""
-      }
+      "type": "http",
+      "url": "http://127.0.0.1:5080/mcp?space=my-lib",
+      "headers": { "Authorization": "Bearer <epm_...>" }
     }
   }
 }
 ```
-
-bridge 从 stdin 每行读一个请求、转发到 HTTP MCP、向 stdout 每行写一个响应，诊断信息只写 stderr；secure 模式把 JWT 放进 `EPISTEME_AUTH_TOKEN`。
 
 **Agent 协作建议**：
 
@@ -541,7 +518,8 @@ REST 前缀 `/api/v1/episteme`（完整定义见 `src/Episteme.Server/Endpoints.
 
 | 分组 | 代表路由 |
 |---|---|
-| 空间 / 目录 | `GET\|POST /spaces`、`GET /spaces/{id}`、`GET /spaces/{id}/tree`、`POST /spaces/{id}/nodes`、`PATCH\|DELETE /spaces/{id}/nodes/{nodeId}` |
+| 空间 / 目录 | `GET\|POST /spaces`、`GET /spaces/{id}`、`PATCH\|DELETE /spaces/{id}`、`GET /spaces/{id}/tree`、`POST /spaces/{id}/nodes`、`PATCH\|DELETE /spaces/{id}/nodes/{nodeId}`、`POST /spaces/{id}/nodes/reorder` |
+| 账号偏好 | `GET\|PUT /api/v1/auth/me/prefs`（默认空间；仅登录会话，MCP 令牌不可用） |
 | Schema | `GET\|POST /spaces/{id}/content-types`、`GET\|PUT /spaces/{id}/content-types/{slug}`、`POST /.../{slug}/validate`、`GET /spaces/{id}/nodes/{nodeId}/render`（或 `/schema`） |
 | 文档 / Part | `GET /spaces/{id}/documents`、`GET\|POST /spaces/{id}/nodes/{nodeId}/documents`、`GET\|PATCH\|DELETE /spaces/{id}/documents/{docId}`、`POST .../parts`、`PUT .../parts/{partId}`、`GET .../parts/{partId}` |
 | 阅读器 / 标注 | `GET /viewers`、`GET /spaces/{id}/documents/{docId}/viewers`、`GET\|POST .../annotations`、`PUT .../annotations/{id}`、`POST .../exports/notes` |
@@ -551,7 +529,7 @@ REST 前缀 `/api/v1/episteme`（完整定义见 `src/Episteme.Server/Endpoints.
 | Pack | `GET /packs`、`GET /packs/{packId}`、`POST /spaces/{id}/packs/install\|import\|export` |
 | MCP 调试 | `GET /mcp/tools`、`GET /spaces/{id}/mcp/tools` |
 
-MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET /mcp/tools?space=...`、`GET /mcp/sse`、`POST /mcp/messages?sessionId=...`、`GET /mcp/sessions`、`GET /health`。
+MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET /mcp/tools?space=...`、`GET /health`。仅 `POST /mcp` 为 MCP 传输端点。
 
 ---
 
@@ -559,15 +537,13 @@ MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET
 
 历史验收记录（`docs/10`）：v0.5 阶段连续三轮 **213 项 / 轮**（六套）全绿；加入 git 旁路同步后为七套 235 项；合并应用内帮助手册后为八套 **267 项**（含 `help_smoke` 35 项）。账号体系与代码工作空间增量在同一镜像上复跑 **267 / 267**，并新增 users 专项 **97 项**，合计 364 项。按「空间授权矩阵」实施跨账户隔离审计时全量复跑 **12 轮 / 413 项**，全部 **0 失败**；该模型本轮已被按账号授权取代。
 
-本轮（**按账号授权 + 每账号 MCP token**）在五个独立 Docker Compose 项目上从空库全量复跑 **10 套 / 426 项，0 失败**：legacy 主回归 104、Web UI 47、git 旁路同步 22（含 secure HMAC 3 项）、帮助手册 35、secure 鉴权 12、PostgreSQL 13、users 账号与工作空间 86、users 登录墙 DOM 29、MCP token 生命周期 42、跨账号隔离 36。回归镜像 `episteme-api:acct-dev` / `episteme-fetch-worker:acct-dev` 均为 `docker build` **0 警告 0 错误**；端口 5090（users）/ 5091（legacy）/ 5092（secure 限流）/ 5093（PostgreSQL）/ 5094（secure HMAC）各自独立，避免鉴权模式与限流窗口串扰。另有 3 套（客户端 Probe 30、MCP stdio 7、原型浏览器 28）依赖本机 dotnet SDK / Chromium，本轮未改动客户端代码，保留历史结果。\n\n正式 5080 实例也用同一镜像从**旧 users 库在线升级**：启动日志出现 `Backfilled account ownership for 2 existing spaces`，并额外完成 10 项只读升级验证（管理员原密码登录、`/admin/owners` 归属视图、空间列表 `ownerUserId`、MCP token 状态、未登录拦截、前端 token 面板与空间归属 tab），**0 失败**；升级前数据卷已备份。若旧空间原本属于普通账号，可由管理员在后台「空间归属」中转让。
+本轮（**按账号授权 + 每账号 MCP token**）在五个独立 Docker Compose 项目上从空库全量复跑 **10 套 / 426 项，0 失败**：legacy 主回归 104、Web UI 47、git 旁路同步 22（含 secure HMAC 3 项）、帮助手册 35、secure 鉴权 12、PostgreSQL 13、users 账号与工作空间 86、users 登录墙 DOM 29、MCP token 生命周期 42、跨账号隔离 36。回归镜像 `episteme-api:acct-dev` / `episteme-fetch-worker:acct-dev` 均为 `docker build` **0 警告 0 错误**；端口 5090（users）/ 5091（legacy）/ 5092（secure 限流）/ 5093（PostgreSQL）/ 5094（secure HMAC）各自独立，避免鉴权模式与限流窗口串扰。另有 1 套（原型浏览器 28）依赖 Chromium，保留历史结果；客户端 Probe 与 MCP stdio 套件已随范围收敛移除。\n\n正式 5080 实例也用同一镜像从**旧 users 库在线升级**：启动日志出现 `Backfilled account ownership for 2 existing spaces`，并额外完成 10 项只读升级验证（管理员原密码登录、`/admin/owners` 归属视图、空间列表 `ownerUserId`、MCP token 状态、未登录拦截、前端 token 面板与空间归属 tab），**0 失败**；升级前数据卷已备份。若旧空间原本属于普通账号，可由管理员在后台「空间归属」中转让。
 
 | 套件 | 命令（仓库根） | 项数 | 前置条件 |
 |---|---|---|---|
 | REST / MCP 主回归 | `python3 tests/api_smoke.py` | 104 | 5080 实例，legacy 模式；仅用 Python 标准库 |
 | Web UI jsdom 交互 | `NODE_PATH=<node_modules> node tests/ui_smoke.js` | 47 | 需 jsdom + 5080 实例 |
-| 客户端无 GUI | `dotnet src/Episteme.Client.Probe/bin/Release/net10.0/Episteme.Client.Probe.dll` | 30 | 已构建客户端 + `EPISTEME_API`；本轮未复跑，保留历史结果 |
 | secure 鉴权 / 限流 | `EPISTEME_TEST_BASE=http://127.0.0.1:5081 EPISTEME_TEST_RATE_LIMIT=20 python3 tests/secure_smoke.py` | 12 | 另起 5081 的 secure 实例 |
-| MCP stdio 传输 | `EPISTEME_DOTNET_CMD=dotnet python3 tests/stdio_smoke.py` | 7 | 已编译 McpStdio DLL；本轮未复跑，保留历史结果 |
 | PostgreSQL provider | `EPISTEME_TEST_BASE=http://127.0.0.1:5082 python3 tests/postgres_smoke.py` | 13 | 另起 PG17 + 5082 的 postgres 实例 |
 | git 旁路同步 | `python3 tests/git_sync_smoke.py`（可配 `EPISTEME_SECURE_BASE` / `EPISTEME_SECURE_SECRET` 跑 HMAC） | 22 | legacy 实例；Pack 安装、head / hook / range、幂等、19 项主链路 + 3 项 secure HMAC |
 | 应用内帮助手册 | `NODE_PATH=<node_modules> node tests/help_smoke.js` | 35 | 需 jsdom；页内手册的分组导航 / 搜索 / 降级 |
@@ -579,7 +555,7 @@ MCP 与探活端点（不在 REST 前缀下）：`POST /mcp`、`GET /mcp`、`GET
 
 复跑注意：
 
-- `tests/api_smoke.py`、`tests/ui_smoke.js`、`tests/help_smoke.js`、`tests/auth_ui_smoke.js`、`tests/mcp_token_smoke.py`、`tests/isolation_smoke.py` 均支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`ui_smoke.js` 的 `WWW` 已改为 `__dirname` 相对定位，换机器无需改动。secure / postgres 套件默认 5081 / 5082，桌面 Probe 可用 `EPISTEME_API` 改基址。
+- `tests/api_smoke.py`、`tests/ui_smoke.js`、`tests/help_smoke.js`、`tests/auth_ui_smoke.js`、`tests/mcp_token_smoke.py`、`tests/isolation_smoke.py` 均支持 `EPISTEME_TEST_BASE`（默认 `http://127.0.0.1:5080`）；`ui_smoke.js` 的 `WWW` 已改为 `__dirname` 相对定位，换机器无需改动。secure / postgres 套件默认 5081 / 5082。
 - `tests/mcp_token_smoke.py` 与 `tests/isolation_smoke.py` 都要求**空库 users 实例**并传 `EPISTEME_ADMIN_PASSWORD`；验证「无账号身份的 HMAC 通道默认停用」时另传 `EPISTEME_MACHINE_SECRET`，若实例启动了 `EPISTEME_MACHINE_USER=<账号>` 绑定，则给 isolation 套件设 `EPISTEME_MACHINE_USER_SET=1`。
 - users 专项会真实创建账号、空间与令牌，建议在独立 compose 项目（`docker compose -p <name> --env-file ...`）的空库上跑；legacy 四套（`api_smoke` / `ui_smoke` / `help_smoke` / `git_sync_smoke` 主链路）必须保持 `EPISTEME_AUTH_MODE=legacy`，否则会因缺少 Bearer 令牌而 401。
 - secure 限流套件会把 20 次/分窗口打满，且 HMAC 用的 `X-Episteme-Key: desktop-1` 与 git-sync 用的 `git-sync` 是两个 keyId：**必须另起一个高阈值 secure 实例**给 `git_sync_smoke.py` 的 3 项 HMAC 用例，并在两个实例的 `EPISTEME_API_KEYS` 里分别登记，否则会得到 `429 RATE_LIMITED` / `API_KEY_UNKNOWN`。
@@ -598,17 +574,11 @@ Episteme/
 ├── prototype/        index.html 单文件零依赖高保真交互原型
 ├── src/
 │   ├── Episteme.Core/          零依赖领域内核（Schema / 版本 / Pack / MCP 工具 / Viewer 契约）
-│   ├── Episteme.Server/        REST + MCP + SPA（app.js / auth.js / help-content.js）+ EF Core + Security / Identity*；wwwroot/vendor 与 4 套 packs
-│   ├── Episteme.UI.Avalonia/  共享 XAML / ViewModel / REST 与 MCP 客户端
-│   ├── Episteme.Desktop/      桌面入口
-│   ├── Episteme.Android/      Android head 骨架（独立构建，未验证）
-│   ├── Episteme.Client.Probe/ 无 GUI 客户端层冒烟
-│   ├── Episteme.McpStdio/     stdio → HTTP MCP 转发桥
-│   ├── Episteme.slnx          Core + Server
-│   └── Episteme.Client.slnx   四个可编译客户端项目
+│   ├── Episteme.Server/        REST + MCP Streamable HTTP + Web SPA（app.js / auth.js / help-content.js）+ EF Core + Security / Identity*；wwwroot/vendor 与 4 套 packs
+│   └── Episteme.slnx          Core + Server
 ├── worker/           Node 22 fetch-worker（Dockerfile、package.json、server.mjs）
 ├── tools/            git-sync.py：旁路 git 同步（head / hook / range、legacy / HMAC / JWT / bearer / login / mcp、--app-type 按类型归档、幂等）
-├── tests/            十二套回归脚本（含 auth_smoke.py / auth_ui_smoke.js / mcp_token_smoke.py / isolation_smoke.py / help_smoke.js）+ 报告
+├── tests/            十一套回归脚本（含 auth_smoke.py / auth_ui_smoke.js / mcp_token_smoke.py / isolation_smoke.py / help_smoke.js）+ 报告
 ├── SPEC.md           v0.1 平台化规格说明书
 └── README.md         本文
 ```
@@ -623,30 +593,33 @@ Episteme/
 | `docs/05` | 架构演进与 Workbench 模板化：Pack 格式、迁移映射、P0–P5 路线、部署拓扑 |
 | `docs/06` | REST 全表、权限矩阵、可测验收项、回归闸门 |
 | `docs/07`–`docs/09` | P1+P2、P3、P4+P5 的实现范围、验收对照、修复清单与简化边界 |
-| `docs/10` | v0.5 完善：真实媒介、生产化、桌面补全、六套回归与诚实边界 |
+| `docs/10` | v0.5 完善：真实媒介、生产化、回归与诚实边界（客户端章节为历史记录） |
 
 > 说明：`SPEC.md` 与 `docs/05`、`docs/06` 中关于「复用旧 Workbench 代码 / `Workbench.slnx` / `/api/v1` 零回归」的表述是 v0.1 设计阶段的历史依据，不再对应本仓库内可执行的产物；P1 起按规格从零落地内核。
 >
 > 工作区清理（2026-11-10）：旧「商业短篇创作工作台」的源码、文档、原型、部署、测试及 Docker 数据卷 / 镜像已清除，本工作区仅保留 `episteme/` 与 `.workbuddy/`；备份与恢复步骤见 `/mnt/work/backups/workbench-cleanup-20261110/RESTORE.md`。
+>
+> 范围收敛（2026-11-16）：项目目标改为**仅开发 Web 应用**。已删除 `Episteme.Android` / `Episteme.Desktop` / `Episteme.UI.Avalonia` / `Episteme.Client.Probe` / `Episteme.McpStdio` 与 `Episteme.Client.slnx`，并移除 MCP 的 SSE / stdio 传输及对应测试；`docs/05`–`docs/10` 中的客户端章节为历史记录，不代表当前范围。
 
 ---
 
 ## 9. 当前边界与后续路线
 
-**已实现**：P1–P5 全部落地；真实 pdf.js / Monaco / Readability 阅读器、内容寻址 PDF blob、交互式锚点重绑定、secure 鉴权与限流、PostgreSQL provider、三种 MCP 传输、桌面端读写补全、git 旁路同步（4 套内置模板 + 四类 git 元数据 + 文件内容 Part）；users 账号体系（注册 / 登录 / 角色 / 管理后台）、**按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助生成 / 重置 / 停用长期 MCP 令牌**、MCP `create_space`、代码工作空间模板、按应用类型归档与代码文件树在线预览。
+**已实现**：P1–P5 全部落地；真实 pdf.js / Monaco / Readability 阅读器、内容寻址 PDF blob、交互式锚点重绑定、secure 鉴权与限流、PostgreSQL provider、MCP Streamable HTTP 单一传输、git 旁路同步（4 套内置模板 + 四类 git 元数据 + 文件内容 Part）；users 账号体系（注册 / 登录 / 角色 / 管理后台）、**按账号授权**（空间归属唯一账号、取消空间授权矩阵）、**每人自助生成 / 重置 / 停用长期 MCP 令牌**、MCP `create_space`、代码工作空间模板、按应用类型归档与代码文件树在线预览。**客户端范围仅浏览器 Web SPA。**
 
 **明确边界**（详见 `docs/07 §7`、`docs/08 §8`、`docs/09 §9`、`docs/10 §7`）：
 
-1. Android head 未编译 APK、未真机验证；桌面 GUI 未在容器里实际开窗（只验证编译、ViewModel 与 REST/MCP 客户端）。
-2. SSE 会话只在单进程内存；未接 Redis / MinIO / 对象存储 / 密钥托管 / 审计归档；默认仍是单机 SQLite 或可选 PostgreSQL。
+1. 仅提供浏览器 Web SPA；不再维护 Android / 桌面 / Avalonia 跨平台客户端，相关工程与 SSE / stdio 传输已移除。
+2. MCP 只提供 Streamable HTTP（`POST /mcp`）；未接 Redis / MinIO / 对象存储 / 密钥托管 / 审计归档；默认仍是单机 SQLite 或可选 PostgreSQL。
 3. 在线抓取的回归基于离线 `/extract` 快照，`/fetch` 的真实 DNS / 出网策略需在受控环境复验。
 4. secure 是最小实现：JWT 无 issuer / audience / 刷新 / 撤销列表，限流为全局固定窗口而非按用户分区，无 TLS 终止与 WAF。users 模式同样以单机为目标：无会话表 / 刷新令牌 / 邮箱验证 / 密码找回 / SSO，JWT 到期前不因改密或停用而主动失效（服务端每次请求重读账号状态，停用立即生效）；身份表用 raw SQL 幂等建表，不是 EF Migration。
-5. MCP 为自实现最小 JSON-RPC，未使用官方 SDK；stdio 是 HTTP 转发 bridge，不是进程内 Server；`resources/read` 目前只返回提示文本，`notifications/tools/list_changed` 主动推送未实现（靠 `toolsVersion` 递增 + 重新拉取 `tools/list`）。
+5. MCP 为自实现最小 JSON-RPC，未使用官方 SDK；仅 Streamable HTTP 一种传输，无本地 bridge；`resources/read` 目前只返回提示文本，`notifications/tools/list_changed` 主动推送未实现（靠 `toolsVersion` 递增 + 重新拉取 `tools/list`）。
 6. 老式 `\f` PDF 文本层 Part 仍以兼容模式显示；Monaco / pdf.js 加载失败时降级，不等于所有浏览器具备同等功能。
-7. 数据库使用 `EnsureCreatedAsync()`，没有迁移脚本；跨版本升级需自行迁移数据。
+7. 数据库使用 `EnsureCreatedAsync()`，没有迁移脚本；跨版本升级需自行迁移数据。例外：新增的 `Nodes.SortOrder` 与身份 / 偏好表由启动时幂等 raw SQL 自动补齐，旧库可直接启动。
 8. Episteme 不是 git remote：不支持 `git clone` / `git push` / `git-receive-pack`；第 10 节的旁路同步依赖外部 Git 服务的 hook 或 CI 调用 `tools/git-sync.py`，`POST /exports/git` 仍只输出线性化 JSON。
+9. 默认工作空间是 UI 偏好而非共享成员关系：只影响主页进入哪个空间，不改变按账号授权边界；删除空间会清空指向它的默认偏好。目录排序是全局序号（可跨父节点），不是严格的同级排序；同一空间多人同时拖动顺序时以最后一次写入为准。
 
-**建议的后续顺序**：多实例生产化（Redis 背板 / 对象存储 / 审计归档）→ Android 编译与真机验证、共享壳富阅读器升级 → 受控环境下 `/fetch` 全链路与白名单验证 → 模板生态（服务端目录、版本签名与安装来源校验）。待拍板项见 `SPEC.md §11`。
+**建议的后续顺序**：多实例生产化（Redis 背板 / 对象存储 / 审计归档）→ Web 阅读器与交互体验持续增强 → 受控环境下 `/fetch` 全链路与白名单验证 → 模板生态（服务端目录、版本签名与安装来源校验）。待拍板项见 `SPEC.md §11`。
 
 ---
 
@@ -656,7 +629,7 @@ Episteme/
 
 ### 10.1 让服务可从公网访问
 
-- `deploy/Caddyfile.example`：域名 + 自动 TLS 反代到 `127.0.0.1:5080`；`flush_interval -1` 保证 SSE 不被缓冲。
+- `deploy/Caddyfile.example`：域名 + 自动 TLS 反代到 `127.0.0.1:5080`；MCP 仅 Streamable HTTP，无需 SSE 长连接配置。
 - `deploy/secure.env.example`：把 `deploy/.env` 切到 `EPISTEME_AUTH_MODE=secure`，配置 `EPISTEME_AUTH_SECRET` 与 `EPISTEME_API_KEYS=git-sync:owner`；`deploy/users.env.example` 则是带账号体系的替代方案。**不要**把未开鉴权的 5080 直接暴露公网——legacy 的角色头可伪造。
 - 生效：`docker compose -f deploy/docker-compose.yml -p episteme up -d --force-recreate`。
 
@@ -805,7 +778,8 @@ python3 tools/git-sync.py --mode head --api http://127.0.0.1:5080 \
 | 方法 | 路径 | 用途 | 身份 |
 |---|---|---|---|
 | `GET` / `POST` | `/api/v1/auth/config` / `register` / `login` | 公开：配置 / 注册 / 登录 | 无需令牌 |
-| `GET` / `POST` | `/api/v1/auth/me` / `password` / `logout` | 我的身份 / 改密 / 登出 | 登录 JWT |
+| `GET` / `POST` | `/api/v1/auth/me` / `password` / `logout` | 我的身份（含 `defaultSpaceId`）/ 改密 / 登出 | 登录 JWT |
+| `GET` / `PUT` | `/api/v1/auth/me/prefs` | 查看 / 设置默认工作空间；目标必须是本人可见空间，空串清除 | **仅登录会话** |
 | `GET` / `POST\|PUT` / `DELETE` | `/api/v1/auth/me/mcp-token` | 查看状态 / 生成或重置 / 停用 MCP 令牌 | **仅登录会话** |
 | `GET` | `/api/v1/admin/overview` / `users` / `spaces` / `owners` | 总览与账号 / 空间 / 归属列表 | 管理员 JWT |
 | `POST` / `PATCH` / `DELETE` | `/api/v1/admin/users[/{id}]` | 建号 / 改角色启停重置 / 删号 | 管理员 JWT |
@@ -853,6 +827,7 @@ curl -sS -X DELETE -H 'Authorization: Bearer <登录JWT>' \
 - 空间归属在中间件按 URL / `?space=` / MCP `params.spaceId`（含 `arguments.spaceId`）校验，并在 `tools/call` 用最终落点做二次校验；空间内的**单个文档**不再做二次跨空间校验（所有文档端点都带空间前缀）。
 - users 模式下 HMAC 机器通道（`X-Episteme-Key`）**默认停用**（`401 MACHINE_CHANNEL_DISABLED`），因为它没有账号身份、与按账号授权冲突。只有设置 `EPISTEME_MACHINE_USER=<账号>` 显式绑定后才启用，并按该账号归属隔离；`EPISTEME_MACHINE_SPACES` 可再附加空间限制。secure 模式保留原 HMAC 行为。
 - 前端是渐进增强：`auth.js` 只在 `users` 模式注入登录墙、MCP 令牌面板与后台，legacy / secure 下 `window.EpistemeAuth.token()` 恒为空字符串，既有 UI 回归不受影响。
+- 登录态缓存在浏览器本地（JWT + 用户摘要 + 默认空间缓存键按账号隔离）；刷新时同步恢复、等待 `/auth/me` 校验完成后再加载空间。只有 401 或主动登出清令牌，网络错误保留缓存；默认空间的**权威值**始终在服务端 `ep_user_prefs`。
 - 完整验证见 `tests/auth_smoke.py`、`tests/auth_ui_smoke.js`、`tests/mcp_token_smoke.py` 与 `tests/isolation_smoke.py`。
 
 ### 11.8 MCP 为什么只能写到当前账号的空间

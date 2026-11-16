@@ -4,7 +4,6 @@ import base64
 import copy
 import json
 import os
-import re
 import sys
 import time
 import urllib.error
@@ -531,7 +530,7 @@ check("capabilities 声明版本、真实渲染器与生产开关",
       code == 200 and str(caps.get("version", "")).startswith("0.5")
       and "pdf.js" in caps.get("renderers", {}).get("pdf", "")
       and "Monaco" in caps.get("renderers", {}).get("code", "")
-      and "sse" in caps.get("transports", []), caps)
+      and caps.get("transports", []) == ["streamable-http"], caps)
 check("health 暴露 authMode / dbProvider",
       str(health.get("authMode")) == "legacy" and str(health.get("dbProvider")) == "sqlite", health)
 
@@ -668,60 +667,11 @@ check("MCP fetch_web 走同一 worker 与同一写入链路",
       and bool(rpc_fetch_body.get("commitId")), rpc_fetch_body)
 
 code, mcp_info = http("GET", BASE + "/mcp")
-check("MCP 元信息声明 SSE / stdio 传输",
-      code == 200 and "sse" in str(mcp_info.get("endpoints", {}))
-      and "stdio" in str(mcp_info.get("endpoints", {})), mcp_info)
-code, sessions = http("GET", BASE + "/mcp/sessions")
-check("SSE 会话端点可用", code == 200 and sessions.get("transport") == "sse", sessions)
-
-
-def sse_roundtrip():
-    # Alias the import: a bare `import http.client` here shadows the module-level
-    # http() request helper used for the POST below.
-    import http.client as hc
-    conn = hc.HTTPConnection(HOST, PORT, timeout=8)
-    conn.request("GET", "/mcp/sse", headers={"Accept": "text/event-stream"})
-    resp = conn.getresponse()
-    # HTTPResponse has no settimeout(); the underlying socket inherits the
-    # connection's timeout, which bounds every readline() below.
-    if conn.sock is not None:
-        conn.sock.settimeout(6)
-    first_lines = []
-    try:
-        for _ in range(5):
-            line = resp.readline().decode("utf-8", "replace")
-            first_lines.append(line)
-            if not line or line.strip() == "":
-                break
-    except Exception:
-        pass
-    first = "".join(first_lines)
-    match = re.search(r"sessionId=([A-Za-z0-9_.-]+)", first)
-    sid_sse = match.group(1) if match else ""
-    ok_frame = resp.status == 200 and "event: endpoint" in first and bool(sid_sse)
-    pushed = False
-    if sid_sse:
-        code2, _ = http("POST", BASE + "/mcp/messages?sessionId=" + sid_sse,
-                        {"jsonrpc": "2.0", "id": 7, "method": "ping"})
-        pushed_code_ok = code2 == 202
-        pushed_lines = []
-        try:
-            for _ in range(5):
-                line = resp.readline().decode("utf-8", "replace")
-                pushed_lines.append(line)
-                if not line or line.strip() == "":
-                    break
-        except Exception:
-            pass
-        chunk = "".join(pushed_lines)
-        pushed = pushed_code_ok and "event: message" in chunk and '"jsonrpc":"2.0"' in chunk
-    conn.close()
-    return ok_frame, pushed, first[:160]
-
-
-sse_ok, sse_push, sse_first = sse_roundtrip()
-check("SSE 首帧下发 endpoint 会话地址", sse_ok, sse_first)
-check("SSE messages 往返推送同一 JSON-RPC 信封", sse_push, sse_first)
+check("MCP 元信息仅声明 Streamable HTTP 传输",
+      code == 200
+      and mcp_info.get("transport") == "Streamable HTTP"
+      and "sse" not in str(mcp_info.get("endpoints", {})).lower()
+      and "stdio" not in str(mcp_info.get("endpoints", {})).lower(), mcp_info)
 
 print("\n== 结果: %d PASS / %d FAIL ==" % (PASS, FAIL))
 sys.exit(1 if FAIL else 0)

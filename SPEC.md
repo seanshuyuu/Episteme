@@ -8,7 +8,8 @@
 | 上游基线 | 商业短篇创作工作台 `SPEC.md` v3.2（.NET 10 / Blazor / ASP.NET Core / Avalonia / PostgreSQL / Docker，39 项接口冒烟 + 22 项浏览器交互回归） |
 | 需求来源 | 用户：「把这个软件更抽象一层，做成一个通用文档管理的空壳子」 |
 | 已确认决策 | ① 演进式抽象（抽通用内核，Workbench 降为模板）② 本轮交付规格 + 高保真原型 ③ 对外提供**动态 MCP Server** ④ 内容寻址快照 DAG + Web 优先阅读器 |
-| 交付物 | `episteme/SPEC.md`、`episteme/docs/01–06`、`episteme/design/`、`episteme/prototype/index.html` |
+| 交付物 | `SPEC.md`、`docs/01–06`、`design/`、`prototype/index.html` |
+| 项目范围（2026-11-16 调整） | **仅开发 Web 应用**：浏览器 SPA + ASP.NET Core 服务端；不提供 Android / 桌面 / Avalonia 跨平台客户端，MCP 仅 Streamable HTTP 一种传输 |
 
 ---
 
@@ -43,7 +44,7 @@
 3. **版本是一等公民**：所有写操作——无论来自界面、REST 还是 MCP Agent——都生成同一个 Commit。AI 的每一次编辑都可追溯、可 diff、可 revert。
 4. **MCP 动态生成**：`tools/list` 依据当前空间目录树与 Schema 实时生成；用户新建内容类型后，Agent 立刻获得对应的 `create_*` / `query_*` / `update_*` 工具，无需重启服务。
 5. **Agent 改动默认可隔离**：MCP 写操作可指定 `branch`，在隔离分支上工作，人工审阅后合并；配合 `reason` / `agent_id` / `expectParent` 乐观锁，避免 AI 静默覆盖人类内容。
-6. **复用而非重写**：JWT / RBAC / API Key + HMAC-SHA256 / Nonce / 幂等键 / 审计日志 / 定时调度 / 通知通道 / 三端 / Docker / `design/tokens.json` 全部沿用；新增的是抽象层，不是第二套系统。
+6. **复用而非重写**：JWT / RBAC / API Key + HMAC-SHA256 / Nonce / 幂等键 / 审计日志 / Web 前端 / Docker / `design/tokens.json` 全部沿用；新增的是抽象层，不是第二套系统。
 
 ---
 
@@ -78,7 +79,7 @@ Workspace 工作区（租户）
 - 列表 / 表单 / 筛选 / 排序全部由 Schema 驱动渲染，不再有手写页面。
 
 ### 4.2 动态 MCP Server
-- 传输：Streamable HTTP `/mcp`（同容器暴露）+ 桌面端本地 stdio；沿用现有 API Key + HMAC / JWT 鉴权。
+- 传输：仅 Streamable HTTP `POST /mcp`（同容器暴露）；无 SSE / stdio；沿用 API Key + HMAC / JWT 鉴权。
 - 静态内核工具：`list_spaces` `tree` `read` `search` `create_node` `move_node` `create_document` `update_document` `append_part` `annotate` `commit` `log` `diff` `revert` `branch` `define_content_type` 等。
 - 动态派生工具：按每个 `exposeToMcp` 的 ContentType 生成 `query_{type}` / `create_{type}` / `update_{type}`，其 JSON Schema 直接由 FieldDef 映射。
 - Resources：`episteme://{space}/{path}/{docId}[/part/{kind}]`。
@@ -127,12 +128,12 @@ SSRF 防护（承接上一轮开源调研结论）：Web / PDF 抓取走**独立
 |---|---|---|
 | 运行时 | .NET 10 LTS / ASP.NET Core | 不变 |
 | Web UI | Blazor Web App（Interactive Server） | 增加 Schema 驱动渲染 + 四类 Viewer |
-| 桌面 / 移动 | Avalonia 12（共享 XAML） | 通用树 + Schema 表单 + 浏览/审阅；富阅读器 Web 优先 |
+| Web 前端 | 原生 SPA（`src/Episteme.Server/wwwroot/app.js`） | 唯一客户端形态；无 Avalonia / Android / 桌面工程 |
 | 数据 | PostgreSQL 17/18 + `jsonb` + GIN + `zhparser` 中文分词 | 新增 Blob/Tree/Commit/Ref/Part/Annotation/Schema 表 |
 | 缓存 / 幂等 / 广播 | Redis 7（现为可选 profile，平台化后转常用） | `toolsVersion` 广播、Nonce 跨实例 |
 | 对象存储 | MinIO / COS（现为可选） | Blob 实体存储，平台化后转常用 |
 | 版本 | 自研内容寻址 DAG | 新增；不引入 LibGit2Sharp |
-| MCP | 官方 `ModelContextProtocol` C# SDK（实现阶段锁定版本） | 新增 Streamable HTTP 端点 |
+| MCP | 自实现最小 JSON-RPC 2.0；仅 Streamable HTTP 端点 | 无 SSE / stdio，无官方 SDK 依赖 |
 | 前端阅读器 | CodeMirror 6 / Monaco、pdf.js、Readability | 新增，按需懒加载 |
 | 部署 | Docker Compose（api + postgres + 可选 redis/minio + 抓取 worker） | 新增抓取 worker 与网络隔离 |
 | 视觉 | `design/tokens.json` 四套浅色主题 | 不变，原型与实现同源 |
@@ -166,7 +167,7 @@ SSRF 防护（承接上一轮开源调研结论）：Web / PDF 抓取走**独立
 | P2 版本 + MCP | 内容寻址 DAG + 动态 MCP Server + tools 版本广播 | 任意写产生 Commit；Agent 新建类型后工具自动出现；revert 一致 |
 | P3 阅读器 | Markdown / Code 优先，PDF 标记 / Web 快照随后 | 四类均可读、可标注、标记进入版本 |
 | P4 Pack 化 | `workbench` Pack + 旧数据迁移 + 旧 API deprecated | 安装 Pack 后出现 11 目录；39 项冒烟与 22 项交互零回归 |
-| P5 三端与生态 | Avalonia 通用树 / 模板导入导出 / 模板目录 | 桌面与 Android 可浏览与审阅；Pack 可导入导出 |
+| P5 Web 体验与生态 | Web 阅读器增强 / 模板导入导出 / 模板目录 | 浏览器可浏览与审阅；Pack 可导入导出 |
 
 ---
 
@@ -185,6 +186,7 @@ SSRF 防护（承接上一轮开源调研结论）：Web / PDF 抓取走**独立
 
 ## 10. 明确边界与风险
 
+- **仅 Web 范围**：不提供 Avalonia / 桌面 / Android 客户端；MCP 只有 Streamable HTTP（`POST /mcp`），无 SSE / stdio 传输。
 - **本轮不写实现代码**：现有容器与 Workbench 保持可运行状态，规格确认后再进入 P1。
 - MCP SDK 具体版本、CodeMirror/Monaco 取舍、pdf.js 版本在实现阶段锁定，本轮只定义契约。
 - 中文全文检索采用 PostgreSQL + `zhparser`，需真实语料压测；本轮未做性能实测。
@@ -201,5 +203,5 @@ SSRF 防护（承接上一轮开源调研结论）：Web / PDF 抓取走**独立
 | 1 | Space 是否支持跨空间引用（`ref` 字段跨 Space） | P1 先限制同 Space，P2 放开 |
 | 2 | 是否需要多人实时协同编辑（CRDT/OT） | 暂不做，采用 `expectParent` 乐观锁 + 冲突提示 |
 | 3 | 模板市场是否需要服务端目录 | P5 先做本地 JSON 导入导出 |
-| 4 | 现有弱口令 `author/demo1234` 是否随平台化一并加固 | **建议加固**，但需同步登录页 / 冒烟脚本 / 客户端 |
-| 5 | MCP 是否同时提供 stdio 供桌面端本地调用 | 建议提供，便于离线与低延迟场景 |
+| 4 | 现有弱口令 `author/demo1234` 是否随平台化一并加固 | **建议加固**，但需同步登录页 / 冒烟脚本 |
+| 5 | MCP 是否同时提供 stdio 供桌面端本地调用 | **已决定：不提供**；仅 Streamable HTTP，无 SSE / stdio |

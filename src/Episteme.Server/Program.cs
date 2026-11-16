@@ -45,6 +45,12 @@ await using (var db = await app.Services.GetRequiredService<IDbContextFactory<Ep
     await db.Database.EnsureCreatedAsync();
 }
 
+// Older databases were created without Nodes.SortOrder; EnsureCreated never alters an
+// existing table, so add the column idempotently before any request can use it.
+await SchemaUpgrade.EnsureColumnsAsync(
+    app.Services.GetRequiredService<IDbContextFactory<EpistemeDbContext>>(),
+    CancellationToken.None);
+
 // Identity tables are created idempotently with portable SQL so an existing database
 // (created by an older Episteme version) also gains them without a migration step.
 await using (var scope = app.Services.CreateAsyncScope())
@@ -62,6 +68,11 @@ await using (var scope = app.Services.CreateAsyncScope())
         var backfilled = await identity.BackfillOwnersAsync(CancellationToken.None);
         if (backfilled > 0)
             app.Logger.LogInformation("Backfilled account ownership for {Count} existing spaces", backfilled);
+        // Old rows all used WorkspaceId="default". Re-key them by owner so the unique
+        // (WorkspaceId, Slug) index becomes account-scoped instead of global.
+        var rekeyed = await identity.RekeySpacesByOwnerAsync(CancellationToken.None);
+        if (rekeyed > 0)
+            app.Logger.LogInformation("Re-keyed {Count} spaces into their owner's workspace", rekeyed);
     }
 }
 
@@ -83,6 +94,5 @@ app.MapGet("/health", () => Results.Json(new
 app.MapEpistemeEndpoints();
 app.MapIdentityEndpoints();
 app.MapMcpEndpoints();
-app.MapSseMcpEndpoints();
 
 app.Run();

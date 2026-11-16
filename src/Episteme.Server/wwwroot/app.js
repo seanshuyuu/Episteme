@@ -46,6 +46,22 @@
     } catch (e) { return ''; }
   }
 
+  function defaultSpaceId() {
+    try {
+      var a = window.EpistemeAuth;
+      if (a && typeof a.defaultSpace === 'function') return a.defaultSpace() || '';
+    } catch (e) { /* fall back to local preference */ }
+    try { return localStorage.getItem('episteme.defaultSpace') || ''; } catch (e) { return ''; }
+  }
+
+  function rememberDefaultSpace(id) {
+    try {
+      var a = window.EpistemeAuth;
+      if (a && typeof a.setDefaultSpace === 'function') { a.setDefaultSpace(id); return; }
+    } catch (e) { /* fall back to local preference */ }
+    try { localStorage.setItem('episteme.defaultSpace', id || ''); } catch (e) { /* storage disabled */ }
+  }
+
   async function api(path, options) {
     options = options || {};
     var headers = Object.assign(
@@ -107,11 +123,16 @@
       return;
     }
     hide('empty-state'); show('workspace');
-    var wanted = preferredId || state.spaceId;
+    // Homepage always opens the user's default workspace: explicit choice first,
+    // then the persisted default (server-side per account, local cache fallback).
+    var wanted = preferredId || defaultSpaceId() || state.spaceId;
     var s = state.spaces.find(function (x) { return x.id === wanted; }) || state.spaces[0];
     state.spaceId = s.id; state.spaceName = s.name;
     $('space-name').textContent = s.name;
     renderSpaces();
+    // First ever load: make the automatically selected space the explicit default so
+    // subsequent refreshes are deterministic and the choice is visible in the manager.
+    if (!defaultSpaceId()) rememberDefaultSpace(s.id);
     await loadAll();
   }
 
@@ -127,6 +148,7 @@
     state.packPreview = null; state.packExport = null;
     disposeMonaco();
     renderSpaces();
+    rememberDefaultSpace(s.id);
     await loadAll();
     return s;
   }
@@ -180,13 +202,25 @@
       box.innerHTML = '<p class="muted">还没有目录。新建目录并绑定内容类型后，即可创建文档。</p>';
       return;
     }
-    box.innerHTML = state.nodes.map(function (n) {
+    box.innerHTML = state.nodes.map(function (n, i) {
       var depth = (n.path.match(/\//g) || []).length - 1;
+      var id = esc(n.id);
+      var op = function (action, label, title, extra) {
+        return '<button type="button" class="tree-op" data-action="' + action +
+          '" data-node-id="' + id + '" data-index="' + i + '" title="' + title + '"' +
+          (extra || '') + '>' + label + '</button>';
+      };
       return '<div class="tree-item' + (n.id === state.nodeId ? ' active' : '') +
-        '" data-node-id="' + esc(n.id) + '" style="padding-left:' + (10 + depth * 12) + 'px">' +
-        '<span>◇</span><span>' + esc(n.path) + '</span>' +
+        '" data-node-id="' + id + '" style="padding-left:' + (10 + depth * 12) + 'px">' +
+        '<span>◇</span><span class="tree-label">' + esc(n.path) + '</span>' +
         (n.contentType ? '<span class="tag">' + esc(n.contentType) + '</span>' : '') +
-        (n.exposeToMcp === false ? '<span class="tag">隐藏</span>' : '') + '</div>';
+        (n.exposeToMcp === false ? '<span class="tag">隐藏</span>' : '') +
+        '<span class="tree-ops">' +
+        op('node-up', '↑', '上移', i === 0 ? ' disabled' : '') +
+        op('node-down', '↓', '下移', i === state.nodes.length - 1 ? ' disabled' : '') +
+        op('edit-node', '改', '重命名 / 移动 / 改绑定') +
+        op('delete-node', '删', '删除目录') +
+        '</span></div>';
     }).join('');
   }
 
@@ -1125,6 +1159,7 @@
       hint('empty-hint', '已创建：' + res.slug, 'ok');
     }
     await loadSpaces(res.id);
+    rememberDefaultSpace(res.id);
     return res;
   }
 
@@ -1137,6 +1172,143 @@
     $('new-node-path').value = '';
     await loadAll();
     return res;
+  }
+
+  function nodeById(id) {
+    return state.nodes.find(function (n) { return n.id === id; }) || null;
+  }
+
+  function editNode(id) {
+    var node = nodeById(id);
+    if (!node) return;
+    state.editingNodeId = id;
+    $('edit-node-path').value = node.path;
+    $('edit-node-type').value = node.contentType || '';
+    $('edit-node-icon').value = node.icon || 'folder';
+    $('edit-node-expose').checked = node.exposeToMcp !== false;
+    show('node-edit-form');
+    hint('node-edit-hint', '');
+    try { $('edit-node-path').focus(); } catch (e) { /* headless */ }
+  }
+
+  function cancelNodeEdit() {
+    state.editingNodeId = null;
+    hide('node-edit-form');
+  }
+
+  async function saveNodeEdit() {
+    var id = state.editingNodeId;
+    var node = nodeById(id);
+    if (!node) { hint('node-edit-hint', '请先选择一个目录', 'error'); return null; }
+    var path = val('edit-node-path');
+    if (!path) { hint('node-edit-hint', '请填写目录路径', 'error'); return null; }
+    var res = await api('/spaces/' + state.spaceId + '/nodes/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify({
+        path: path, contentType: val('edit-node-type'), icon: val('edit-node-icon'),
+        exposeToMcp: $('edit-node-expose').checked, source: 'ui'
+      })
+    });
+    state.editingNodeId = null;
+    hide('node-edit-form');
+    if (state.nodeId === id && path !== node.path) state.nodeId = res.id;
+    await loadAll();
+    return res;
+  }
+
+  async function deleteNode(id) {
+    var node = nodeById(id);
+    if (!node) return false;
+    var children = state.nodes.filter(function (n) {
+      return n.path.indexOf(node.path + '/') === 0 || n.parentId === id;
+    }).length;
+    if (!window.confirm('删除目录「' + node.path + '」' +
+        (children ? '及其 ' + children + ' 个子目录/文档' : '') + '？该操作会生成一条新提交。')) return false;
+    await api('/spaces/' + state.spaceId + '/nodes/' + encodeURIComponent(id) + '?recursive=true', {
+      method: 'DELETE'
+    });
+    if (state.nodeId === id) { state.nodeId = null; state.render = null; }
+    if (state.editingNodeId === id) cancelNodeEdit();
+    await loadAll();
+    return true;
+  }
+
+  async function moveNode(id, step) {
+    var ids = state.nodes.map(function (n) { return n.id; });
+    var at = ids.indexOf(id);
+    var to = at + step;
+    if (at < 0 || to < 0 || to >= ids.length) return null;
+    ids[at] = ids[to]; ids[to] = id;
+    var res = await api('/spaces/' + state.spaceId + '/nodes/reorder', {
+      method: 'POST', body: JSON.stringify({ orderedIds: ids, source: 'ui' })
+    });
+    // Reload from server: ordering is authoritative there and shared across clients.
+    await loadAll();
+    return res;
+  }
+
+  // ---------- workspace (space) management ----------
+
+  function renderSpaceManager() {
+    var box = $('space-manager');
+    if (!box) return;
+    var current = defaultSpaceId();
+    box.innerHTML = state.spaces.map(function (s) {
+      var isDefault = s.id === current;
+      return '<div class="space-row" data-space-id="' + esc(s.id) + '">' +
+        '<div class="space-row-main">' +
+        '<input data-field="name" value="' + esc(s.name) + '" aria-label="空间名称">' +
+        '<input data-field="slug" value="' + esc(s.slug) + '" aria-label="空间标识">' +
+        '<input data-field="description" value="' + esc(s.description || '') + '" aria-label="空间说明">' +
+        '<span class="space-meta">' + esc(s.documentCount || 0) + ' 文档 · ' +
+        esc(s.commitCount || 0) + ' 提交' + (isDefault ? ' · <strong>默认</strong>' : '') + '</span>' +
+        '</div>' +
+        '<div class="space-row-ops">' +
+        '<button data-action="save-space" data-space="' + esc(s.id) + '" class="ghost">保存</button>' +
+        '<button data-action="default-space" data-space="' + esc(s.id) + '" class="ghost"' +
+        (isDefault ? ' disabled' : '') + '>设为默认</button>' +
+        '<button data-action="enter-space" data-space="' + esc(s.id) + '" class="ghost">进入</button>' +
+        '<button data-action="delete-space" data-space="' + esc(s.id) + '" class="ghost danger">删除</button>' +
+        '</div></div>';
+    }).join('') || '<p class="muted">还没有空间，先用顶栏「+ 空间」创建一个。</p>';
+  }
+
+  async function saveSpace(id) {
+    var row = document.querySelector('[data-space-id="' + id + '"]');
+    if (!row) return null;
+    var name = row.querySelector('[data-field="name"]').value.trim();
+    var slug = row.querySelector('[data-field="slug"]').value.trim();
+    var description = row.querySelector('[data-field="description"]').value.trim();
+    if (!name) { hint('space-manager-hint', '空间名称不能为空', 'error'); return null; }
+    var res = await api('/spaces/' + encodeURIComponent(id), {
+      method: 'PATCH',
+      body: JSON.stringify({ name: name, slug: slug, description: description, source: 'ui' })
+    });
+    await loadSpaces(id);
+    renderSpaceManager();
+    hint('space-manager-hint', '已保存空间「' + name + '」', 'ok');
+    return res;
+  }
+
+  async function setDefaultSpaceUi(id) {
+    rememberDefaultSpace(id);
+    await loadSpaces(id);
+    renderSpaceManager();
+    hint('space-manager-hint', '默认工作空间已更新，刷新后会直接进入', 'ok');
+  }
+
+  async function deleteSpaceUi(id) {
+    var s = state.spaces.find(function (x) { return x.id === id; });
+    if (!s) return false;
+    if (!window.confirm('删除空间「' + s.name + '」及其全部目录、文档与提交历史？此操作不可恢复。')) return false;
+    await api('/spaces/' + encodeURIComponent(id), { method: 'DELETE' });
+    var wasDefault = defaultSpaceId() === id;
+    state.spaceId = null; state.nodeId = null; state.render = null;
+    await loadSpaces();
+    if (wasDefault && state.spaceId) rememberDefaultSpace(state.spaceId);
+    renderSpaceManager();
+    hint('space-manager-hint', '已删除空间「' + s.name + '」', 'ok');
+    return true;
   }
 
   function fieldRow(index, preset) {
@@ -1414,6 +1586,57 @@
     return true;
   }
 
+  var configFocusBefore = null;
+
+  function showConfigSection(name) {
+    if (name === 'admin') {
+      var entry = $('config-admin-entry');
+      if (!entry || entry.classList.contains('hidden')) return;
+    }
+    document.querySelectorAll('#config-nav [data-config-section]').forEach(function (b) {
+      b.classList.toggle('active', b.getAttribute('data-config-section') === name);
+    });
+    document.querySelectorAll('[data-config-panel]').forEach(function (p) {
+      p.classList.toggle('hidden', p.getAttribute('data-config-panel') !== name);
+    });
+    if (name === 'workspace') renderSpaceManager();
+  }
+
+  async function openConfig() {
+    var overlay = $('config-overlay');
+    if (!overlay) return false;
+    configFocusBefore = document.activeElement || null;
+    overlay.classList.remove('hidden');
+    overlay.setAttribute('aria-hidden', 'false');
+    var auth = window.EpistemeAuth || {};
+    var users = auth.mode === 'users';
+    var modeChip = $('config-mode');
+    if (modeChip) modeChip.textContent = '鉴权：' + (auth.mode || 'legacy');
+    ['account', 'token', 'admin'].forEach(function (name) {
+      var button = document.querySelector('#config-nav [data-config-section="' + name + '"]');
+      if (button) button.classList.toggle('hidden', !users);
+    });
+    if (!users)
+      ['config-login', 'btn-token', 'btn-admin', 'btn-logout'].forEach(function (id) {
+        var element = $(id); if (element) element.classList.add('hidden');
+      });
+    showConfigSection('appearance');
+    if (users && auth.refreshMe) { try { await auth.refreshMe(); } catch (e) { /* keep panel usable */ } }
+    return true;
+  }
+
+  function closeConfig() {
+    var overlay = $('config-overlay');
+    if (!overlay) return false;
+    overlay.classList.add('hidden');
+    overlay.setAttribute('aria-hidden', 'true');
+    if (configFocusBefore && configFocusBefore.focus) {
+      try { configFocusBefore.focus(); } catch (e) { /* detached node */ }
+    }
+    configFocusBefore = null;
+    return true;
+  }
+
   function bindHelpEvents() {
     var search = $('help-search');
     if (search) search.addEventListener('input', function (e) {
@@ -1462,8 +1685,25 @@
             case 'create-space': await createSpace(); break;
             case 'show-space-form': show('space-form'); hint('space-form-hint', '', ''); break;
             case 'hide-space-form': hide('space-form'); break;
+            case 'open-space-manager':
+              await openConfig(); showConfigSection('workspace'); break;
+            case 'close-and-new-space':
+              closeConfig(); show('space-form'); hint('space-form-hint', '', ''); break;
+            case 'save-space': await saveSpace(actionEl.getAttribute('data-space')); break;
+            case 'default-space': await setDefaultSpaceUi(actionEl.getAttribute('data-space')); break;
+            case 'delete-space': await deleteSpaceUi(actionEl.getAttribute('data-space')); break;
+            case 'enter-space':
+              await switchSpace(actionEl.getAttribute('data-space'));
+              closeConfig();
+              break;
             case 'new-node': show('node-form'); break;
             case 'save-node': await createNode(); break;
+            case 'edit-node': editNode(actionEl.getAttribute('data-node-id')); break;
+            case 'cancel-node-edit': cancelNodeEdit(); break;
+            case 'save-node-edit': await saveNodeEdit(); break;
+            case 'delete-node': await deleteNode(actionEl.getAttribute('data-node-id')); break;
+            case 'node-up': await moveNode(actionEl.getAttribute('data-node-id'), -1); break;
+            case 'node-down': await moveNode(actionEl.getAttribute('data-node-id'), 1); break;
             case 'new-type': show('schema-builder'); if (!$('field-rows').children.length) addField(); break;
             case 'add-field': addField(); break;
             case 'remove-field': removeField(actionEl.getAttribute('data-index')); break;
@@ -1493,6 +1733,8 @@
             case 'import-pack': await importPack(); break;
             case 'open-help': openHelp(); break;
             case 'close-help': closeHelp(); break;
+            case 'open-config': await openConfig(); break;
+            case 'close-config': closeConfig(); break;
             case 'help-goto': showHelpSection(actionEl.getAttribute('data-help-id')); break;
             case 'help-prev': helpStep(-1); break;
             case 'help-next': helpStep(1); break;
@@ -1504,6 +1746,8 @@
           hint('empty-hint', e.message, 'error');
           hint('reader-hint', e.message, 'error');
           hint('pack-hint', e.message, 'error');
+          hint('node-edit-hint', e.message, 'error');
+          hint('space-manager-hint', e.message, 'error');
         }
         return;
       }
@@ -1515,6 +1759,16 @@
 
     var theme = $('theme-select');
     if (theme) theme.addEventListener('change', function (e) { applyTheme(e.target.value); });
+
+    var configNav = $('config-nav');
+    if (configNav) configNav.addEventListener('click', function (ev) {
+      var button = ev.target.closest('[data-config-section]');
+      if (button) showConfigSection(button.getAttribute('data-config-section'));
+    });
+    document.addEventListener('keydown', function (ev) {
+      var overlay = $('config-overlay');
+      if (ev.key === 'Escape' && overlay && !overlay.classList.contains('hidden')) closeConfig();
+    });
 
     var spaceSelect = $('space-select');
     if (spaceSelect) spaceSelect.addEventListener('change', async function (e) {
@@ -1533,6 +1787,12 @@
 
   async function init() {
     bindEvents();
+    // auth.js restores the token and validates it asynchronously. Waiting here keeps
+    // the first /spaces request from racing token restoration and wiping a valid login.
+    var auth = window.EpistemeAuth || {};
+    if (typeof auth.ready === 'function') {
+      try { await auth.ready(); } catch (e) { /* continue with cached state */ }
+    }
     try {
       var res = await fetch(BASE + '/tokens.json');
       if (res.ok) state.tokens = await res.json();
@@ -1594,7 +1854,12 @@
     uploadPdfPart: uploadPdfPart, rebindAnnotation: rebindAnnotation,
     sanitizeSnapshotHtml: sanitizeSnapshotHtml, highlightQuotes: highlightQuotes,
     openHelp: openHelp, closeHelp: closeHelp, showHelpSection: showHelpSection,
-    toggleHelpAll: toggleHelpAll, helpStep: helpStep
+    toggleHelpAll: toggleHelpAll, helpStep: helpStep,
+    openConfig: openConfig, closeConfig: closeConfig, showConfigSection: showConfigSection,
+    renderSpaceManager: renderSpaceManager, saveSpace: saveSpace,
+    setDefaultSpace: setDefaultSpaceUi, deleteSpace: deleteSpaceUi,
+    editNode: editNode, saveNodeEdit: saveNodeEdit, cancelNodeEdit: cancelNodeEdit,
+    deleteNode: deleteNode, moveNode: moveNode, defaultSpaceId: defaultSpaceId
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

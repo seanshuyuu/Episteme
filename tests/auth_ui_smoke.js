@@ -203,6 +203,15 @@ const visible = (dom, id) => {
     && (doc.getElementById('token-plain').textContent || '').startsWith('epm_'), 8000);
   const firstToken = (doc.getElementById('token-plain') || {}).textContent || '';
   check('生成/重置令牌后一次性明文可见', generated && firstToken.length > 40, firstToken.slice(0, 14));
+  const configJson = (doc.getElementById('token-config-json') || {}).textContent || '';
+  check('生成令牌后展示已填入令牌的 MCP 配置 JSON',
+    generated && configJson.includes('mcpServers') && configJson.includes(firstToken)
+      && visible(dom, 'btn-token-copy-config'), configJson.slice(0, 120));
+  check('MCP 配置仅 Streamable HTTP（无 stdio 标签）',
+    configJson.includes('"type": "http"')
+      && !configJson.includes('EPISTEME_AUTH_TOKEN')
+      && !doc.querySelector('[data-auth-action="token-config-tab"]'),
+    configJson.slice(0, 120));
   check('生成后状态变为已启用且出现重置/停用按钮',
     (doc.getElementById('token-status').textContent || '').includes('已启用')
     && visible(dom, 'btn-token-reset') && visible(dom, 'btn-token-revoke'),

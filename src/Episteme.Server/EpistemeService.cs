@@ -164,12 +164,17 @@ public sealed partial class EpistemeService(
         var name = S(args, "name");
         if (string.IsNullOrWhiteSpace(name)) throw new BusinessException("BAD_REQUEST", "name 不能为空");
         var slug = S(args, "slug", "space-" + Guid.NewGuid().ToString("N")[..8]);
-        if (await db.Spaces.AnyAsync(s => s.WorkspaceId == "default" && s.Slug == slug, ct))
-            throw new BusinessException("SPACE_EXISTS", $"slug 已存在：{slug}", 409);
+        // In users mode WorkspaceId is the owning account id: the unique index
+        // (WorkspaceId, Slug) then makes slug account-scoped, so two accounts may use
+        // the same name and slug without seeing each other's spaces.
+        var workspaceId = EpistemeConfig.Users && principal is not null
+            ? principal.UserId : "default";
+        if (await db.Spaces.AnyAsync(s => s.WorkspaceId == workspaceId && s.Slug == slug, ct))
+            throw new BusinessException("SPACE_EXISTS", $"当前账号下已存在 slug：{slug}", 409);
 
         var space = new Space
         {
-            Id = Ids.New("sp"), Name = name, Slug = slug,
+            Id = Ids.New("sp"), WorkspaceId = workspaceId, Name = name, Slug = slug,
             Description = S(args, "description"), ToolsVersion = 1
         };
         db.Spaces.Add(space);
@@ -221,6 +226,81 @@ public sealed partial class EpistemeService(
         };
     }
 
+    public async Task<JsonObject> UpdateSpaceAsync(
+        string id, JsonObject args, WriteContext ctx, CancellationToken ct)
+    {
+        RequireRole(ctx, "owner");
+        await using var db = await Db(ct);
+        var space = await RequireSpace(db, id, ct);
+        var changed = new JsonArray();
+
+        if (args.ContainsKey("name"))
+        {
+            var name = S(args, "name");
+            if (string.IsNullOrWhiteSpace(name))
+                throw new BusinessException("BAD_REQUEST", "name 不能为空", 400);
+            space.Name = name;
+            changed.Add("name");
+        }
+        if (args.ContainsKey("description"))
+        {
+            space.Description = S(args, "description");
+            changed.Add("description");
+        }
+        if (args.ContainsKey("slug"))
+        {
+            var slug = S(args, "slug");
+            if (string.IsNullOrWhiteSpace(slug) || slug.Length > 64 ||
+                !(char.IsAsciiLetterLower(slug[0]) || char.IsAsciiDigit(slug[0])))
+                throw new BusinessException("BAD_REQUEST", "slug 需以小写字母或数字开头，最长 64 位", 400);
+            if (!slug.All(c => char.IsAsciiLetterLower(c) || char.IsAsciiDigit(c) || c == '_' || c == '-'))
+                throw new BusinessException("BAD_REQUEST", "slug 只能包含小写字母、数字、_ 与 -", 400);
+            if (await db.Spaces.AnyAsync(s => s.WorkspaceId == space.WorkspaceId &&
+                                              s.Slug == slug && s.Id != id, ct))
+                throw new BusinessException("SPACE_EXISTS", $"当前账号下已存在 slug：{slug}", 409);
+            space.Slug = slug;
+            changed.Add("slug");
+        }
+        if (changed.Count == 0)
+            return new JsonObject { ["id"] = id, ["updated"] = false, ["name"] = space.Name };
+
+        var commit = await PersistAsync(db, space, ctx, "更新空间 " + space.Name, ct);
+        return new JsonObject
+        {
+            ["updated"] = true, ["id"] = space.Id, ["name"] = space.Name,
+            ["slug"] = space.Slug, ["description"] = space.Description,
+            ["changed"] = changed, ["commitId"] = commit.Id
+        };
+    }
+
+    public async Task<JsonObject> DeleteSpaceAsync(string id, WriteContext ctx, CancellationToken ct)
+    {
+        RequireRole(ctx, "owner");
+        await using var db = await Db(ct);
+        var space = await RequireSpace(db, id, ct);
+        var docs = await db.Documents.Where(d => d.SpaceId == id).ToListAsync(ct);
+        var docIds = docs.Select(d => d.Id).ToList();
+        var parts = await db.Parts.Where(p => docIds.Contains(p.DocumentId)).ToListAsync(ct);
+        var partIds = parts.Select(p => p.Id).ToList();
+        db.Annotations.RemoveRange(await db.Annotations.Where(a => partIds.Contains(a.PartId)).ToListAsync(ct));
+        db.Parts.RemoveRange(parts);
+        db.Documents.RemoveRange(docs);
+        db.Nodes.RemoveRange(await db.Nodes.Where(n => n.SpaceId == id).ToListAsync(ct));
+        db.ContentTypes.RemoveRange(await db.ContentTypes.Where(c => c.SpaceId == id).ToListAsync(ct));
+        db.Trees.RemoveRange(await db.Trees.Where(t => t.SpaceId == id).ToListAsync(ct));
+        db.Commits.RemoveRange(await db.Commits.Where(c => c.SpaceId == id).ToListAsync(ct));
+        db.Refs.RemoveRange(await db.Refs.Where(r => r.SpaceId == id).ToListAsync(ct));
+        db.AuditLogs.RemoveRange(await db.AuditLogs.Where(a => a.SpaceId == id).ToListAsync(ct));
+        db.Spaces.Remove(space);
+        await db.SaveChangesAsync(ct);
+        await identity.DeleteSpaceBindingsAsync(id, ct);
+        return new JsonObject
+        {
+            ["deleted"] = true, ["spaceId"] = id, ["removedDocuments"] = docIds.Count,
+            ["note"] = "空间及目录、文档、提交与审计已删除；内容寻址 blob 保留供其他空间去重引用"
+        };
+    }
+
     // ---------- Nodes ----------
 
     public async Task<JsonObject> ListNodesAsync(string spaceId, CancellationToken ct)
@@ -228,7 +308,7 @@ public sealed partial class EpistemeService(
         await using var db = await Db(ct);
         await RequireSpace(db, spaceId, ct);
         var nodes = await db.Nodes.Where(n => n.SpaceId == spaceId)
-            .OrderBy(n => n.Path).ToListAsync(ct);
+            .OrderBy(n => n.SortOrder).ThenBy(n => n.Path).ToListAsync(ct);
         var arr = new JsonArray();
         foreach (var n in nodes)
         {
@@ -240,7 +320,7 @@ public sealed partial class EpistemeService(
                 ["id"] = n.Id, ["path"] = n.Path, ["name"] = n.Name,
                 ["parentId"] = n.ParentId, ["contentType"] = slug,
                 ["exposeToMcp"] = n.ExposeToMcp, ["defaultPartKind"] = n.DefaultPartKind,
-                ["icon"] = n.Icon
+                ["icon"] = n.Icon, ["sortOrder"] = n.SortOrder
             });
         }
         return new JsonObject { ["items"] = arr, ["total"] = arr.Count };
@@ -263,13 +343,16 @@ public sealed partial class EpistemeService(
         if (!string.IsNullOrWhiteSpace(typeSlug))
             typeId = (await LatestType(db, spaceId, typeSlug, ct)).Row.Id;
 
+        var maxOrder = await db.Nodes.Where(n => n.SpaceId == spaceId)
+            .Select(n => (int?)n.SortOrder).MaxAsync(ct) ?? -1;
         var node = new Node
         {
             Id = Ids.New("nd"), SpaceId = spaceId, Path = path,
             Name = path.TrimEnd('/').Split('/').Last(), ContentTypeId = typeId,
             ExposeToMcp = args["exposeToMcp"] is JsonValue ev && ev.TryGetValue<bool>(out var e) ? e : true,
             DefaultPartKind = string.IsNullOrWhiteSpace(S(args, "defaultPartKind")) ? null : S(args, "defaultPartKind"),
-            Icon = S(args, "icon", "folder")
+            Icon = S(args, "icon", "folder"),
+            SortOrder = I(args, "sortOrder", maxOrder + 1)
         };
         node.ParentId = await FindParentIdAsync(db, spaceId, path, ct);
         db.Nodes.Add(node);
@@ -293,6 +376,11 @@ public sealed partial class EpistemeService(
 
         if (args.ContainsKey("exposeToMcp") && args["exposeToMcp"] is JsonValue ev && ev.TryGetValue<bool>(out var ex))
             node.ExposeToMcp = ex;
+        if (args.ContainsKey("sortOrder")) node.SortOrder = I(args, "sortOrder", node.SortOrder);
+        if (args.ContainsKey("icon")) node.Icon = S(args, "icon", node.Icon);
+        if (args.ContainsKey("defaultPartKind"))
+            node.DefaultPartKind = string.IsNullOrWhiteSpace(S(args, "defaultPartKind"))
+                ? null : S(args, "defaultPartKind");
         if (args.ContainsKey("contentType"))
         {
             var slug = S(args, "contentType");
@@ -341,6 +429,39 @@ public sealed partial class EpistemeService(
         space.ToolsVersion++;
         var commit = await PersistAsync(db, space, ctx, $"删除目录 {node.Path}", ct);
         return new JsonObject { ["deleted"] = true, ["commitId"] = commit.Id, ["removedNodes"] = allIds.Count };
+    }
+
+    /// <summary>
+    /// Persist the exact display order supplied by the UI. Every id must belong to the
+    /// space, so reordering can never be used to touch another account's nodes.
+    /// </summary>
+    public async Task<JsonObject> ReorderNodesAsync(
+        string spaceId, JsonObject args, WriteContext ctx, CancellationToken ct)
+    {
+        RequireRole(ctx, "owner");
+        var ids = (args["orderedIds"] as JsonArray ?? new JsonArray())
+            .Select(Jsonx.Plain)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+        if (ids.Count == 0)
+            throw new BusinessException("BAD_REQUEST", "orderedIds 不能为空", 400);
+        if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+            throw new BusinessException("BAD_REQUEST", "orderedIds 存在重复节点", 400);
+
+        await using var db = await Db(ct);
+        var space = await RequireSpace(db, spaceId, ct);
+        var nodes = await db.Nodes.Where(n => n.SpaceId == spaceId && ids.Contains(n.Id)).ToListAsync(ct);
+        if (nodes.Count != ids.Count)
+            throw new BusinessException("NODE_NOT_FOUND", "orderedIds 含不属于该空间的节点", 404);
+        for (var i = 0; i < ids.Count; i++)
+            nodes.First(n => n.Id == ids[i]).SortOrder = i;
+        space.ToolsVersion++;
+        var commit = await PersistAsync(db, space, ctx, "调整目录顺序", ct);
+        return new JsonObject
+        {
+            ["reordered"] = ids.Count, ["commitId"] = commit.Id,
+            ["toolsVersion"] = space.ToolsVersion
+        };
     }
 
     private static string NormalizePath(string path)

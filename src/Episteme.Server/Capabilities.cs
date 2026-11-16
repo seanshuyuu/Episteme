@@ -85,7 +85,7 @@ public static class EpistemeConfig
             ["maxPdfBytes"] = 20 * 1024 * 1024,
             ["interactiveAnchorRebind"] = true
         },
-        ["transports"] = new JsonArray("streamable-http", "sse", "stdio"),
+        ["transports"] = new JsonArray("streamable-http"),
         ["security"] = new JsonObject
         {
             ["jwtHs256"] = true,
@@ -110,6 +110,13 @@ public static class EpistemeConfig
             ["roles"] = new JsonArray("admin", "owner", "editor", "agent", "viewer"),
             ["authorizationModel"] = "account",
             ["credentials"] = new JsonArray("login-jwt", "mcp-token"),
+            ["credentialScopes"] = new JsonObject
+            {
+                ["login-jwt"] = "/api/*",
+                ["mcp-token"] = "/mcp*",
+                ["hmac"] = "/api/* (EPISTEME_MACHINE_USER only)",
+                ["mixed"] = "rejected"
+            },
             ["endpoints"] = new JsonObject
             {
                 ["config"] = "/api/v1/auth/config", ["register"] = "/api/v1/auth/register",

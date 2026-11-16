@@ -41,7 +41,7 @@ public static class IdentityEndpoints
                 ["header"] = "X-Episteme-Mcp-Token",
                 ["prefix"] = IdentityStore.McpTokenPrefix,
                 ["bearer"] = true,
-                ["note"] = "每人一个可自助生成/重置/停用的长期 MCP 令牌，仅登录会话可管理"
+                ["note"] = "每人一个可自助生成/重置/停用的长期 MCP 令牌；仅用于 /mcp 端点，不能调用 /api，且仅登录会话可管理"
             },
             ["product"] = "Episteme", ["version"] = EpistemeConfig.Version
         }));
@@ -54,6 +54,13 @@ public static class IdentityEndpoints
 
         auth.MapGet("/me", async (HttpContext http, IdentityStore store) =>
             await Endpoints.Run(http, ct => MeAsync(http, store, ct)));
+
+        // Per-account UI preferences: the default workspace the homepage opens.
+        auth.MapGet("/me/prefs", async (HttpContext http, IdentityStore store) =>
+            await Endpoints.Run(http, ct => PrefsAsync(http, store, ct)));
+        auth.MapPut("/me/prefs", async (HttpContext http, IdentityStore store,
+                                        EpistemeService svc, [FromBody] JsonObject body) =>
+            await Endpoints.Run(http, ct => UpdatePrefsAsync(http, store, svc, body, ct)));
 
         auth.MapPost("/logout", () => Results.Json(new JsonObject
         {
@@ -217,7 +224,7 @@ public static class IdentityEndpoints
         ["endpoint"] = "/api/v1/auth/me/mcp-token",
         ["bearerHeader"] = "Authorization: Bearer <epm_...>",
         ["alternateHeader"] = "X-Episteme-Mcp-Token: <epm_...>",
-        ["transport"] = "POST /mcp, GET /mcp/sse, tools/git-sync.py --auth bearer",
+        ["transport"] = "POST /mcp（Streamable HTTP）, tools/git-sync.py --auth bearer",
         ["note"] = "明文只在生成/重置时返回一次，服务端仅保存 SHA-256 摘要；重置后旧令牌立即失效"
     };
 
@@ -295,6 +302,7 @@ public static class IdentityEndpoints
         var result = TokenBundle(user, token);
         result["authorizationModel"] = "account";
         result["spaces"] = await OwnedSpacesNodeAsync(store, user.Id, ct);
+        result["defaultSpaceId"] = await store.GetPrefAsync(user.Id, "default_space_id", ct);
         result["mcpToken"] = McpTokenNode(await store.McpTokenAsync(user.Id, ct));
         result["note"] = "登录 JWT 用于浏览器；MCP / CI 建议使用「我的 MCP Token」里的长期令牌";
         return result;
@@ -323,8 +331,40 @@ public static class IdentityEndpoints
             ["authorizationModel"] = "account", ["authChannel"] = p.AuthChannel,
             ["ownedSpaces"] = owned, ["ownedSpaceCount"] = p.OwnedSpaceIds.Count,
             ["mcpToken"] = McpTokenNode(await store.McpTokenAsync(user.Id, ct)),
-            ["authMode"] = EpistemeConfig.AuthMode()
+            ["authMode"] = EpistemeConfig.AuthMode(),
+            ["defaultSpaceId"] = await store.GetPrefAsync(user.Id, "default_space_id", ct)
         };
+    }
+
+    private static async Task<JsonObject> PrefsAsync(
+        HttpContext http, IdentityStore store, CancellationToken ct)
+    {
+        RequireUsers();
+        var p = RequireSession(http);
+        return new JsonObject
+        {
+            ["defaultSpaceId"] = await store.GetPrefAsync(p.UserId, "default_space_id", ct),
+            ["note"] = "默认空间按账号保存在服务端；浏览器刷新或换设备都会自动进入该空间"
+        };
+    }
+
+    private static async Task<JsonObject> UpdatePrefsAsync(
+        HttpContext http, IdentityStore store, EpistemeService svc,
+        JsonObject body, CancellationToken ct)
+    {
+        RequireUsers();
+        var p = RequireSession(http);
+        var defaultSpaceId = S(body, "defaultSpaceId");
+        if (!string.IsNullOrWhiteSpace(defaultSpaceId))
+        {
+            var spaces = await svc.ListSpacesAsync(ct);
+            var visible = spaces["items"] as JsonArray ?? new JsonArray();
+            if (!visible.OfType<JsonObject>().Any(o =>
+                    string.Equals(Jsonx.Plain(o["id"]), defaultSpaceId, StringComparison.Ordinal)))
+                throw new BusinessException("SPACE_NOT_FOUND", "默认空间不在当前账号可见范围内", 404);
+        }
+        await store.SetPrefAsync(p.UserId, "default_space_id", defaultSpaceId, ct);
+        return new JsonObject { ["updated"] = true, ["defaultSpaceId"] = defaultSpaceId };
     }
 
     private static async Task<JsonObject> ChangePasswordAsync(
@@ -386,8 +426,7 @@ public static class IdentityEndpoints
             ["note"] = "明文只在此响应里出现一次，请立即复制保存；下次只能查看状态或再次重置",
             ["usage"] = new JsonObject
             {
-                ["mcp"] = "POST /mcp（JSON-RPC tools/list / tools/call）",
-                ["sse"] = "GET /mcp/sse",
+                ["mcp"] = "POST /mcp（Streamable HTTP / JSON-RPC tools/list / tools/call）",
                 ["gitSync"] = "python3 tools/git-sync.py --auth bearer --token <明文> --space <自己空间的 id>",
                 ["scope"] = "只能访问本账号名下的空间；不能管理令牌、不能进管理后台"
             }

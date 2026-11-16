@@ -43,6 +43,13 @@ public static class Endpoints
         api.MapGet("/spaces/{id}", async (string id, HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.GetSpaceAsync(id, ct)));
 
+        api.MapPatch("/spaces/{id}", async (string id, HttpContext http, EpistemeService svc,
+                                            [FromBody] JsonObject body) =>
+            await Run(http, ct => svc.UpdateSpaceAsync(id, body, Ctx(http, body, "ui"), ct)));
+
+        api.MapDelete("/spaces/{id}", async (string id, HttpContext http, EpistemeService svc) =>
+            await Run(http, ct => svc.DeleteSpaceAsync(id, Ctx(http, new JsonObject(), "ui"), ct)));
+
         // Tree / nodes
         api.MapGet("/spaces/{id}/tree", async (string id, HttpContext http, EpistemeService svc) =>
             await Run(http, ct => svc.ListNodesAsync(id, ct)));
@@ -57,6 +64,10 @@ public static class Endpoints
         api.MapDelete("/spaces/{id}/nodes/{nodeId}",
             async (string id, string nodeId, HttpContext http, EpistemeService svc) =>
                 await Run(http, ct => svc.DeleteNodeAsync(id, nodeId, QueryJson(http.Request), Ctx(http, new JsonObject()), ct)));
+
+        api.MapPost("/spaces/{id}/nodes/reorder",
+            async (string id, HttpContext http, EpistemeService svc, [FromBody] JsonObject body) =>
+                await Run(http, ct => svc.ReorderNodesAsync(id, body, Ctx(http, body, "ui"), ct)));
 
         // Schema
         api.MapGet("/spaces/{id}/content-types", async (string id, HttpContext http, EpistemeService svc) =>

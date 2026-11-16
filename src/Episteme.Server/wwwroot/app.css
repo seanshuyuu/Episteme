@@ -88,6 +88,24 @@ button.link { border: none; background: none; color: var(--primaryDeep); padding
 .tree-item.active { background: var(--primarySoft); border-color: var(--primary); color: var(--primaryDeep); font-weight: 600; }
 .tree-item .tag { margin-left: auto; font-size: 10px; color: var(--muted); }
 .inline-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; padding: 10px; background: var(--surface2); border-radius: var(--radiusSm); }
+.inline-check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-ops { display: inline-flex; gap: 2px; margin-left: auto; flex: none; }
+.tree-item:hover .tree-ops, .tree-item.active .tree-ops { opacity: 1; }
+.tree-op {
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+  border-radius: 4px; font-size: 11px; line-height: 1; padding: 4px 5px; cursor: pointer;
+}
+.tree-op:hover:not(:disabled) { color: var(--primaryDeep); border-color: var(--primary); }
+.tree-op:disabled { opacity: .35; cursor: default; }
+.space-manager { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.space-row { border: 1px solid var(--line); border-radius: var(--radiusSm); padding: 10px; background: var(--surface2); }
+.space-row-main { display: grid; grid-template-columns: 1.1fr .9fr 1.4fr; gap: 6px; margin-bottom: 8px; }
+.space-row-main input { min-width: 0; }
+.space-meta { grid-column: 1 / -1; font-size: 11px; color: var(--muted); }
+.space-row-ops { display: flex; gap: 6px; flex-wrap: wrap; }
+.space-row-ops .danger { color: #b42318; }
+@media (max-width: 768px) { .space-row-main { grid-template-columns: 1fr; } }
 
 .builder { padding: 12px; border: 1px dashed var(--line); border-radius: var(--radiusSm); margin-bottom: 14px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 6px; align-items: center; margin-bottom: 6px; }
@@ -328,6 +346,14 @@ mark.anchor-hit { background: var(--primarySoft); color: var(--primaryDeep); bor
 .help-pager button:disabled { opacity: .45; cursor: default; }
 .help-pager button:disabled:hover { border-color: var(--line); color: var(--text); }
 
+/* ---------- config / authorization page ---------- */
+.config-dialog .help-content section { margin-bottom: 16px; }
+.config-dialog .help-content h2 { font-size: 16px; margin: 0 0 8px; }
+.config-dialog .help-content p { line-height: 1.7; }
+.config-dialog .help-content label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.config-dialog .help-content .row { flex-wrap: wrap; gap: 8px; }
+.config-dialog .help-content .auth-chip { margin-right: 4px; }
+
 @media (max-width: 768px) {
   .help-overlay { padding: 0; }
   .help-dialog { width: 100%; height: 100%; border-radius: 0; border: none; }
@@ -370,8 +396,9 @@ mark.anchor-hit { background: var(--primarySoft); color: var(--primaryDeep); bor
 .part-tab .file-lang { margin-left: 6px; font-size: 10px; color: var(--muted); }
 
 /* ---------- accounts: login wall + admin console ---------- */
+/* Above the config page (z-index 1000): token/admin dialogs can be opened from it. */
 .auth-overlay, .admin-overlay {
-  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center;
   background: rgba(30, 48, 44, .42); padding: 20px; backdrop-filter: blur(3px);
 }
 .auth-card {
@@ -468,6 +495,13 @@ button.ghost.danger:hover { background: #fdf1f0; }
   padding: 10px; word-break: break-all; user-select: all;
 }
 .token-once-note { font-size: 11px; color: #9a7a35; margin-top: 8px; }
+.token-config-title { font-size: 12px; font-weight: 600; color: #8a6416; margin: 14px 0 8px; }
+#token-config-json {
+  margin: 0; max-height: 220px; overflow: auto;
+  background: var(--surface); border: 1px solid #ecd9af; border-radius: 8px;
+  padding: 10px; user-select: all;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.65;
+}
 .token-usage pre {
   margin: 0; background: var(--surface2); border: 1px solid var(--line);
   border-radius: var(--radiusSm); padding: 12px; overflow: auto;

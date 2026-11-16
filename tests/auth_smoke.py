@@ -206,6 +206,16 @@ check("管理总览返回账号/空间/授权统计",
       code == 200 and overview.get("users", 0) >= 2
       and overview.get("authMode") == "users", overview)
 
+# MCP endpoints only accept epm_ tokens; login JWTs are valid on /api only.
+code, adm_gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, admin_token)
+admin_mcp = adm_gen.get("token", "")
+check("管理员可生成自己的长期 MCP token",
+      code == 200 and admin_mcp.startswith("epm_"), adm_gen.get("rotated"))
+code, usr_gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, user_token)
+user_mcp = usr_gen.get("token", "")
+check("普通用户可生成自己的长期 MCP token",
+      code == 200 and user_mcp.startswith("epm_"), usr_gen.get("rotated"))
+
 # ---------------------------------------------------------------- C. MCP 创建代码工作空间
 code, packs = http("GET", API + "/packs", token=admin_token)
 pack_items = packs.get("items", packs.get("packs", []))
@@ -214,7 +224,7 @@ check("内置 Pack 目录列出 4 套（含 code-workspace）",
       and any(p.get("id") == "pack_code-workspace" for p in pack_items),
       [p.get("id") for p in pack_items])
 
-code, rpc = mcp("tools/list", {}, admin_token)
+code, rpc = mcp("tools/list", {}, admin_mcp)
 tools = (rpc.get("result") or {}).get("tools") or []
 tool_names = [t.get("name") for t in tools]
 check("空库 tools/list 暴露 create_space 引导工具",
@@ -232,7 +242,7 @@ code, rpc = mcp("tools/call", {
         "name": "个人代码管理工作空间", "slug": slug,
         "description": "桌面端 / 移动端 / 跨平台 / 前后端分离项目归档与代码在线预览",
         "packId": "pack_code-workspace", "includeSamples": True
-    }}, admin_token)
+    }}, admin_mcp)
 created = structured(rpc)
 space_id = created.get("id", "")
 check("MCP create_space 一次创建并安装代码工作空间模板",
@@ -271,7 +281,7 @@ code, mixed2 = http("POST", API + "/spaces/" + space_id + "/packs/install",
                     {"packId": "pack_code-workspace", "overwrite": True}, admin_token)
 check("再次安装 code-workspace 模板仍成功", code == 200, mixed2)
 
-code, rpc = mcp("tools/list", {"spaceId": space_id}, admin_token)
+code, rpc = mcp("tools/list", {"spaceId": space_id}, admin_mcp)
 result2 = rpc.get("result") or {}
 names2 = [t.get("name") for t in (result2.get("tools") or [])]
 check("安装模板后动态派生 query/create 工具",
@@ -290,7 +300,7 @@ code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_token)
 check("普通用户直读他人空间被 403 ACCOUNT_FORBIDDEN",
       code == 403 and res.get("code") == "ACCOUNT_FORBIDDEN", res)
 code, res = mcp("tools/call", {"spaceId": space_id, "name": "episteme.tree",
-                               "arguments": {}}, user_token)
+                               "arguments": {}}, user_mcp)
 check("MCP 携带他人 spaceId 同样被 403", code == 403, res)
 
 code, res = http("PUT", ADMIN + "/members",
@@ -306,7 +316,7 @@ check("空间归属表可查询且该空间归属管理员",
 code, rpc = mcp("tools/call", {
     "name": "episteme.create_space",
     "arguments": {"name": "我的私人空间", "slug": "mine-" + stamp}
-}, user_token)
+}, user_mcp)
 own = structured(rpc)
 own_id = own.get("id", "")
 check("普通用户可用 MCP 创建自己的空间", code == 200 and bool(own_id), own)
@@ -322,38 +332,33 @@ code, res = http("POST", API + "/spaces/" + space_id + "/nodes/" +
                  project_node_id + "/documents", write_doc, user_token)
 check("普通用户不能向他人空间写文档", code == 403, res)
 
-# ---- per-account MCP token lifecycle ----
+# ---- per-account MCP token lifecycle (MCP tokens only work on /mcp) ----
 code, st0 = http("GET", AUTH + "/me/mcp-token", token=user_token)
 check("普通用户可查看自己的 MCP token 状态（无明文）",
-      code == 200 and st0.get("hasToken") is False and "token" not in st0, st0)
-code, gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, user_token)
-user_mcp = gen.get("token", "")
-check("普通用户可生成自己的长期 MCP token",
-      code == 200 and user_mcp.startswith("epm_"), gen.get("rotated"))
+      code == 200 and st0.get("hasToken") is True and "token" not in st0, st0)
 code, res = http("GET", API + "/spaces", token=user_mcp)
-check("MCP token 只看到本账号名下空间",
-      code == 200 and [i.get("id") for i in res.get("items", [])] == [own_id],
-      res.get("items"))
-code, res = http("GET", API + "/spaces/" + space_id + "/tree", token=user_mcp)
-check("MCP token 读他人空间被 ACCOUNT_FORBIDDEN",
-      code == 403 and res.get("code") == "ACCOUNT_FORBIDDEN", res)
+check("MCP token 不能调用普通 /api 端点",
+      code == 403 and res.get("code") == "CREDENTIAL_SCOPE_MISMATCH", res)
+code, res = mcp("tools/list", {}, user_mcp)
+check("MCP token 可访问 /mcp 工具清单",
+      code == 200 and bool((res.get("result") or {}).get("tools")), res.get("code"))
 code, res = http("POST", AUTH + "/me/mcp-token", {"action": "reset"}, user_mcp)
 check("MCP token 不能重置自己", code == 403 and
-      res.get("code") == "MCP_TOKEN_SESSION_REQUIRED", res)
+      res.get("code") == "CREDENTIAL_SCOPE_MISMATCH", res)
 code, gen2 = http("POST", AUTH + "/me/mcp-token", {"action": "reset"}, user_token)
 user_mcp2 = gen2.get("token", "")
 check("登录会话可重置 MCP token 且返回新明文",
       code == 200 and gen2.get("rotated") is True and user_mcp2 != user_mcp
       and user_mcp2.startswith("epm_"), gen2.get("rotated"))
-code, res = http("GET", API + "/spaces", token=user_mcp)
+code, res = mcp("tools/list", {}, user_mcp)
 check("重置后旧 token 立即 401 MCP_TOKEN_INVALID",
       code == 401 and res.get("code") == "MCP_TOKEN_INVALID", res)
-code, res = http("GET", API + "/spaces", token=user_mcp2)
+code, res = mcp("tools/list", {}, user_mcp2)
 check("新 token 立即可用", code == 200, res)
 code, res = http("DELETE", AUTH + "/me/mcp-token", {}, user_token)
 check("登录会话可停用 MCP token", code == 200 and res.get("revoked") is True, res)
-code, res = http("GET", API + "/spaces", token=user_mcp2)
-check("停用后 token 立即失效", code == 401, res)
+code, res = mcp("tools/list", {}, user_mcp2)
+check("停用后 token 立即失效", code == 401 and res.get("code") == "MCP_TOKEN_INVALID", res)
 
 # ---------------------------------------------------------------- D. 管理员后台
 qa_name = "qa" + stamp
@@ -405,11 +410,7 @@ check("登录限流在阈值后返回 429 LOGIN_RATE_LIMITED",
       {"first": codes[0], "last": codes[-1], "limit": LOGIN_LIMIT})
 
 # ---------------------------------------------------------------- E. git 同步与在线预览
-code, adm_gen = http("POST", AUTH + "/me/mcp-token", {"action": "generate"}, admin_token)
-admin_mcp = adm_gen.get("token", "")
-check("管理员可生成自己的长期 MCP token",
-      code == 200 and admin_mcp.startswith("epm_"), adm_gen.get("rotated"))
-
+# git-sync writes through /api, so every route uses a login JWT (--auth mcp is retired).
 with tempfile.TemporaryDirectory(prefix="episteme-git-") as repo:
     def git(*args):
         return subprocess.run(["git", "-C", repo, *args],
@@ -432,10 +433,9 @@ with tempfile.TemporaryDirectory(prefix="episteme-git-") as repo:
 
     bearer = ["--auth", "bearer", "--token", admin_token]
     login = ["--auth", "login", "--user", ADMIN_USER, "--password", ADMIN_PASSWORD]
-    mcpauth = ["--auth", "mcp", "--token", admin_mcp]
     routes = [
         ("desktop", "桌面端", "桌面客户端", bearer, "bearer"),
-        ("mobile", "移动端", "移动 App", mcpauth, "mcp-token"),
+        ("mobile", "移动端", "移动 App", bearer, "bearer"),
         ("cross", "跨平台", "跨平台工具", login, "login"),
         ("fullstack", "前后端分离", "订单中台", bearer, "bearer"),
     ]

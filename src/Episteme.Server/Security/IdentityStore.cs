@@ -109,13 +109,72 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
                 created_unix INTEGER NOT NULL DEFAULT 0,
                 last_used_unix INTEGER NOT NULL DEFAULT 0,
                 revoked INTEGER NOT NULL DEFAULT 0)",
-            @"CREATE UNIQUE INDEX IF NOT EXISTS ix_ep_mcp_tokens_hash ON ep_mcp_tokens (token_hash)"
+            @"CREATE UNIQUE INDEX IF NOT EXISTS ix_ep_mcp_tokens_hash ON ep_mcp_tokens (token_hash)",
+            // Per-account UI preferences (default workspace, etc.). Stored server-side so
+            // the homepage opens the user's chosen space on any browser or device.
+            @"CREATE TABLE IF NOT EXISTS ep_user_prefs (
+                user_id TEXT NOT NULL,
+                pref_key TEXT NOT NULL,
+                pref_value TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (user_id, pref_key))"
         };
         foreach (var sql in ddls)
         {
             await using var cmd = Cmd(conn, sql);
             await cmd.ExecuteNonQueryAsync(ct);
         }
+    }
+
+    // ---------- per-account preferences ----------
+
+    public async Task<string> GetPrefAsync(string userId, string key, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "SELECT pref_value FROM ep_user_prefs WHERE user_id=@u AND pref_key=@k",
+            ("@u", userId), ("@k", key));
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? (Str(reader, 0) ?? "") : "";
+    }
+
+    public async Task SetPrefAsync(string userId, string key, string value, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "INSERT INTO ep_user_prefs (user_id,pref_key,pref_value) VALUES (@u,@k,@v) " +
+            "ON CONFLICT(user_id,pref_key) DO UPDATE SET pref_value=excluded.pref_value",
+            ("@u", userId), ("@k", key), ("@v", value ?? ""));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>Clear a preference that points at a deleted space, for every account.</summary>
+    public async Task<int> ClearPrefValueAsync(string key, string value, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        await using var cmd = Cmd(conn,
+            "UPDATE ep_user_prefs SET pref_value='' WHERE pref_key=@k AND pref_value=@v",
+            ("@k", key), ("@v", value));
+        return await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>Remove all identity rows bound to a deleted space.</summary>
+    public async Task DeleteSpaceBindingsAsync(string spaceId, CancellationToken ct)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var conn = await OpenAsync(db, ct);
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM ep_space_owners WHERE space_id=@s",
+                     "DELETE FROM ep_space_members WHERE space_id=@s"
+                 })
+        {
+            await using var cmd = Cmd(conn, sql, ("@s", spaceId));
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        await ClearPrefValueAsync("default_space_id", spaceId, ct);
     }
 
     public async Task<bool> AnyUserAsync(CancellationToken ct)
@@ -193,6 +252,43 @@ public sealed class IdentityStore(IDbContextFactory<EpistemeDbContext> factory)
             added++;
         }
         return added;
+    }
+
+    /// <summary>
+    /// Upgrade path for account-scoped slugs. Historical databases stored "default" in
+    /// every space's WorkspaceId, so the (WorkspaceId, Slug) index was effectively a
+    /// global slug key. Move each space into its owner's workspace so different accounts
+    /// can use the same slug. Idempotent: only rows still marked "default" are changed.
+    /// </summary>
+    public async Task<int> RekeySpacesByOwnerAsync(CancellationToken ct)
+    {
+        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        await using (var db = await factory.CreateDbContextAsync(ct))
+        {
+            var conn = await OpenAsync(db, ct);
+            await using var cmd = Cmd(conn, "SELECT space_id,user_id FROM ep_space_owners");
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var spaceId = Str(reader, 0);
+                var userId = Str(reader, 1);
+                if (!string.IsNullOrWhiteSpace(spaceId) && !string.IsNullOrWhiteSpace(userId))
+                    owners[spaceId] = userId;
+            }
+        }
+        if (owners.Count == 0) return 0;
+
+        await using var context = await factory.CreateDbContextAsync(ct);
+        var spaces = await context.Spaces.Where(s => s.WorkspaceId == "default").ToListAsync(ct);
+        var changed = 0;
+        foreach (var space in spaces)
+        {
+            if (!owners.TryGetValue(space.Id, out var ownerId) || space.WorkspaceId == ownerId) continue;
+            space.WorkspaceId = ownerId;
+            changed++;
+        }
+        if (changed > 0) await context.SaveChangesAsync(ct);
+        return changed;
     }
 
     // ---------- password ----------

@@ -27,7 +27,7 @@
             '数据都在 Docker 具名卷里。执行 docker compose ... down -v 会清空全部空间、文档与提交历史，请先备份。',
             'Schema 字段类型变更需要显式转换规则；新增必填字段必须给 defaultValue，否则迁移会被拒绝。',
             'PDF 原件最多 20 MiB 且不可编辑；网页抓取由独立 worker 完成，短 HTML 片段会走 Readability 回退，不是错误。',
-            'Android 客户端是未编译验证的骨架；桌面 GUI 只验证过编译与客户端逻辑，未在容器内实际开窗。'
+            '本项目仅提供浏览器 Web SPA；Android / 桌面 / 跨平台客户端已移除，MCP 仅支持 Streamable HTTP（POST /mcp）。'
           ] },
           { type: 'list', items: [
             '任何时候点顶栏「帮助」都能打开本手册；左侧按分组切换主题，搜索框过滤关键词，「阅读全部」可一次浏览完整内容。',
@@ -49,7 +49,7 @@
             { t: '7 · 标注', d: '在「标记 · 锚点」区选高亮 / 下划线 / 批注，填引用原文、行号、页码或 DOM 路径后添加。锚点丢失时用「重新定位到当前选中」修复，「导出为笔记」汇总为新的 Markdown Part。' },
             { t: '8 · 版本与回滚', d: '「版本」Tab 看提交时间线、选中两次提交看并排 diff、点「撤销选中提交」生成反向提交（不改写历史）。' },
             { t: '9 · 用模板加速', d: '「模板」Tab 预览 / 安装内置模板；「导出为 Pack JSON」分享当前空间结构，或粘贴自定义 Pack 后「导入到当前空间」。' },
-            { t: '10 · 外观与移动端', d: '顶栏切换四套浅色主题（浅绿 / 浅蓝 / 浅紫 / 浅粉）；窄屏自动切换为抽屉与底部导航。' }
+            { t: '10 · 外观与移动端', d: '顶栏点「配置」→「外观与状态」切换四套浅色主题（浅绿 / 浅蓝 / 浅紫 / 浅粉）；窄屏自动切换为抽屉与底部导航。' }
           ] },
           { type: 'note', title: '想跳过手工建模？', items: [
             '直接安装「通用阅读台」模板：5 个目录 / 4 个内容类型并带示例文档，演示一份文档同时挂 PDF 原文、Markdown 笔记、网页快照与复现代码。',
@@ -62,8 +62,9 @@
         lead: '整个应用是单页：左侧管结构，中间管 Schema 与录入，右侧五个 Tab 管内容、阅读、版本、Agent 与模板。',
         blocks: [
           { type: 'table', head: ['区域', '作用'], rows: [
-            ['顶栏', '空间切换 / 新建空间、toolsVersion 与能力芯片、四套主题、帮助入口'],
-            ['左栏「目录」', '无限层级物化路径树；「+ 新建目录」可建纯目录或绑定内容类型的集合'],
+            ['顶栏', '空间切换 / 新建空间 /「管理工作空间」/「配置」/ 帮助入口；刷新后自动进入默认空间'],
+            ['配置页', '外观与状态、工作空间管理、账号与授权、我的 MCP Token、管理员管理页面；toolsVersion 与能力芯片也在这里'],
+            ['左栏「目录」', '无限层级物化路径树；「+ 新建目录」可建纯目录或绑定内容类型的集合；每项可上移 / 下移 / 改名移动 / 删除'],
             ['中栏「内容类型」', 'Schema Builder 定义字段；下方动态表单由 /render 契约生成，直接创建文档'],
             ['Tab「文档」', '当前空间的文档列表，点卡片打开阅读器'],
             ['Tab「阅读器」', '四类 Part 切换与编辑、真实媒介导入、标注与锚点重定位、导出笔记'],
@@ -72,7 +73,7 @@
             ['Tab「模板」', '内置模板预览 / 安装 / 导出 / 导入自定义 Pack JSON']
           ] },
           { type: 'list', items: [
-            '顶栏「能力检测中…」芯片来自 GET /capabilities，会显示当前实例的鉴权、数据库、渲染器与抓取能力。',
+            '配置页「外观与状态」里的能力芯片来自 GET /capabilities，会显示当前实例的鉴权、数据库、渲染器与抓取能力。',
             '窄屏（≤768px）下三栏折叠为单列，阅读器工具条改为纵向排列。'
           ] }
         ]
@@ -82,13 +83,16 @@
         lead: '空间是最外层隔离单位；目录是物化路径树，节点既可以只是目录，也可以绑定内容类型成为「集合」。',
         blocks: [
           { type: 'steps', items: [
-            { t: '新建 / 切换空间', d: '空状态卡片或顶栏「+ 空间」创建；下拉框切换。切换会清空阅读器与版本面板的选中状态，避免跨空间串数据。' },
+            { t: '新建 / 切换空间', d: '空状态卡片或顶栏「+ 空间」创建；下拉框切换。切换会清空阅读器与版本面板的选中状态，并自动把该空间记为默认；刷新主页会直接进入它。' },
+            { t: '管理工作空间', d: '顶栏「管理工作空间」或「配置 → 工作空间」：列出全部空间，可改名、改 slug、改说明、设为默认、进入、删除。删除会连同该空间目录、文档与提交历史一起清除，操作不可恢复。' },
             { t: '新建目录', d: '左栏「+ 新建目录」填 /路径，第二栏可填要绑定的内容类型 slug（留空即纯目录）。' },
+            { t: '改 / 移动 / 删 / 排序目录', d: '目录项右侧的「改」可改路径（等于重命名或移动整个子树）、绑定类型、图标与 MCP 暴露；「删」删除目录及子项（需确认）；「↑ / ↓」调整显示顺序，排序结果保存到服务端。' },
             { t: '用 Schema 自动建目录', d: '定义内容类型时填「绑定目录」，保存后会自动创建节点并绑定类型，通常不需要再手工建一次。' }
           ] },
-          { type: 'note', title: '目录也是 Agent 的资源树', items: [
-            '目录结构会通过 MCP 的 tree / resources/list 暴露给 Agent；节点是否暴露由 Schema 的 exposeToMcp 决定。',
-            '每个空间有独立的一条 Commit 链，跨空间不共享版本历史。'
+          { type: 'note', title: '默认空间与目录顺序都会持久化', items: [
+            'users 模式下默认空间按账号保存在服务端 ep_user_prefs，浏览器刷新或换设备仍回到同一个空间；legacy / secure 模式保存在当前浏览器本地。',
+            '目录顺序由 Node.SortOrder 持久化，按界面上移 / 下移后所有客户端都会看到同一顺序；旧库启动时会幂等补齐该字段。',
+            '目录结构会通过 MCP 的 tree / resources/list 暴露给 Agent；节点是否暴露由 exposeToMcp 决定。每个空间有独立的一条 Commit 链。'
           ] }
         ]
       },
@@ -211,9 +215,7 @@
         lead: 'MCP 工具按当前目录树与 Schema 实时生成：你新建一个内容类型，Agent 立刻获得对应的查询 / 新建 / 更新工具，无需重启服务。',
         blocks: [
           { type: 'table', head: ['传输', '接入方式'], rows: [
-            ['Streamable HTTP（主）', 'POST /mcp?space=<slug>，JSON-RPC 2.0，协议版本 2025-06-18'],
-            ['SSE', 'GET /mcp/sse 拿到 /mcp/messages?sessionId=...，再 POST 请求'],
-            ['stdio', '编译 src/Episteme.McpStdio，本地 Agent 用它把 stdin 请求转发到 HTTP MCP']
+            ['Streamable HTTP（唯一）', 'POST /mcp?space=<slug>，JSON-RPC 2.0，协议版本 2025-06-18']
           ] },
           { type: 'steps', items: [
             { t: '先看工具清单', d: '「MCP 工具」Tab 或 tools/list：30 个静态工具 + 每个 exposeToMcp 类型派生的 3 个动态工具。Schema 改过要重新拉一次。' },
@@ -225,7 +227,7 @@
           { type: 'warn', title: 'MCP 当前实现边界', items: [
             'toolsVersion 单调递增并通过 X-Tools-Version 回写，但 notifications/tools/list_changed 主动推送尚未实现，请重新调用 tools/list。',
             'resources/list 只列暴露的节点（episteme://{spaceId}{nodePath}）；resources/read 目前返回提示文本，实际读取请用 tree / read 工具。',
-            'MCP 是自实现的最小 JSON-RPC，未使用官方 SDK；SSE 会话只在单进程内存，多实例部署需共享背板。'
+            'MCP 是自实现的最小 JSON-RPC，仅提供 Streamable HTTP（POST /mcp）一种传输，未使用官方 SDK。'
           ] }
         ]
       },
@@ -234,7 +236,8 @@
         lead: '所有 REST 路径以 /api/v1/episteme 为前缀；响应统一 JSON，业务错误为 { code, message, traceId }。',
         blocks: [
           { type: 'table', head: ['分组', '代表路径'], rows: [
-            ['空间 / 目录', 'GET|POST /spaces、GET /spaces/{id}/tree、POST /spaces/{id}/nodes'],
+            ['空间 / 目录', 'GET|POST /spaces、PATCH|DELETE /spaces/{id}、GET /spaces/{id}/tree、POST /spaces/{id}/nodes、PATCH|DELETE /spaces/{id}/nodes/{nodeId}、POST /spaces/{id}/nodes/reorder'],
+            ['账号偏好', 'GET|PUT /api/v1/auth/me/prefs（默认空间，仅登录会话）'],
             ['Schema', 'GET|POST /spaces/{id}/content-types、.../{slug}/validate、/nodes/{nodeId}/render'],
             ['文档 / Part', '/spaces/{id}/documents、/nodes/{nodeId}/documents、/documents/{docId}/parts'],
             ['标注 / 检索', '/documents/{docId}/annotations、/exports/notes、/spaces/{id}/search'],
@@ -274,10 +277,15 @@
         blocks: [
           { type: 'list', items: [
             '启用：deploy/.env 设置 EPISTEME_AUTH_MODE=users、EPISTEME_AUTH_SECRET（openssl rand -hex 32）、EPISTEME_ADMIN_PASSWORD，重建 api 容器；完整样例见 deploy/users.env.example。',
-            '普通用户可在登录墙自助注册（默认 editor），管理员由首启种子账号创建；之后所有 /api/ 与 /mcp 请求都要带 Authorization: Bearer <token>。',
-            '按账号授权：每个空间只属于一个账号（ep_space_owners），只有归属账号本人与管理员能读写；其他账号一律 403 ACCOUNT_FORBIDDEN。后台不再有「把空间授权给别人」的入口，改为「空间归属」管理与转让。',
+            '普通用户可在登录墙自助注册（默认 editor），管理员由首启种子账号创建。两种凭据严格分离：/api 用 Authorization: Bearer <登录 JWT>，/mcp 用 Bearer epm_... 或 X-Episteme-Mcp-Token；同一请求带两种凭据返回 409 CREDENTIAL_CONFLICT，跨端点使用返回 403 CREDENTIAL_SCOPE_MISMATCH。',
+            '按账号授权：每个空间只属于一个账号（ep_space_owners），只有归属账号本人与管理员能读写；其他账号一律 403 ACCOUNT_FORBIDDEN。空间名与 slug 按账号独立，A 和 B 可以各建一个同名同 slug 的空间。后台不再有「把空间授权给别人」的入口，改为「空间归属」管理与转让。',
             '全局角色 admin / owner / editor / agent / viewer 就是该账号在自己名下所有空间的有效角色；目录结构变更仅 owner，内容写入允许 owner / editor / agent。',
             '任何已登录账号都能创建自己的空间并自动成为归属账号；旧库升级时会按历史 owner 授权或种子管理员自动回填归属，已有数据不会消失。'
+          ] },
+          { type: 'note', title: '登录状态与默认空间', items: [
+            '登录 JWT 与用户身份、默认空间一起缓存在本浏览器；页面刷新时先同步恢复缓存，再用 /auth/me 校验，校验完成前不会发出 /spaces 请求，因此不会因启动竞态误清令牌。',
+            '只有服务端明确返回 401 或主动登出才会清除本地令牌；网络抖动不会让登录态消失。过期令牌在启动时直接识别并提示重新登录。',
+            '默认空间按账号保存到服务端（GET/PUT /api/v1/auth/me/prefs），切换空间即更新；主页刷新、换浏览器或换设备都会自动进入该空间。删除空间时会自动清空指向它的默认偏好。'
           ] },
           { type: 'note', title: '通过 MCP 建代码工作空间', items: [
             '空库时 tools/list 只返回 5 个引导工具；先调 episteme.create_space，参数带 packId=pack_code-workspace 与 includeSamples=true，一次建好四类项目目录与四类提交归档目录。',
@@ -289,9 +297,9 @@
             '同一个 commit 归档到不同 --app-type 时互不覆盖（幂等键包含归档节点）；hook 重跑或 CI 重试不会产生重复文档。'
           ] },
           { type: 'note', title: '我的 MCP Token（每人一个，自助管理）', items: [
-            '登录后顶栏点「我的 MCP Token」：可查看状态 / 令牌提示 / 创建时间 / 最后使用时间，并可生成、重置（旧令牌立即失效）、停用；明文只在生成或重置时显示一次。',
-            '令牌形如 epm_...，服务端只保存 SHA-256 摘要。用法：Authorization: Bearer epm_... 或 X-Episteme-Mcp-Token: epm_...，访问 POST /mcp、GET /mcp/sse；git-sync.py 用 --auth mcp --token <明文> 或环境变量 EPISTEME_MCP_TOKEN。',
-            '令牌与浏览器登录 JWT 相互独立：登出不影响令牌，改密不影响令牌；只有本人登录后才能在「我的 MCP Token」里重置或停用。令牌本身不能管理令牌、不能进管理后台。',
+            '登录后点顶栏「配置」→「账号与授权」→「我的 MCP Token」：可查看状态 / 令牌提示 / 创建时间 / 最后使用时间，并可生成、重置（旧令牌立即失效）、停用；明文只在生成或重置时显示一次。',
+            '令牌形如 epm_...，服务端只保存 SHA-256 摘要。用法：Authorization: Bearer epm_... 或 X-Episteme-Mcp-Token: epm_...，仅访问 POST /mcp（Streamable HTTP）；不能调用 /api，git-sync.py 请改用 --auth login 或 --auth bearer。',
+            '管理员点「配置」→「管理后台」进入独立管理页面，可管理账号、全局角色与空间归属。令牌不能管理令牌、不能进管理后台。',
             '端点：GET / POST|PUT / DELETE /api/v1/auth/me/mcp-token（仅登录会话可用）；MCP 令牌调用会返回 403 MCP_TOKEN_SESSION_REQUIRED。'
           ] },
           { type: 'note', title: 'MCP 为什么只能写进自己的空间', items: [
@@ -305,7 +313,7 @@
             'users 模式下无账号身份的 HMAC 机器通道默认停用（MACHINE_CHANNEL_DISABLED）；只有设置 EPISTEME_MACHINE_USER 显式绑定账号后才启用，且按该账号归属隔离。secure 模式保留原 HMAC 行为。',
             '这是账号级隔离：管理员仍可读全部空间并转让归属；同一空间同一时刻只有一个归属账号，没有共享成员。仍没有单文档 ACL、没有行级加密。',
             '无邮箱验证、密码找回与 SSO；身份表用 raw SQL 幂等建表，不是 EF Migration。',
-            '前端是渐进增强：auth.js 只在 users 模式注入 DOM，legacy / secure 下行为不变。'
+            '前端是渐进增强：顶栏只保留「配置」按钮，主题、能力状态、账号授权与管理员页面都在独立配置页里；auth.js 只在 users 模式注入登录与管理 DOM，legacy / secure 下行为不变。'
           ] }
         ]
       },
@@ -314,10 +322,10 @@
         lead: '这些是明确未做到或有意简化的部分，避免把原型能力误当成生产保证。',
         blocks: [
           { type: 'table', head: ['项目', '现状'], rows: [
-            ['Android', '骨架源码，未编译 APK、未真机验证；富阅读器计划由 WebView 承载'],
-            ['桌面 GUI', '容器内无 X server，只验证编译、ViewModel 与 REST/MCP 客户端，未实际开窗'],
+            ['客户端范围', '仅提供浏览器 Web SPA；不提供 Android / 桌面 / Avalonia 跨平台客户端'],
+            ['MCP 传输', '仅 Streamable HTTP（POST /mcp）；无 SSE / stdio 传输'],
             ['多人协同', '无 CRDT / OT 实时协同，靠 expectParent 乐观锁与冲突提示'],
-            ['SSE / 多实例', '会话只在单进程内存；未接 Redis 背板、对象存储、密钥托管与审计归档'],
+            ['多实例', '未接 Redis 背板、对象存储、密钥托管与审计归档'],
             ['阅读器', 'Monaco / pdf.js 加载失败自动降级；老式 \\f PDF 文本层保持兼容显示'],
             ['secure 模式', '最小实现：无 JWT 刷新 / 撤销、无 TLS 终止、无限流按用户分区'],
             ['users 模式', '无会话表 / 邮箱验证 / 密码找回 / SSO；登录 JWT 到期前不因改密主动失效（MCP 令牌可即时重置），停用账号实时拒绝'],

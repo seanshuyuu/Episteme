@@ -119,13 +119,13 @@ public static class EpistemeSecurity
     }
 
     /// <summary>
-    /// users mode is ACCOUNT-scoped. Three credential channels all resolve to a live
-    /// server-side principal:
-    ///   - login JWT (browser session; the only channel allowed to manage credentials)
-    ///   - per-account MCP token, epm_... (MCP / git-sync / CI; account-owned spaces only)
-    ///   - HMAC, only when explicitly bound to an account via EPISTEME_MACHINE_USER
-    /// The role written downstream is always derived from the account, never from a
-    /// client-supplied header or a per-space grant.
+    /// users mode is ACCOUNT-scoped, with strictly separated credential channels:
+    ///   - login JWT: /api/* only (browser session, credential management, admin console)
+    ///   - per-account MCP token (epm_...): /mcp* only (Streamable HTTP / SSE transports)
+    ///   - HMAC: /api/* only, when explicitly bound via EPISTEME_MACHINE_USER
+    /// A request presenting more than one credential is rejected, and a credential used
+    /// on the wrong endpoint family is rejected too. The role written downstream is
+    /// always derived from the account, never from a client-supplied header.
     /// </summary>
     private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
         AuthenticateUsersAsync(HttpContext ctx)
@@ -141,31 +141,53 @@ public static class EpistemeSecurity
 
         var store = ctx.RequestServices.GetRequiredService<IdentityStore>();
         var ct = ctx.RequestAborted;
+        var prefix = IdentityStore.McpTokenPrefix;
 
-        // 1) HMAC machine channel. In users mode an identity-less super-user credential
-        //    contradicts account authorization, so it is off unless explicitly bound.
-        var keyId = ctx.Request.Headers["X-Episteme-Key"].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(keyId))
-            return await AuthenticateMachineAsync(ctx, keyId, secret, store);
-
+        var keyId = ctx.Request.Headers["X-Episteme-Key"].FirstOrDefault()?.Trim() ?? "";
         var authorization = ctx.Request.Headers.Authorization.ToString();
         var bearer = !string.IsNullOrWhiteSpace(authorization) &&
                      authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
             ? authorization[7..].Trim() : "";
         var headerToken = ctx.Request.Headers["X-Episteme-Mcp-Token"].FirstOrDefault()?.Trim() ?? "";
+        var isMcpPath = path.StartsWith("/mcp", StringComparison.OrdinalIgnoreCase);
+        var bearerIsMcp = bearer.StartsWith(prefix, StringComparison.Ordinal);
+        var headerIsMcp = !string.IsNullOrWhiteSpace(headerToken);
 
-        // 2) Per-account MCP token: Bearer epm_... or the dedicated header.
-        var mcpToken = bearer.StartsWith(IdentityStore.McpTokenPrefix, StringComparison.Ordinal)
-            ? bearer
-            : (headerToken.StartsWith(IdentityStore.McpTokenPrefix, StringComparison.Ordinal)
-                ? headerToken : "");
-        if (!string.IsNullOrWhiteSpace(mcpToken))
-            return await AuthenticateMcpTokenAsync(ctx, mcpToken, store);
+        // A request must present exactly one credential. Silently preferring one of
+        // several headers is how JWT and MCP tokens used to get mixed up.
+        var presented = (string.IsNullOrWhiteSpace(keyId) ? 0 : 1) +
+                        (string.IsNullOrWhiteSpace(bearer) ? 0 : 1) + (headerIsMcp ? 1 : 0);
+        if (presented > 1)
+            return Fail(409, "CREDENTIAL_CONFLICT",
+                "同一请求只能携带一种凭据：登录 JWT、epm_ MCP 令牌与 HMAC 签名不可同时使用");
+        if (headerIsMcp && !headerToken.StartsWith(prefix, StringComparison.Ordinal))
+            return Fail(401, "MCP_TOKEN_INVALID", "X-Episteme-Mcp-Token 必须是 epm_ 开头的令牌");
+        if (presented == 0)
+            return Fail(401, "UNAUTHORIZED", isMcpPath
+                ? "MCP 端点需要 Authorization: Bearer <epm_ MCP 令牌> 或 X-Episteme-Mcp-Token"
+                : "API 端点需要 Authorization: Bearer <登录 JWT>");
 
-        // 3) Login JWT (browser session).
+        // Endpoint family is fixed by the credential type. No cross-use, no fallback.
+        if (isMcpPath)
+        {
+            if (!string.IsNullOrWhiteSpace(keyId) || (!bearerIsMcp && !headerIsMcp))
+                return Fail(403, "CREDENTIAL_SCOPE_MISMATCH",
+                    "MCP 端点只接受 epm_ MCP 令牌；登录 JWT 与 HMAC 签名只能用于 /api 端点");
+            return await AuthenticateMcpTokenAsync(
+                ctx, bearerIsMcp ? bearer : headerToken, store);
+        }
+
+        if (bearerIsMcp || headerIsMcp)
+            return Fail(403, "CREDENTIAL_SCOPE_MISMATCH",
+                "epm_ MCP 令牌只能用于 /mcp 端点；API 请求请使用账号登录 JWT");
+
+        // HMAC machine channel. In users mode it is off unless explicitly bound.
+        if (!string.IsNullOrWhiteSpace(keyId))
+            return await AuthenticateMachineAsync(ctx, keyId, secret, store);
+
+        // Login JWT (browser session).
         if (string.IsNullOrWhiteSpace(bearer))
-            return Fail(401, "UNAUTHORIZED",
-                "需要 Authorization: Bearer <登录 JWT 或 epm_ MCP 令牌>");
+            return Fail(401, "UNAUTHORIZED", "API 端点需要 Authorization: Bearer <登录 JWT>");
 
         var (valid, code, userId, _) = IdentityTokens.Verify(bearer, secret);
         if (!valid) return Fail(401, code, "登录令牌无效或已过期，请重新登录");
@@ -183,8 +205,8 @@ public static class EpistemeSecurity
     }
 
     /// <summary>
-    /// Opaque per-account MCP token. Reset/revoke takes effect on the very next request
-    /// because the stored digest is replaced / flagged; no revocation list is needed.
+    /// Opaque per-account MCP token, accepted only on /mcp* endpoints. Reset/revoke takes
+    /// effect on the very next request because the stored digest is replaced / flagged.
     /// </summary>
     private static async Task<(bool Ok, int Status, string Code, string Message, string Role)>
         AuthenticateMcpTokenAsync(HttpContext ctx, string token, IdentityStore store)
@@ -221,7 +243,7 @@ public static class EpistemeSecurity
         var machineUser = EpistemeConfig.MachineUser();
         if (string.IsNullOrWhiteSpace(machineUser))
             return Fail(401, "MACHINE_CHANNEL_DISABLED",
-                "users 模式已改为按账号授权：无账号身份的 HMAC 通道已停用。请在「我的 MCP Token」生成令牌并以 Bearer 使用，或设置 EPISTEME_MACHINE_USER 显式绑定账号");
+                "users 模式已改为按账号授权：无账号身份的 HMAC 通道已停用。API 请求请使用账号登录 JWT，或设置 EPISTEME_MACHINE_USER 显式绑定账号");
 
         var machine = await VerifyHmacAsync(ctx, keyId, secret);
         if (!machine.Ok) return machine;
@@ -282,17 +304,23 @@ public static class EpistemeSecurity
         await using var db = await ctx.RequestServices
             .GetRequiredService<IDbContextFactory<EpistemeDbContext>>()
             .CreateDbContextAsync(ctx.RequestAborted);
+        var machineUser = EpistemeConfig.MachineUser() ?? "";
         var ids = new List<string>();
         foreach (var token in tokens)
         {
             var row = await db.Spaces.FirstOrDefaultAsync(
-                s => s.Id == token || s.Slug == token, ctx.RequestAborted);
+                s => s.Id == token || (s.Slug == token && s.WorkspaceId == machineUser),
+                ctx.RequestAborted);
             ids.Add(row?.Id ?? token);
         }
         return ids.Distinct(StringComparer.Ordinal).ToArray();
     }
 
-    /// <summary>Resolve the target space (id or slug) from path, ?space= or an MCP params body.</summary>
+    /// <summary>
+    /// Resolve the target space (id or slug) from path, ?space= or an MCP params body.
+    /// Slugs are account-scoped: a non-admin never resolves another account's slug to
+    /// that space's id, so the ownership guard below cannot be bypassed by a collision.
+    /// </summary>
     private static async Task<(string Raw, string Resolved)> SpaceIdForRequestAsync(
         HttpContext ctx, IdentityStore store)
     {
@@ -309,13 +337,18 @@ public static class EpistemeSecurity
         if (string.IsNullOrWhiteSpace(raw)) raw = await McpSpaceFromBodyAsync(ctx);
         if (string.IsNullOrWhiteSpace(raw)) return ("", "");
 
-        // Resolve slug -> id so grants (stored by id) match. Fall back to the raw value
-        // so an unknown space still yields 404/403 rather than silently becoming public.
+        // Resolve slug -> id so ownership (stored by id) matches. Fall back to the raw
+        // value so an unknown space still yields 404/403 rather than becoming public.
         await using var db = await ctx.RequestServices
             .GetRequiredService<IDbContextFactory<EpistemeDbContext>>()
             .CreateDbContextAsync(ctx.RequestAborted);
-        var space = await db.Spaces.FirstOrDefaultAsync(
-            s => s.Id == raw || s.Slug == raw, ctx.RequestAborted);
+        var principal = ctx.Items["EpistemePrincipal"] as UserPrincipal;
+        var space = principal is not null && !principal.IsAdmin
+            ? await db.Spaces.FirstOrDefaultAsync(
+                s => (s.Id == raw || s.Slug == raw) &&
+                     (s.Id == raw || principal.OwnedSpaceIds.Contains(s.Id)), ctx.RequestAborted)
+            : await db.Spaces.FirstOrDefaultAsync(
+                s => s.Id == raw || s.Slug == raw, ctx.RequestAborted);
         return (raw, space?.Id ?? raw);
     }
 

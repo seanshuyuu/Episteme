@@ -16,10 +16,9 @@ Authentication (matches Episteme secure / users modes):
   --auth jwt     HS256 Bearer token built from --secret
   --auth hmac    X-Episteme-Key / Timestamp / Nonce / Signature / Role,
                  canonical = method\\npath\\nquery\\ntimestamp\\nnonce\\nrole\\nbodySha256
-  --auth bearer  --token <登录 JWT 或 epm_ MCP 令牌>
+  --auth bearer  --token <登录 JWT>（只调用 /api 端点）
   --auth login   --user / --password 调 /api/v1/auth/login 自动换取令牌
-  --auth mcp     --token / EPISTEME_MCP_TOKEN：每账号长期 MCP 令牌（推荐用于 CI），
-                 令牌只能写该账号名下的空间
+  --auth mcp     已停用：epm_ 令牌只能调用 /mcp，git-sync 的 /api 通道请用 bearer/login
 
 Application-type routing (pack_code-workspace):
   --app-type desktop|mobile|cross|fullstack 自动把 --node-path 指向对应归档目录
@@ -161,11 +160,9 @@ class Client:
         self.user = user or env_default("EPISTEME_USER")
         self.password = password or env_default("EPISTEME_PASSWORD")
         if self.auth == "mcp":
-            self.token = self.token or env_default("EPISTEME_MCP_TOKEN")
-            if not self.token:
-                raise SyncError("--auth mcp 需要 --token / EPISTEME_MCP_TOKEN（在「我的 MCP Token」生成）")
-            if not self.token.startswith("epm_"):
-                raise SyncError("MCP 令牌应以 epm_ 开头；登录 JWT 请改用 --auth bearer")
+            raise SyncError(
+                "--auth mcp 已停用：epm_ MCP 令牌只能用于 /mcp 端点，不能调用 git-sync 的 /api 端点。"
+                "请改用 --auth login（账号密码）或 --auth bearer（登录 JWT）")
         if self.auth == "login" and (not self.user or not self.password):
             raise SyncError("--auth login 需要 --user / --password")
         if self.auth == "login":
@@ -506,7 +503,7 @@ def parse_args(argv=None):
     p.add_argument("--branch", default="")
     p.add_argument("--auth", choices=["legacy", "secure", "jwt", "hmac", "bearer", "login", "mcp"],
                    default=env_default("EPISTEME_AUTH_MODE", "legacy"),
-                   help="secure 等价于 hmac；bearer/login/mcp 用于 users 账号模式；默认 legacy")
+                   help="secure 等价于 hmac；bearer/login 用于 users 账号模式；mcp 已停用（epm_ 仅用于 /mcp）")
     p.add_argument("--secret", default=env_default("EPISTEME_AUTH_SECRET"))
     p.add_argument("--key-id", default=env_default("EPISTEME_API_KEY_ID", "git-sync"))
     p.add_argument("--role", default=env_default("EPISTEME_SYNC_ROLE", "owner"))

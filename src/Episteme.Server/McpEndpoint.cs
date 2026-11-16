@@ -25,13 +25,11 @@ public static class McpEndpoint
             ["transport"] = "Streamable HTTP", ["protocolVersion"] = "2025-06-18",
             ["endpoints"] = new JsonObject
             {
-                ["rpc"] = "POST /mcp", ["sse"] = "GET /mcp/sse",
-                ["messages"] = "POST /mcp/messages?sessionId=...",
-                ["stdio"] = "src/Episteme.McpStdio（独立进程转发）",
+                ["rpc"] = "POST /mcp",
                 ["debugTools"] = "GET /mcp/tools?space={slug}"
             },
             ["capabilities"] = "GET /api/v1/episteme/capabilities",
-            ["note"] = "POST /mcp 为完整 JSON-RPC 通道；SSE 与 stdio 为额外传输，共用同一 Dispatch"
+            ["note"] = "POST /mcp 是唯一 MCP 传输：Streamable HTTP + JSON-RPC 2.0"
         }));
 
         app.MapGet("/mcp/tools", async (HttpContext http, EpistemeService svc) =>
@@ -70,10 +68,7 @@ public static class McpEndpoint
         return Results.Json(await ProcessAsync(http, svc, body));
     }
 
-    /// <summary>
-    /// Transport-independent JSON-RPC core. POST /mcp returns the envelope directly;
-    /// the SSE transport pushes exactly the same envelope onto the event stream.
-    /// </summary>
+    /// <summary>Streamable HTTP JSON-RPC core behind POST /mcp.</summary>
     internal static async Task<JsonObject> ProcessAsync(HttpContext http, EpistemeService svc, JsonObject body)
     {
         var id = body["id"]?.DeepClone();

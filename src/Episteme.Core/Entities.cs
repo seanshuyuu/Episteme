@@ -59,6 +59,8 @@ public sealed class Node
     public bool ExposeToMcp { get; set; } = true;
     public string? DefaultPartKind { get; set; }
     public string Icon { get; set; } = "folder";
+    /// <summary>User-defined sibling order; lower values render first.</summary>
+    public int SortOrder { get; set; }
 }
 
 public sealed class ContentType

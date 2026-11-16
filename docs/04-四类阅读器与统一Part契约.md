@@ -155,7 +155,7 @@ Web 标注把 `page/rect` 换成 `domPath + textQuote + textPosition`，其余�
 - **全局搜索**：PostgreSQL FTS + `zhparser` 中文分词；PDF / Web 抽取文本也进索引；结果按 Part 类型分组，命中处高亮。
 - **命令面板**：`Ctrl/Cmd+K` 搜索文档 / 跳转版本 / 执行 MCP 工具预览。
 - **主题**：沿用 `design/tokens.json` 四套浅色主题；PDF / 代码高亮有独立暗色可选（阅读器内部），不污染全局主题真源。
-- **三端差异**：Web 提供完整编辑与四类加载；Avalonia 桌面 / Android 提供目录浏览、Schema 表单、Markdown/Code 轻量编辑与**标注审阅**，PDF/Web 富渲染通过内置 WebView 或跳转 Web 端完成（承接方案 A 的两套 UI 边界）。
+- **客户端范围（2026-11-16）**：仅 Web 提供完整编辑与四类加载；原 Avalonia 桌面 / Android 轻量端已移除（本条为历史设计记录）。
 
 ---
 

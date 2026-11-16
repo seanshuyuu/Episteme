@@ -15,14 +15,25 @@
   var ADMIN = '/api/v1/admin';
   var API = '/api/v1/episteme';
   var KEY = 'episteme.auth.token';
+  var USER_KEY = 'episteme.auth.user';
+  var DEFAULT_KEY = 'episteme.defaultSpace';
   var ROLES = ['admin', 'owner', 'editor', 'agent', 'viewer'];
 
   var state = {
     mode: 'legacy', token: '', user: null, isAdmin: false,
+    defaultSpaceId: '', initializing: true, readyResolve: null, readyPromise: null,
     config: null, users: [], spaces: [], owners: [],
     adminOpen: false, tokenOpen: false, tokenInfo: null, tokenPlain: '',
+    tokenSpaceSlug: '',
     tab: 'login', busy: false
   };
+
+  // Synchronous bootstrap. app.js must never fire an API request before the token and
+  // cached identity are available, otherwise a startup 401 can wipe a valid token.
+  state.token = loadToken();
+  state.user = loadUser();
+  state.defaultSpaceId = loadDefaultSpace();
+  state.readyPromise = new Promise(function (resolve) { state.readyResolve = resolve; });
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -44,7 +55,11 @@
     });
     var data = {};
     try { data = await res.json(); } catch (e) { /* empty body */ }
-    if (!res.ok) throw new Error(data.message || ('HTTP ' + res.status));
+    if (!res.ok) {
+      var err = new Error(data.message || ('HTTP ' + res.status));
+      err.status = res.status;
+      throw err;
+    }
     return data;
   }
 
@@ -55,10 +70,67 @@
     } else {
       try { localStorage.removeItem(KEY); } catch (e) { /* storage disabled */ }
     }
-    if (user) { state.user = user; state.isAdmin = (user.globalRole === 'admin'); }
+    if (user) {
+      state.user = user;
+      state.isAdmin = (user.globalRole === 'admin');
+      try { localStorage.setItem(USER_KEY, JSON.stringify(user)); } catch (e) { /* storage disabled */ }
+    }
+    if (!value) {
+      state.user = null;
+      state.isAdmin = false;
+      try { localStorage.removeItem(USER_KEY); } catch (e) { /* storage disabled */ }
+    }
+    state.defaultSpaceId = loadDefaultSpace();
   }
   function loadToken() {
     try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; }
+  }
+  function loadUser() {
+    try {
+      var raw = localStorage.getItem(USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+  // Per-account cache keeps one browser from leaking a default space across users.
+  function defaultKey() {
+    return state.user && state.user.id ? DEFAULT_KEY + '.' + state.user.id : DEFAULT_KEY;
+  }
+  function loadDefaultSpace() {
+    try { return localStorage.getItem(defaultKey()) || ''; } catch (e) { return ''; }
+  }
+  function persistDefaultSpace(id) {
+    state.defaultSpaceId = id || '';
+    try {
+      if (state.defaultSpaceId) localStorage.setItem(defaultKey(), state.defaultSpaceId);
+      else localStorage.removeItem(defaultKey());
+    } catch (e) { /* storage disabled */ }
+  }
+  function defaultSpace() { return state.defaultSpaceId || ''; }
+
+  // Avoid sending an already-expired JWT on bootstrap: decode exp without verifying
+  // the signature (the server still does that on every request).
+  function tokenUsable() {
+    if (!state.token) return false;
+    var parts = state.token.split('.');
+    if (parts.length < 2) return true;
+    try {
+      var raw = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      var payload = JSON.parse(typeof atob === 'function' ? atob(raw) : '{}');
+      return !payload.exp || payload.exp * 1000 > Date.now() + 1000;
+    } catch (e) { return true; }
+  }
+
+  async function setDefaultSpace(spaceId) {
+    var id = spaceId || '';
+    persistDefaultSpace(id);
+    if (state.mode === 'users' && state.token) {
+      try {
+        await request(AUTH, '/me/prefs', {
+          method: 'PUT', body: JSON.stringify({ defaultSpaceId: id })
+        });
+      } catch (e) { /* local choice stands; server reconciles on next /me */ }
+    }
+    return id;
   }
 
   // ---------- DOM scaffold (created lazily, only in users mode) ----------
@@ -117,14 +189,15 @@
       '      <button data-auth-action="token-generate" id="btn-token-generate" class="primary">生成令牌</button>' +
       '      <button data-auth-action="token-reset" id="btn-token-reset" class="ghost hidden">重置令牌</button>' +
       '      <button data-auth-action="token-revoke" id="btn-token-revoke" class="ghost danger hidden">停用</button>' +
-      '      <button data-auth-action="token-copy" id="btn-token-copy" class="ghost hidden">复制</button>' +
+      '      <button data-auth-action="token-copy" id="btn-token-copy" class="ghost hidden">复制令牌</button>' +
+      '      <button data-auth-action="token-copy-config" id="btn-token-copy-config" class="ghost hidden">复制配置 JSON</button>' +
       '    </div>' +
       '    <div class="token-usage">' +
       '      <div class="subhead">用法</div>' +
       '      <pre>Authorization: Bearer &lt;epm_...&gt;\n' +
-      'POST /mcp        JSON-RPC tools/list / tools/call\n' +
-      'GET  /mcp/sse    SSE 传输\n' +
-      'python3 tools/git-sync.py --auth bearer --token &lt;明文&gt; --space &lt;自己空间的 id&gt;</pre>' +
+      'POST /mcp        Streamable HTTP / JSON-RPC tools/list / tools/call\n' +
+      'X-Episteme-Mcp-Token: &lt;epm_...&gt; 也可替代 Bearer\n' +
+      'MCP 令牌不能调用 /api；API 请用账号登录 JWT</pre>' +
       '    </div>' +
       '    <p id="token-hint" class="hint"></p>' +
       '  </div>' +
@@ -146,33 +219,9 @@
       if (state.tokenOpen) closeToken();
       else if (state.adminOpen) closeAdmin();
     });
-    // topbar identity chip placed after the help button
-    var topbar = document.querySelector('.topbar-meta');
-    if (topbar) {
-      var chip = document.createElement('span');
-      chip.id = 'auth-user-chip';
-      chip.className = 'chip auth-chip hidden';
-      topbar.appendChild(chip);
-      var tok = document.createElement('button');
-      tok.id = 'btn-token';
-      tok.className = 'ghost hidden';
-      tok.setAttribute('data-auth-action', 'open-token');
-      tok.textContent = '我的 MCP Token';
-      topbar.appendChild(tok);
-      var btn = document.createElement('button');
-      btn.id = 'btn-admin';
-      btn.className = 'ghost hidden';
-      btn.setAttribute('data-auth-action', 'open-admin');
-      btn.textContent = '管理后台';
-      topbar.appendChild(btn);
-      var out = document.createElement('button');
-      out.id = 'btn-logout';
-      out.className = 'ghost hidden';
-      out.setAttribute('data-auth-action', 'logout');
-      out.textContent = '登出';
-      topbar.appendChild(out);
-      topbar.addEventListener('click', onAuthClick);
-    }
+    // Identity controls live in the standalone config page, never in the topbar.
+    var config = $('config-overlay');
+    if (config) config.addEventListener('click', onAuthClick);
   }
 
   function hint(id, msg, kind) {
@@ -224,6 +273,7 @@
         method: 'POST', body: JSON.stringify({ userName: u, password: p })
       });
       saveToken(res.token, res.user);
+      if (res.defaultSpaceId !== undefined) persistDefaultSpace(res.defaultSpaceId);
       // The login response already carries the user, so paint the identity chip
       // immediately instead of leaving a blank topbar until /auth/me returns.
       renderIdentity();
@@ -252,6 +302,7 @@
         })
       });
       saveToken(res.token, res.user);
+      if (res.defaultSpaceId !== undefined) persistDefaultSpace(res.defaultSpaceId);
       renderIdentity();
       closeLogin();
       await refreshMe();
@@ -266,27 +317,39 @@
       var me = await request(AUTH, '/me');
       state.user = me.user;
       state.isAdmin = !!me.isAdmin;
+      if (me.defaultSpaceId !== undefined) persistDefaultSpace(me.defaultSpaceId);
+      try { localStorage.setItem(USER_KEY, JSON.stringify(me.user)); } catch (e) { /* storage disabled */ }
       renderIdentity();
     } catch (e) {
-      saveToken('');
-      state.user = null; state.isAdmin = false;
-      renderIdentity();
-      openLogin('登录已失效，请重新登录');
+      if (e.status === 401) {
+        saveToken('');
+        state.user = null; state.isAdmin = false;
+        renderIdentity();
+        openLogin('登录已失效，请重新登录');
+      } else {
+        // A refresh must not silently log the user out because of a network blip.
+        // The cached token stays; the next request will still carry it.
+        hint('auth-hint', '账号信息暂不可用，已保留本地登录令牌', 'error');
+      }
     }
   }
 
   function renderIdentity() {
-    var chip = $('auth-user-chip'), tokBtn = $('btn-token'), adminBtn = $('btn-admin'), out = $('btn-logout');
+    var chip = $('auth-user-chip'), tokBtn = $('btn-token'), adminBtn = $('btn-admin'),
+        out = $('btn-logout'), loginBtn = $('config-login'), adminEntry = $('config-admin-entry');
     if (!chip) return;
     if (!state.user) {
-      hide(chip); hide(tokBtn); hide(adminBtn); hide(out);
+      hide(chip); hide(tokBtn); hide(adminBtn); hide(out); hide(adminEntry);
+      show(loginBtn);
       return;
     }
     chip.textContent = state.user.displayName + ' · ' + state.user.globalRole;
     show(chip);
     show(tokBtn);
     show(out);
-    if (state.isAdmin) show(adminBtn); else hide(adminBtn);
+    hide(loginBtn);
+    if (state.isAdmin) { show(adminBtn); show(adminEntry); }
+    else { hide(adminBtn); hide(adminEntry); }
   }
 
   // jsdom has no native dialogs; a guarded helper keeps the DOM regression headless.
@@ -307,7 +370,7 @@
 
   // Called by app.js when any API request returns 401.
   function onUnauthorized() {
-    if (!EpistemeConfigUsers()) return;
+    if (!EpistemeConfigUsers() || state.initializing) return;
     saveToken('');
     state.user = null; state.isAdmin = false;
     state.tokenInfo = null; state.tokenPlain = '';
@@ -379,18 +442,59 @@
     }
   }
 
+  function currentSpaceSlug() {
+    try {
+      var app = window.EpistemeApp && window.EpistemeApp.getState && window.EpistemeApp.getState();
+      var spaces = (app && app.spaces) || [];
+      var active = spaces.filter(function (s) { return s.id === app.spaceId; })[0] || spaces[0];
+      if (active && active.slug) return active.slug;
+    } catch (e) { /* SPA may not be loaded yet */ }
+    return state.tokenSpaceSlug || 'my-lib';
+  }
+
+  async function loadTokenSpaceSlug() {
+    try {
+      var res = await request(API, '/spaces');
+      var spaces = res.items || [];
+      if (spaces.length && spaces[0].slug) state.tokenSpaceSlug = spaces[0].slug;
+    } catch (e) { /* keep the current / placeholder slug */ }
+  }
+
+  function buildMcpConfigs(token) {
+    var slug = currentSpaceSlug();
+    var origin = (window.location && window.location.origin) || 'http://127.0.0.1:5080';
+    return JSON.stringify({
+      mcpServers: {
+        episteme: {
+          type: 'http',
+          url: origin + '/mcp?space=' + encodeURIComponent(slug),
+          headers: { Authorization: 'Bearer ' + token }
+        }
+      }
+    }, null, 2);
+  }
+
   function renderTokenReveal() {
-    var box = $('token-reveal'), copy = $('btn-token-copy');
+    var box = $('token-reveal'), copy = $('btn-token-copy'), copyConfig = $('btn-token-copy-config');
     if (!box) return;
     if (!state.tokenPlain) {
-      box.innerHTML = ''; hide(box); if (copy) hide(copy); return;
+      box.innerHTML = ''; hide(box);
+      if (copy) hide(copy);
+      if (copyConfig) hide(copyConfig);
+      return;
     }
+    var json = buildMcpConfigs(state.tokenPlain);
     box.innerHTML =
       '<div class="token-once-title">新令牌（仅显示这一次，请立即复制）</div>' +
       '<code id="token-plain">' + esc(state.tokenPlain) + '</code>' +
-      '<div class="token-once-note">服务端只保存 SHA-256 摘要；关闭窗口后无法再次查看明文。</div>';
+      '<div class="token-config-title">MCP 客户端配置 JSON（Streamable HTTP，已填入令牌，整段复制即可）</div>' +
+      '<pre id="token-config-json">' + esc(json) + '</pre>' +
+      '<div class="token-once-note">' +
+      '默认使用当前空间；如需连接自己的其他空间，把 JSON 中的空间标识换成对应 slug。</div>' +
+      '<div class="token-once-note">服务端只保存 SHA-256 摘要；关闭窗口后无法再次查看明文，请勿分享这段配置。</div>';
     show(box);
     if (copy) show(copy);
+    if (copyConfig) show(copyConfig);
   }
 
   async function rotateToken() {
@@ -404,6 +508,7 @@
         method: 'POST', body: JSON.stringify({ action: had ? 'reset' : 'generate' })
       });
       state.tokenPlain = res.token || '';
+      await loadTokenSpaceSlug();
       renderTokenReveal();
       await loadTokenStatus();
       hint('token-hint', had ? '已重置，旧令牌已失效' : '已生成专属 MCP 令牌', 'ok');
@@ -422,16 +527,25 @@
     } catch (e) { hint('token-hint', e.message, 'error'); }
   }
 
-  function copyToken() {
-    if (!state.tokenPlain) return;
+  function copyText(value, message, fallback) {
+    if (!value) return;
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(state.tokenPlain);
-        hint('token-hint', '已复制到剪贴板', 'ok');
+        navigator.clipboard.writeText(value);
+        hint('token-hint', message, 'ok');
         return;
       }
     } catch (e) { /* clipboard unavailable */ }
-    hint('token-hint', '请选中上方令牌文本手动复制', 'ok');
+    hint('token-hint', fallback, 'ok');
+  }
+
+  function copyToken() {
+    copyText(state.tokenPlain, '已复制到剪贴板', '请选中上方令牌文本手动复制');
+  }
+
+  function copyTokenConfig() {
+    copyText(buildMcpConfigs(state.tokenPlain),
+      '配置 JSON 已复制到剪贴板', '请选中上方配置 JSON 手动复制');
   }
 
   // ---------- admin console ----------
@@ -564,6 +678,7 @@
     try {
       if (action === 'tab-login') setTab('login');
       else if (action === 'tab-register') setTab('register');
+      else if (action === 'open-login') openLogin();
       else if (action === 'login') await doLogin();
       else if (action === 'register') await doRegister();
       else if (action === 'logout') logout();
@@ -574,6 +689,7 @@
       else if (action === 'token-generate' || action === 'token-reset') await rotateToken();
       else if (action === 'token-revoke') await revokeToken();
       else if (action === 'token-copy') copyToken();
+      else if (action === 'token-copy-config') copyTokenConfig();
       else if (action === 'admin-users') {
         state.adminTab = 'users';
         document.querySelectorAll('.admin-tabs button').forEach(function (b) { b.classList.remove('active'); });
@@ -637,40 +753,54 @@
 
   // ---------- bootstrap ----------
 
+  // One stable provider object from the very first script tick: app.js can safely
+  // await ready() and read token() before /auth/config resolves.
+  var provider = {
+    token: token, onUnauthorized: onUnauthorized, mode: 'legacy',
+    ready: function () { return state.readyPromise; },
+    defaultSpace: defaultSpace, setDefaultSpace: setDefaultSpace
+  };
+  window.EpistemeAuth = provider;
+
   async function init() {
     try {
-      var res = await fetch(AUTH + '/config');
-      var cfg = res.ok ? await res.json() : {};
-      state.mode = cfg.mode || 'legacy';
-      state.config = cfg;
-    } catch (e) { state.mode = 'legacy'; }
+      try {
+        var res = await fetch(AUTH + '/config');
+        var cfg = res.ok ? await res.json() : {};
+        state.mode = cfg.mode || 'legacy';
+        state.config = cfg;
+      } catch (e) { state.mode = 'legacy'; }
+      provider.mode = state.mode;
 
-    if (state.mode !== 'users') {
-      // Legacy/secure: expose a no-op token provider and stop. Nothing else changes.
-      window.EpistemeAuth = { token: token, onUnauthorized: onUnauthorized, mode: state.mode };
-      return;
-    }
+      if (state.mode !== 'users') {
+        // Legacy/secure: no login wall, but the cached default space still applies.
+        return;
+      }
 
-    scaffold();
-    window.EpistemeAuth = {
-      token: token, onUnauthorized: onUnauthorized, mode: state.mode,
-      refreshMe: refreshMe, openAdmin: openAdmin, openToken: openToken, logout: logout
-    };
-    state.adminTab = 'users';
-    var stored = loadToken();
-    if (stored) {
-      state.token = stored;
-      await refreshMe();
-      if (state.user) closeLogin();
-      else openLogin();
-    } else {
-      openLogin();
+      scaffold();
+      Object.assign(provider, {
+        refreshMe: refreshMe, openAdmin: openAdmin, openToken: openToken, logout: logout
+      });
+      state.adminTab = 'users';
+      if (state.token && !tokenUsable()) {
+        saveToken('');
+        openLogin('登录已过期，请重新登录');
+      } else if (state.token) {
+        renderIdentity();
+        await refreshMe();
+        if (state.user) closeLogin();
+        else openLogin();
+      } else {
+        openLogin();
+      }
+    } catch (e) {
+      // Never leave app.js waiting forever, even if bootstrapping fails.
+      if (state.mode === 'users' && $('auth-overlay')) openLogin();
+    } finally {
+      state.initializing = false;
+      state.readyResolve();
     }
   }
-
-  // Expose a no-op token synchronously so app.js never sees an undefined provider,
-  // even if it initializes before the /config round-trip finishes.
-  window.EpistemeAuth = { token: token, onUnauthorized: onUnauthorized, mode: 'legacy' };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

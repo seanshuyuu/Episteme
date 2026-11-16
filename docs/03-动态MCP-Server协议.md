@@ -18,9 +18,8 @@
 
 | 项 | 值 |
 |---|---|
-| 远程 | Streamable HTTP，`POST/GET https://{host}/mcp`；SSE 兼容回退 |
-| 本地 | stdio（桌面端 Avalonia 内置，供离线 / 低延迟场景） |
-| 协议版本 | 实现阶段锁定 `ModelContextProtocol` C# SDK 版本，头部带 `MCP-Protocol-Version` |
+| 唯一传输 | Streamable HTTP：`POST https://{host}/mcp`（`GET /mcp` 返回传输元信息）；无 SSE / stdio |
+| 协议版本 | JSON-RPC 2.0，头部带 `MCP-Protocol-Version: 2025-06-18`；自实现最小协议栈，不依赖官方 SDK |
 | 会话 | `Mcp-Session-Id`；服务端无状态，会话状态可由 JWT / 幂等键重建 |
 | 空间路由 | `/mcp?space={slug}` 或工具参数 `spaceId`；**一次连接只绑定一个 Space**，避免工具描述爆炸 |
 | OpenAPI | 现有 `/openapi.json` 保留；MCP 工具清单另提供 `GET /api/v1/episteme/mcp/tools` 便于调试 |
@@ -28,7 +27,7 @@
 ### 2.1 鉴权（沿用现有，不重复造轮子）
 
 - **API Key + HMAC-SHA256**：`X-Key-Id`、`X-Timestamp`、`X-Nonce`、`X-Signature`，签名串顺序固定（时间戳 → Nonce → Key → Body），承接 v3.2 已修好的中间件顺序。
-- **JWT Bearer**：交互式 Agent / 桌面端登录后使用。
+- **JWT Bearer**：交互式 Agent / Web 登录后使用。
 - `tools/call` 每次都独立校验 scope；连接建立时的身份不等于调用授权。
 - Nonce 由进程内缓存升级为 Redis（平台化后多实例必需）。
 - 新增 MCP 专用 scope：`episteme:read` / `episteme:write` / `episteme:schema` / `episteme:version` / `episteme:annotate`。

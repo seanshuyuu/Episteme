@@ -8,10 +8,7 @@
 episteme.example.com {
 	encode zstd gzip
 
-	# flush_interval -1 关闭响应缓冲，SSE (/mcp/sse) 才能逐事件下发
-	reverse_proxy 127.0.0.1:5080 {
-		flush_interval -1
-	}
+	reverse_proxy 127.0.0.1:5080
 
 	log {
 		output file /var/log/caddy/episteme.log
