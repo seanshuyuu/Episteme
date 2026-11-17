@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episteme 后端基础实现与测试报告</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17233b;
+      --muted: #59677f;
+      --line: #dce4ef;
+      --paper: #fff;
+      --canvas: #f3f6fb;
+      --blue: #315bd6;
+      --blue-soft: #edf2ff;
+      --green: #147d63;
+      --green-soft: #e8f7f1;
+      --amber: #996200;
+      --amber-soft: #fff6df;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); line-height: 1.68; }
+    .hero {
+      padding: 48px max(22px, calc((100vw - 1060px) / 2));
+      background: linear-gradient(125deg, #16264a, #315bd6);
+      color: white;
+    }
+    .eyebrow { margin: 0 0 10px; color: #cbd9ff; font-size: .78rem; letter-spacing: .14em; }
+    h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.2rem); letter-spacing: -.04em; line-height: 1.16; }
+    .hero p:last-child { max-width: 760px; margin: 14px 0 0; color: #e1e9ff; }
+    main { max-width: 1100px; margin: 26px auto 60px; padding: 0 20px; }
+    section {
+      margin: 0 0 18px; padding: 25px clamp(18px, 3.5vw, 34px);
+      border: 1px solid var(--line); border-radius: 15px; background: var(--paper);
+      box-shadow: 0 12px 32px rgba(27,46,82,.06);
+    }
+    h2 { margin: 0 0 15px; font-size: 1.35rem; letter-spacing: -.02em; }
+    h3 { margin: 20px 0 8px; font-size: 1.03rem; }
+    p { margin: 8px 0; }
+    .status {
+      display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px;
+      border-radius: 99px; background: rgba(255,255,255,.13); color: #fff; font-size: .83rem;
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .card { padding: 15px 16px; border: 1px solid var(--line); border-radius: 11px; }
+    .card b { display: block; margin-bottom: 4px; }
+    .card span { color: var(--muted); font-size: .9rem; }
+    .callout { margin: 15px 0; padding: 13px 15px; border-left: 4px solid var(--blue); border-radius: 0 9px 9px 0; background: var(--blue-soft); }
+    .callout.ok { border-color: var(--green); background: var(--green-soft); }
+    .callout.warn { border-color: #d79516; background: var(--amber-soft); }
+    code { padding: .12em .38em; border-radius: 5px; background: #f0f3f8; font-size: .9em; }
+    pre { overflow-x: auto; margin: 10px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: #f8faff; font-size: .88rem; line-height: 1.65; }
+    table { width: 100%; border-collapse: collapse; font-size: .91rem; }
+    th, td { padding: 10px 11px; border-bottom: 1px solid #e8edf4; text-align: left; vertical-align: top; }
+    th { background: #f6f8fc; color: #42516a; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .pass { color: var(--green); font-weight: 750; }
+    .foot { color: var(--muted); font-size: .86rem; }
+    @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
+    @media print {
+      @page { margin: 15mm; }
+      body { background: white; font-size: 10pt; }
+      .hero { padding: 22px 0; print-color-adjust: exact; }
+      main { margin: 12px 0; padding: 0; }
+      section { padding: 16px; box-shadow: none; break-inside: avoid; }
+      .card, .callout { print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <p class="eyebrow">EPISTEME · IMPLEMENTATION &amp; VERIFICATION</p>
+    <h1>后端基础实现<br>与测试报告</h1>
+    <p>在已确认的 .NET 10 / PostgreSQL / EF Core 分层方案上完成首个可构建后端切片，并执行构建、自动化测试、格式检查和 HTTP 认证冒烟验证。</p>
+    <p><span class="status">结果 · 基础切片通过验证</span></p>
+  </header>
+
+  <main>
+    <section>
+      <h2>执行摘要</h2>
+      <div class="callout warn">本报告记录首轮基础切片的历史结果；后续开发与当前测试状态请参阅 <a href="backend-progress.md">后端实现与验证进展</a>。</div>
+      <div class="grid">
+        <div class="card"><b>.NET 10</b><span>API、领域层、应用层、基础设施层与 Refit 客户端均纳入解决方案。</span></div>
+        <div class="card"><b>15 / 15 测试通过</b><span>领域规则 8 项；工作空间授权用例 7 项。</span></div>
+        <div class="card"><b>构建与格式检查通过</b><span>0 个构建警告、0 个构建错误；格式校验无差异。</span></div>
+      </div>
+      <div class="callout ok">
+        <strong>验证结论：</strong>初始后端结构可正常构建，领域及授权规则测试通过；工作空间元数据 API 在无 Bearer Token 时返回 HTTP 401。
+      </div>
+      <div class="callout warn">
+        <strong>范围说明：</strong>这是可测试的基础切片，不是完整产品交付。文档正文存储、Git 版本操作、MCP 工具、OAuth Token 签发及工作空间创建流程尚未实现。
+      </div>
+    </section>
+
+    <section>
+      <h2>已实现</h2>
+      <ul>
+        <li><strong>领域模型：</strong><code>ApplicationUser</code>、<code>Workspace</code>、<code>WorkspaceMember</code>，包括工作空间类型、状态、Owner/Editor/Reader 角色和关键状态变更规则。</li>
+        <li><strong>数据访问骨架：</strong>EF Core DbContext、Identity 用户/角色映射、OpenIddict EF Core 持久化模型注册，以及 Npgsql PostgreSQL 配置。</li>
+        <li><strong>共享授权用例：</strong>集中校验 OAuth scope、用户状态、工作空间状态、成员资格和工作空间角色；仓库查询一次性取回授权快照。</li>
+        <li><strong>Web API：</strong><code>GET /api/v1/workspaces/{workspaceId}</code>，要求 Bearer JWT 与读取 scope，并返回工作空间元数据。</li>
+        <li><strong>Refit 客户端：</strong>提供强类型 API 接口和客户端依赖注入注册。</li>
+        <li><strong>自动化测试：</strong>覆盖基础领域约束、缺少 scope、非成员访问、Reader 写权限拒绝、管理员授权边界、空间归档和停用用户。</li>
+      </ul>
+      <h3>主要代码位置</h3>
+      <pre>src/
+├── Episteme.sln
+├── Directory.Build.props
+├── Directory.Packages.props
+├── server/
+│   ├── Episteme.Api/                 # HTTP API 与 JWT 验证
+│   ├── Episteme.Application/         # 工作空间授权用例
+│   ├── Episteme.Domain/              # 用户、工作空间、成员领域模型
+│   └── Episteme.Infrastructure/      # EF Core、Identity、OpenIddict、Npgsql
+├── clients/Episteme.Client/          # Refit 客户端
+└── tests/
+    ├── Episteme.Domain.Tests/
+    └── Episteme.Application.Tests/</pre>
+    </section>
+
+    <section>
+      <h2>验证结果</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>验证项</th><th>命令/场景</th><th>结果</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>自动化测试</td><td><code>dotnet test src/Episteme.sln</code></td><td class="pass">通过</td><td>Domain.Tests 8 项 + Application.Tests 7 项；失败 0。</td></tr>
+            <tr><td>解决方案构建</td><td><code>dotnet build src/Episteme.sln --no-restore</code></td><td class="pass">通过</td><td>0 个警告，0 个错误。</td></tr>
+            <tr><td>格式校验</td><td><code>dotnet format src/Episteme.sln --verify-no-changes --no-restore</code></td><td class="pass">通过</td><td>未发现格式差异。</td></tr>
+            <tr><td>HTTP 冒烟验证</td><td>未提供 Token 请求工作空间 GET API</td><td class="pass">HTTP 401</td><td>应用以临时本地连接字符串配置启动；未连接真实 PostgreSQL，也未访问需要数据库记录的授权流程。</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">应用启动要求配置 <code>ConnectionStrings:Episteme</code>。冒烟测试使用仅限本地进程配置的非生产值，不写入仓库配置。</p>
+    </section>
+
+    <section>
+      <h2>尚未实现 / 后续工作</h2>
+      <ul>
+        <li>Identity 用户注册/管理流程、OpenIddict 签发端点、客户端与签名密钥初始化、Token 生命周期端到端流程。</li>
+        <li>EF Core 初始迁移、数据库启动配置/种子数据、真实 PostgreSQL 集成测试。</li>
+        <li>工作空间创建、更新、成员管理、归档用例与管理 API。</li>
+        <li>每个空间独立 Git 仓库、目录树查询、文档正文读写、版本历史/恢复和并发冲突处理。</li>
+        <li>MCP 宿主、OAuth 保护与空间/目录/文档工具；配置文件导入和导出。</li>
+        <li>前端文档浏览器与渲染/编辑体验（Markdown、代码、PDF、图片等预览仍需确定）。</li>
+        <li>部署及运维实现（数据库服务、Git 存储卷、密钥管理、备份、监控和保留期清理）。</li>
+      </ul>
+      <div class="callout">
+        <strong>启动条件：</strong>当前 API 需要外部配置好的 JWT Authority/Audience 及 PostgreSQL 连接；本轮未配置生产环境认证签发者，也未执行数据库迁移。
+      </div>
+    </section>
+
+    <section>
+      <h2>变更与工作区状态</h2>
+      <ul>
+        <li>新增 .NET 解决方案和代码位于 <code>src/</code>。</li>
+        <li>未修改设计文档，没有创建提交。</li>
+        <li>保留了原有未提交变更：删除中的 <code>SPEC.md</code>，以及先前创建的 Agent/设计文件。</li>
+      </ul>
+      <p class="foot">建议下一步实现：PostgreSQL 迁移与集成测试 → 工作空间创建/成员授权 → Git 内容适配器与文件 API → MCP 工具。</p>
+    </section>
+  </main>
+</body>
+</html>

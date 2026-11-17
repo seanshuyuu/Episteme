@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Episteme.Infrastructure/Episteme.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.UI" />
+    <PackageReference Include="OpenIddict.Server.AspNetCore" />
+  </ItemGroup>
+</Project>

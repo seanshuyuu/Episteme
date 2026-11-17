@@ -1,0 +1,9 @@
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<Episteme.Infrastructure.Identity.ApplicationUser> SignInManager
+@if (SignInManager.IsSignedIn(User))
+{
+    <form method="post" action="/Identity/Account/Logout">
+        @Html.AntiForgeryToken()
+        <button type="submit">Sign out</button>
+    </form>
+}

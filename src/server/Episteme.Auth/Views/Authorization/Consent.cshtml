@@ -1,0 +1,23 @@
+@using Microsoft.Extensions.Primitives
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Authorize application</title></head>
+<body>
+<h1>Authorize application</h1>
+<p>Allow <strong>@ViewData["ClientName"]</strong> to access the requested scopes?</p>
+<p>@ViewData["Scope"]</p>
+<p>Resource: @ViewData["Resource"]</p>
+<form method="post" action="/connect/authorize">
+    @Html.AntiForgeryToken()
+    @foreach (KeyValuePair<string, StringValues> parameter in Context.Request.Query)
+    {
+        @foreach (var value in parameter.Value)
+        {
+            <input type="hidden" name="@parameter.Key" value="@value" />
+        }
+    }
+    <button type="submit" name="decision" value="accept">Allow</button>
+    <button type="submit" name="decision" value="deny">Deny</button>
+</form>
+</body>
+</html>

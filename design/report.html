@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Episteme 文档工作空间 · 业务与技术设计报告</title>
+  <style>
+    :root {
+      --ink: #17233b;
+      --muted: #59677f;
+      --line: #dce4ef;
+      --paper: #fff;
+      --canvas: #f3f6fb;
+      --blue: #315bd6;
+      --blue-soft: #edf2ff;
+      --teal: #087e78;
+      --teal-soft: #e8f7f5;
+      --gold: #996200;
+      --gold-soft: #fff6df;
+      --red: #a53d47;
+      --red-soft: #fff0f0;
+      --shadow: 0 16px 42px rgba(27, 46, 82, .08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--ink);
+      line-height: 1.68;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    code {
+      padding: .12em .38em;
+      border-radius: 5px;
+      background: #f0f3f8;
+      font-size: .92em;
+    }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 64px max(24px, calc((100vw - 1180px) / 2)) 58px;
+      color: #fff;
+      background:
+        radial-gradient(ellipse at 82% 8%, rgba(116, 164, 255, .38), transparent 34%),
+        linear-gradient(125deg, #16264a 0%, #243d77 56%, #315bd6 100%);
+    }
+    .hero::after {
+      position: absolute;
+      right: -85px;
+      bottom: -240px;
+      width: 520px;
+      height: 520px;
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 50%;
+      box-shadow: 0 0 0 44px rgba(255,255,255,.035), 0 0 0 88px rgba(255,255,255,.025);
+      content: "";
+      pointer-events: none;
+    }
+    .hero-inner { position: relative; z-index: 1; max-width: 1180px; margin: auto; }
+    .eyebrow {
+      margin: 0 0 14px;
+      color: #c9d8ff;
+      font-size: .78rem;
+      font-weight: 750;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 840px;
+      margin: 0;
+      font-size: clamp(2.15rem, 5vw, 4rem);
+      letter-spacing: -.045em;
+      line-height: 1.12;
+    }
+    .hero-copy {
+      max-width: 780px;
+      margin: 20px 0 0;
+      color: #e0e8ff;
+      font-size: 1.06rem;
+    }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,.24);
+      border-radius: 99px;
+      background: rgba(255,255,255,.09);
+      color: #f1f5ff;
+      font-size: .83rem;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      gap: 32px;
+      max-width: 1228px;
+      margin: 32px auto 80px;
+      padding: 0 24px;
+    }
+    .toc {
+      position: sticky;
+      top: 20px;
+      align-self: start;
+      padding: 18px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--paper);
+      box-shadow: 0 4px 18px rgba(27,46,82,.04);
+    }
+    .toc strong {
+      display: block;
+      padding: 0 9px 10px;
+      color: #7a879b;
+      font-size: .73rem;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .toc a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 7px;
+      color: #43516a;
+      font-size: .86rem;
+    }
+    .toc a:hover { background: var(--blue-soft); color: var(--blue); text-decoration: none; }
+    main { min-width: 0; }
+    section {
+      margin-bottom: 22px;
+      padding: 30px clamp(20px, 4vw, 42px);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--paper);
+      box-shadow: var(--shadow);
+      scroll-margin-top: 18px;
+    }
+    section h2 {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 18px;
+      font-size: 1.48rem;
+      letter-spacing: -.025em;
+      line-height: 1.3;
+    }
+    .num {
+      display: inline-grid;
+      width: 32px;
+      height: 32px;
+      flex: 0 0 32px;
+      place-items: center;
+      border-radius: 9px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      font-size: .83rem;
+      font-weight: 800;
+    }
+    h3 { margin: 24px 0 10px; font-size: 1.08rem; }
+    p { margin: 10px 0; }
+    .lead { color: var(--muted); font-size: 1.02rem; }
+    .callout {
+      margin: 18px 0;
+      padding: 14px 17px;
+      border-left: 4px solid var(--blue);
+      border-radius: 0 10px 10px 0;
+      background: var(--blue-soft);
+    }
+    .callout.warning { border-color: #d79516; background: var(--gold-soft); }
+    .callout.success { border-color: var(--teal); background: var(--teal-soft); }
+    .grid { display: grid; gap: 13px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card {
+      padding: 17px 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .card h3 { margin: 0 0 6px; }
+    .card p { margin: 4px 0; color: var(--muted); font-size: .92rem; }
+    .card .tag {
+      display: inline-block;
+      margin-bottom: 8px;
+      color: var(--teal);
+      font-size: .73rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(100px, 1fr));
+      align-items: stretch;
+      gap: 22px;
+      margin: 22px 0 12px;
+    }
+    .flow-item {
+      position: relative;
+      display: grid;
+      min-height: 104px;
+      align-content: center;
+      padding: 15px;
+      border: 1px solid #d6e0f7;
+      border-radius: 12px;
+      background: #f8faff;
+      text-align: center;
+    }
+    .flow-item:not(:last-child)::after {
+      position: absolute;
+      top: 50%;
+      right: -18px;
+      color: #8095c4;
+      content: "→";
+      font-size: 1.15rem;
+      font-weight: 800;
+      transform: translateY(-50%);
+    }
+    .flow-item b { font-size: .92rem; }
+    .flow-item small { color: var(--muted); font-size: .78rem; }
+    .diagram-note { color: var(--muted); font-size: .86rem; }
+    .table-wrap { overflow-x: auto; margin: 14px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+    }
+    th, td {
+      padding: 11px 12px;
+      border-bottom: 1px solid #e8edf4;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #f6f8fc; color: #42516a; font-weight: 750; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .yes { color: var(--teal); font-weight: 750; }
+    .no { color: #8490a2; }
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin: 18px 0;
+    }
+    .entity {
+      overflow: hidden;
+      border: 1px solid #cfd9ec;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .entity h3 {
+      margin: 0;
+      padding: 10px 13px;
+      background: #edf2ff;
+      color: #244ba9;
+      font-size: .88rem;
+    }
+    .entity ul { margin: 0; padding: 11px 13px 13px 29px; color: #43516a; font-size: .82rem; }
+    .entity li { margin: 3px 0; }
+    .entity.identity h3 { background: #e8f7f5; color: #087e78; }
+    .entity.git h3 { background: #fff6df; color: #8d5c00; }
+    .relation {
+      margin: 15px 0;
+      padding: 14px 16px;
+      border: 1px dashed #b9c7dc;
+      border-radius: 10px;
+      background: #fafcff;
+      color: #384964;
+      text-align: center;
+      font-size: .9rem;
+    }
+    .relation b { color: var(--blue); }
+    .tree {
+      margin: 14px 0;
+      padding: 18px 20px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #f8faff;
+      color: #293853;
+      font-size: .84rem;
+      line-height: 1.75;
+      white-space: pre;
+    }
+    ul, ol { padding-left: 1.35rem; }
+    li { margin: 6px 0; }
+    .decision-number {
+      display: inline-grid;
+      width: 26px;
+      height: 26px;
+      margin-right: 7px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--gold-soft);
+      color: var(--gold);
+      font-size: .78rem;
+      font-weight: 800;
+    }
+    .footer {
+      padding: 22px 24px 42px;
+      color: #738098;
+      text-align: center;
+      font-size: .83rem;
+    }
+    .print-button {
+      position: fixed;
+      right: 22px;
+      bottom: 20px;
+      z-index: 3;
+      padding: 10px 15px;
+      border: 0;
+      border-radius: 99px;
+      background: var(--blue);
+      box-shadow: 0 8px 24px rgba(49,91,214,.28);
+      color: #fff;
+      cursor: pointer;
+      font: inherit;
+      font-size: .85rem;
+      font-weight: 700;
+    }
+    .print-button:hover { background: #2449b5; }
+
+    @media (max-width: 900px) {
+      .layout { grid-template-columns: 1fr; margin-top: 18px; }
+      .toc { position: static; display: flex; flex-wrap: wrap; gap: 2px; }
+      .toc strong { width: 100%; }
+      .grid.three, .entity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+      .flow-item:nth-child(3)::after { display: none; }
+    }
+    @media (max-width: 600px) {
+      .hero { padding: 44px 22px 42px; }
+      .layout { padding: 0 13px; }
+      section { padding: 22px 18px; }
+      .grid.two, .grid.three, .entity-grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; gap: 10px; }
+      .flow-item { min-height: 74px; }
+      .flow-item:not(:last-child)::after {
+        top: auto;
+        right: 50%;
+        bottom: -18px;
+        content: "↓";
+        transform: translateX(50%);
+      }
+      .flow-item:nth-child(3)::after { display: block; }
+      .print-button { right: 14px; bottom: 14px; }
+    }
+    @media print {
+      @page { margin: 15mm; }
+      body { background: #fff; font-size: 10pt; }
+      .hero { padding: 24px 0; background: #243d77 !important; print-color-adjust: exact; }
+      .hero::after, .toc, .print-button { display: none !important; }
+      .layout { display: block; max-width: none; margin: 12px 0; padding: 0; }
+      section { margin: 0 0 12px; padding: 18px; box-shadow: none; break-inside: avoid; }
+      .entity-grid, .grid { break-inside: avoid; }
+      a { color: inherit; }
+      .card, .entity, .callout { print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <p class="eyebrow">Episteme · Product &amp; Architecture</p>
+      <h1>文档工作空间<br>业务与技术设计报告</h1>
+      <p class="hero-copy">
+        面向可扩展文档管理与 Git 版本协作的方案提案。覆盖业务实体、实体关系、
+        ASP.NET 技术架构、MCP 能力边界与设计决策。
+      </p>
+      <div class="hero-meta">
+        <span class="pill">提案版本 · 1.0</span>
+        <span class="pill">状态 · 方案已确认，后端开发中</span>
+        <span class="pill">设计日期 · 2026-11-17</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="报告目录">
+      <strong>报告目录</strong>
+      <a href="#summary">执行摘要</a>
+      <a href="#principles">核心设计原则</a>
+      <a href="#architecture">系统架构</a>
+      <a href="#domain">业务实体</a>
+      <a href="#erd">实体关系</a>
+      <a href="#authorization">授权模型</a>
+      <a href="#mcp">MCP 与 API 能力</a>
+      <a href="#layout">代码目录结构</a>
+      <a href="#security">安全与一致性</a>
+      <a href="#decisions">设计决策</a>
+      <a href="#next">后续开发</a>
+    </nav>
+
+    <main>
+      <section id="summary">
+        <h2><span class="num">01</span>执行摘要</h2>
+        <p class="lead">
+          Episteme 以“工作空间”为核心：用户可按代码、Skill、论文研究、商业小说等场景创建不同空间；
+          每个空间拥有独立 Git 仓库，目录、文档正文和版本历史由 Git 管理。
+        </p>
+        <div class="grid three">
+          <article class="card">
+            <span class="tag">内容与版本</span>
+            <h3>Git 是唯一事实来源</h3>
+            <p>文档正文、目录树、版本历史落在空间仓库，不在数据库重复存储。</p>
+          </article>
+          <article class="card">
+            <span class="tag">身份与元数据</span>
+            <h3>PostgreSQL + EF Core</h3>
+            <p>持久化用户、空间、成员授权、用户偏好和管理审计。</p>
+          </article>
+          <article class="card">
+            <span class="tag">统一业务能力</span>
+            <h3>Web API + MCP</h3>
+            <p>两个入口共享 Application 用例、校验和授权策略。</p>
+          </article>
+        </div>
+        <div class="callout warning">
+          <strong>方案状态：</strong>用户已确认当前方案，后端正在分阶段实现。本文记录设计基线；
+          实际完成范围和验证结果见 <a href="backend-progress.md">后端实现与验证进展</a>。
+        </div>
+      </section>
+
+      <section id="principles">
+        <h2><span class="num">02</span>核心设计原则</h2>
+        <div class="grid two">
+          <article class="card">
+            <h3>明确数据边界</h3>
+            <p>PostgreSQL 保存身份和管理元数据；Git 保存内容与版本。避免两份目录/正文数据相互冲突。</p>
+          </article>
+          <article class="card">
+            <h3>按空间隔离授权</h3>
+            <p>系统角色与空间成员角色分离；每次 API/MCP 请求均校验用户、scope 和空间权限。</p>
+          </article>
+          <article class="card">
+            <h3>不开放任意服务器路径</h3>
+            <p>工作目录采用沙箱内逻辑相对路径；API/MCP 不接受服务器绝对路径。</p>
+          </article>
+          <article class="card">
+            <h3>优先成熟组件</h3>
+            <p>使用 Identity、OpenIddict、EF Core、Npgsql、Refit、官方 MCP SDK 和 Git，不自建基础协议。</p>
+          </article>
+        </div>
+        <div class="callout success">
+          <strong>配置导入/导出 ≠ 内容备份：</strong>
+          默认配置清单只保存空间配置与可选目录骨架，不包含正文、token、成员权限或 Git 历史。
+        </div>
+      </section>
+
+      <section id="architecture">
+        <h2><span class="num">03</span>系统架构与组件选型</h2>
+        <p>
+          前后端分离：前端通过 Web API 消费服务；MCP Client 连接独立 MCP Server。
+          两个宿主都把请求交给同一 Application 层，不互相绕行调用。
+        </p>
+        <div class="flow" aria-label="请求经过 API 或 MCP 到应用层、领域和基础设施，再访问 PostgreSQL 与 Git">
+          <div class="flow-item"><b>前端 / MCP Client</b><small>HTTPS / OAuth</small></div>
+          <div class="flow-item"><b>Web API / MCP Host</b><small>认证、协议入口</small></div>
+          <div class="flow-item"><b>Application</b><small>用例、授权、校验</small></div>
+          <div class="flow-item"><b>Domain / Infrastructure</b><small>规则与适配器</small></div>
+          <div class="flow-item"><b>PostgreSQL / Git</b><small>元数据 / 内容版本</small></div>
+        </div>
+        <p class="diagram-note">依赖方向：API、MCP Server → Application → Domain；Infrastructure 实现 Application 定义的持久化与 Git 端口。</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>领域</th><th>推荐组件</th><th>用途</th></tr></thead>
+            <tbody>
+              <tr><td>Web API</td><td>ASP.NET Core 10</td><td>HTTP API、认证中间件、OpenAPI、Problem Details。</td></tr>
+              <tr><td>数据访问</td><td>EF Core 10 + Npgsql</td><td>PostgreSQL 持久化与迁移。</td></tr>
+              <tr><td>用户与授权</td><td>ASP.NET Core Identity + OpenIddict</td><td>用户/系统角色管理与 OAuth/OIDC Token 生命周期。</td></tr>
+              <tr><td>MCP</td><td>官方 C# MCP SDK</td><td>独立工具宿主；远程建议 OAuth 保护的 Streamable HTTP。</td></tr>
+              <tr><td>.NET API 客户端</td><td>Refit</td><td>供 .NET 前端、BFF 或集成方调用；不做服务端内部回调。</td></tr>
+              <tr><td>Git 操作</td><td>系统 Git CLI + CliWrap</td><td>参数化调用 Git，检查退出码、超时并隔离仓库路径。</td></tr>
+              <tr><td>API 契约</td><td>ASP.NET Core OpenAPI</td><td>从 Web API 生成契约，供前端或客户端生成器使用。</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="diagram-note">
+          实际依赖版本在设计确认后，按 .NET 10 的稳定兼容版本锁定。若不需要标准 OAuth/OIDC 或 MCP 授权流，应重新评估 OpenIddict 的必要性。
+        </p>
+      </section>
+
+      <section id="domain">
+        <h2><span class="num">04</span>业务实体与数据归属</h2>
+        <h3>数据库实体（PostgreSQL）</h3>
+        <div class="entity-grid">
+          <article class="entity identity">
+            <h3>ApplicationUser</h3>
+            <ul>
+              <li>Identity 用户（Guid 主键）</li>
+              <li>用户名、邮箱、状态、创建时间</li>
+              <li>停用优先于物理删除</li>
+            </ul>
+          </article>
+          <article class="entity identity">
+            <h3>IdentityRole / UserRole</h3>
+            <ul>
+              <li>系统级 Administrator / User</li>
+              <li>使用 Identity 标准角色机制</li>
+              <li>不替代空间成员授权</li>
+            </ul>
+          </article>
+          <article class="entity identity">
+            <h3>OpenIddict 持久化实体</h3>
+            <ul>
+              <li>Application、Authorization、Scope、Token</li>
+              <li>管理签发、刷新、撤销及授权会话</li>
+              <li>使用官方 EF Core Store</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>UserWorkspaceSettings</h3>
+            <ul>
+              <li>UserId 唯一外键</li>
+              <li>默认工作目录相对路径</li>
+              <li>用户偏好 JSON</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>Workspace</h3>
+            <ul>
+              <li>名称、slug、类型、描述、状态</li>
+              <li>服务端生成且不变的 StorageKey</li>
+              <li>版本化 jsonb 配置、默认分支</li>
+              <li>并发戳、创建/更新时间</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>WorkspaceMember</h3>
+            <ul>
+              <li>WorkspaceId + UserId 唯一</li>
+              <li>Owner / Editor / Reader</li>
+              <li>成员状态、加入时间、添加者</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>AuditEvent</h3>
+            <ul>
+              <li>操作者、可选空间、事件类型、时间</li>
+              <li>只保存非敏感 JSONB 摘要</li>
+              <li>不重复保存文档正文历史</li>
+            </ul>
+          </article>
+          <article class="entity git">
+            <h3>Git Tree（非 EF 实体）</h3>
+            <ul>
+              <li>工作空间目录结构与文件路径</li>
+              <li>空目录以占位文件纳入 Git</li>
+              <li>不在数据库复制目录树</li>
+            </ul>
+          </article>
+          <article class="entity git">
+            <h3>Git Blob / Commit（非 EF 实体）</h3>
+            <ul>
+              <li>Blob 保存文档正文</li>
+              <li>Commit 是版本历史与稳定版本标识</li>
+              <li>恢复旧版本产生新提交</li>
+            </ul>
+          </article>
+        </div>
+        <div class="callout">
+          <strong>工作空间类型：</strong><code>Code</code>、<code>Skill</code>、<code>Research</code>、
+          <code>BusinessNovel</code>、<code>Custom</code>。类型提供模板/默认行为，类型专属设置放在有 schema version 的 JSON 配置中。
+        </div>
+      </section>
+
+      <section id="erd">
+        <h2><span class="num">05</span>实体关系图</h2>
+        <div class="entity-grid">
+          <article class="entity identity">
+            <h3>用户与系统角色</h3>
+            <ul>
+              <li>ApplicationUser 1 — 0..1 UserWorkspaceSettings</li>
+              <li>ApplicationUser * — * IdentityRole</li>
+              <li>由 Identity UserRole 关联</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>工作空间与成员</h3>
+            <ul>
+              <li>ApplicationUser 1 — * Workspace（创建者）</li>
+              <li>Workspace 1 — * WorkspaceMember</li>
+              <li>ApplicationUser 1 — * WorkspaceMember</li>
+              <li>成员唯一键：(WorkspaceId, UserId)</li>
+            </ul>
+          </article>
+          <article class="entity">
+            <h3>审计与空间</h3>
+            <ul>
+              <li>ApplicationUser 0..1 — * AuditEvent</li>
+              <li>Workspace 0..1 — * AuditEvent</li>
+              <li>空间归档/成员变更有管理审计</li>
+            </ul>
+          </article>
+        </div>
+        <div class="relation">
+          <b>ApplicationUser</b> ──<i>创建</i>──▶ <b>Workspace</b>
+          &nbsp;·&nbsp; <b>Workspace</b> ──<i>授权成员</i>──▶ <b>WorkspaceMember</b>
+          &nbsp;·&nbsp; <b>Workspace</b> ──<i>StorageKey</i>──▶ <b>Git 仓库</b>
+        </div>
+        <div class="callout warning">
+          <strong>关键约束：</strong>创建者关系只作创建审计；当前 Owner 以 WorkspaceMember.Role 为准，
+          且每个有效空间必须至少有一名 Owner。StorageKey 唯一且不可修改；用户/空间采用停用或归档语义，避免级联删除数据。
+        </div>
+      </section>
+
+      <section id="authorization">
+        <h2><span class="num">06</span>授权模型</h2>
+        <p>系统级角色控制平台管理能力；空间级角色控制具体空间内的资源。MCP 的 OAuth scope 与空间角色需同时通过。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>能力</th><th>Administrator</th><th>Owner</th><th>Editor</th><th>Reader</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>读取空间、目录、文档</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+              <tr><td>写入文档/目录并提交版本</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td></tr>
+              <tr><td>查看历史、恢复版本（新提交）</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td></tr>
+              <tr><td>修改空间名称、类型和配置</td><td class="yes">✓</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td></tr>
+              <tr><td>成员管理、转移 Owner、归档</td><td class="yes">✓</td><td class="yes">✓（保留一名 Owner）</td><td class="no">—</td><td class="no">—</td></tr>
+              <tr><td>管理系统用户、全局角色、他人 token</td><td class="yes">✓</td><td class="no">—</td><td class="no">—</td><td class="no">—</td></tr>
+              <tr><td>查看/撤销本人 token 或授权会话</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="diagram-note">初版采用固定 Owner / Editor / Reader，不开放用户自定义角色。创建者成为首位 Owner。</p>
+      </section>
+
+      <section id="mcp">
+        <h2><span class="num">07</span>MCP 与 Web API 能力</h2>
+        <div class="grid two">
+          <article class="card">
+            <h3>工作空间</h3>
+            <p><code>list_workspaces</code> · <code>get_workspace</code> · <code>create_workspace</code> · <code>update_workspace</code> · <code>delete_workspace</code>（默认归档）</p>
+          </article>
+          <article class="card">
+            <h3>目录</h3>
+            <p><code>list_directory</code> · <code>create_directory</code> · <code>move_directory</code> · <code>delete_directory</code></p>
+          </article>
+          <article class="card">
+            <h3>文档</h3>
+            <p><code>read_document</code> · <code>create_document</code> · <code>update_document</code> · <code>move_document</code> · <code>delete_document</code></p>
+          </article>
+          <article class="card">
+            <h3>版本与配置</h3>
+            <p><code>get_document_history</code> · <code>restore_document_version</code> · <code>export_workspace_config</code> · <code>import_workspace_config</code></p>
+          </article>
+        </div>
+        <ul>
+          <li>认证主体来自受验证的 Token，不接受调用者传入的 user ID 冒充身份。</li>
+          <li>所有工具复用 Application 层用例和权限检查，不直接访问 EF Core 或 Git。</li>
+          <li>写请求校验角色、路径、输入大小和预期版本；查询有分页与响应大小限制。</li>
+          <li>OAuth scope 控制协议级能力，空间成员角色控制资源级能力，二者缺一不可。</li>
+        </ul>
+      </section>
+
+      <section id="layout">
+        <h2><span class="num">08</span>代码目录结构提案</h2>
+        <p>所有方案文档放在 <code>design/</code>，所有应用代码放在 <code>src/</code>；前端框架待确认。</p>
+        <pre class="tree">.
+├── Agent.md
+├── design/
+│   ├── README.md
+│   ├── architecture.md
+│   ├── domain-model.md
+│   ├── erd.md
+│   ├── decisions.md
+│   └── report.html
+└── src/
+    ├── Episteme.sln
+    ├── Directory.Build.props
+    ├── Directory.Packages.props
+    ├── server/
+    │   ├── Episteme.Api/
+    │   ├── Episteme.McpServer/
+    │   ├── Episteme.Application/
+    │   ├── Episteme.Domain/
+    │   └── Episteme.Infrastructure/
+    ├── clients/
+    │   └── Episteme.Client/              # Refit 客户端
+    └── tests/
+        ├── Episteme.Domain.Tests/
+        ├── Episteme.Application.Tests/
+        └── Episteme.IntegrationTests/</pre>
+        <div class="callout">
+          <strong>依赖方向：</strong><code>Api</code>、<code>McpServer</code> → <code>Application</code> → <code>Domain</code>。
+          <code>Infrastructure</code> 实现应用端口，由宿主组合注入。Domain 不依赖 EF Core、ASP.NET Core、Refit、MCP SDK 或 Git CLI。
+        </div>
+      </section>
+
+      <section id="security">
+        <h2><span class="num">09</span>安全、路径与一致性</h2>
+        <ul>
+          <li><strong>仓库定位：</strong>部署级 <code>WorkspaceStorageRoot</code> + 服务端生成的不可变 <code>StorageKey</code>；工作空间名称和 slug 不作为物理路径。</li>
+          <li><strong>路径边界：</strong>拒绝绝对路径、<code>..</code>、符号链接逃逸、仓库元数据路径及越界规范化结果；先鉴权，再访问磁盘。</li>
+          <li><strong>并发写入：</strong>工作空间级写锁，检测预期 HEAD；不匹配返回冲突，不静默覆盖。恢复历史通过新提交完成。</li>
+          <li><strong>删除：</strong>工作空间默认归档；彻底清除仓库通过有保留期和确认保护的后台任务执行。</li>
+          <li><strong>Token 与日志：</strong>短期 access token、refresh 轮换/撤销、最小 scope；日志和配置导出不包含密钥、token、密码或正文。</li>
+          <li><strong>事务边界：</strong>Git 与 PostgreSQL 无共享 ACID 事务；管理变更和内容提交各有权威记录，失败显式返回并支持恢复/对账。</li>
+          <li><strong>错误表达：</strong>权限拒绝、非法路径、版本冲突、存储失败等使用明确错误，禁止将失败伪装成空内容或成功。</li>
+        </ul>
+      </section>
+
+      <section id="decisions">
+        <h2><span class="num">10</span>设计决策</h2>
+        <p class="lead">下列默认值作为已确认的后端设计基线；仍未具体确定的事项需在实现前明确。</p>
+        <ol>
+          <li><span class="decision-number">1</span><strong>部署与工作目录：</strong>多用户服务端；用户工作目录限定为用户沙箱下的逻辑相对路径。</li>
+          <li><span class="decision-number">2</span><strong>MCP 连接：</strong>独立 MCP 宿主、官方 C# SDK、OAuth 保护的 Streamable HTTP；stdio 需求待定。</li>
+          <li><span class="decision-number">3</span><strong>认证与 Token：</strong>Identity + OpenIddict，支持标准 OAuth/OIDC、refresh/revoke 和 MCP scopes。</li>
+          <li><span class="decision-number">4</span><strong>角色模型：</strong>系统 Administrator/User；空间 Owner/Editor/Reader 固定角色。</li>
+          <li><span class="decision-number">5</span><strong>Git 工作流：</strong>每空间独立仓库；初版默认分支、写操作顺序提交，不开放分支/合并。</li>
+          <li><span class="decision-number">6</span><strong>配置清单：</strong>只含非敏感设置和可选空目录骨架；正文、权限、Token、Git 历史另行管理。</li>
+          <li><span class="decision-number">7</span><strong>前端技术栈：</strong>目前不指定 UI 框架；独立前端通过 API/OpenAPI 集成。</li>
+          <li><span class="decision-number">8</span><strong>空间类型：</strong>Code、Skill、Research、BusinessNovel、Custom；类型专属配置使用版本化 JSON。</li>
+          <li><span class="decision-number">9</span><strong>保留策略：</strong>默认软删除/归档；彻底清理由有权限的后台任务按保留期执行。</li>
+        </ol>
+        <div class="callout warning">
+          <strong>变更方式：</strong>重大设计调整需取得用户确认后实施。
+        </div>
+      </section>
+
+      <section id="next">
+        <h2><span class="num">11</span>后续开发</h2>
+        <ol>
+          <li>根据确认意见更新设计文档，冻结领域边界、角色矩阵、MCP 部署方式与保留策略。</li>
+          <li>在 <code>src/</code> 创建 .NET 解决方案、分层项目、依赖版本管理与基础测试项目。</li>
+          <li>建立 Identity/OpenIddict/Npgsql 持久化模型与迁移，补充工作空间成员授权用例。</li>
+          <li>实现隔离 Git 仓库适配器、路径校验和并发控制，再接入 Web API 与 MCP 工具。</li>
+          <li>完成关键权限、路径穿越防护、版本冲突、导入校验及归档行为测试。</li>
+        </ol>
+        <p class="diagram-note">
+          项目级 AI Agent 约定已预置于仓库根目录 <code>Agent.md</code>，专用 Agent 定义位于
+          <code>.github/agents/episteme.agent.md</code>。
+        </p>
+      </section>
+    </main>
+  </div>
+  <footer class="footer">Episteme · 业务与技术设计提案 · 本报告为离线 HTML，无外部字体、脚本或服务依赖</footer>
+  <button class="print-button" type="button" onclick="window.print()" aria-label="打印或导出 PDF">打印 / 导出 PDF</button>
+</body>
+</html>

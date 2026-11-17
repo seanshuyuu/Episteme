@@ -1,0 +1,305 @@
+@Episteme.Api_HostAddress = http://localhost:5274
+@workspaceId = 00000000-0000-0000-0000-000000000001
+@accessToken = replace-with-a-valid-access-token
+@workspaceVersion = 00000000-0000-0000-0000-000000000001
+@memberId = 00000000-0000-0000-0000-000000000002
+@headCommit = replace-with-current-commit-id
+@sourceCommit = replace-with-ancestor-commit-id
+@tokenId = 00000000-0000-0000-0000-000000000003
+@userId = 00000000-0000-0000-0000-000000000004
+@authorizationId = 00000000-0000-0000-0000-000000000005
+@httpsHost = https://localhost:7274
+@newUserPassword = replace-locally-with-a-strong-password
+
+### Create a user only over HTTPS (do not commit real passwords)
+POST {{httpsHost}}/api/v1/admin/users
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "email": "new-user@example.test", "password": "{{newUserPassword}}" }
+
+### List users (requires users.manage and current Administrator role)
+GET {{Episteme.Api_HostAddress}}/api/v1/admin/users?offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+### Get a user
+GET {{Episteme.Api_HostAddress}}/api/v1/admin/users/{{userId}}
+Authorization: Bearer {{accessToken}}
+
+### Reset a user's password over HTTPS; never commit the replacement password
+PUT {{httpsHost}}/api/v1/admin/users/{{userId}}/password
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "password": "{{newUserPassword}}" }
+
+### List and revoke another user's tokens (requires users.manage and Administrator)
+GET {{Episteme.Api_HostAddress}}/api/v1/admin/users/{{userId}}/tokens
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{Episteme.Api_HostAddress}}/api/v1/admin/users/{{userId}}/tokens/{{tokenId}}
+Authorization: Bearer {{accessToken}}
+
+### Disable a user who owns no active or provisioning workspace
+PUT {{Episteme.Api_HostAddress}}/api/v1/admin/users/{{userId}}/status
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "status": "Disabled" }
+
+### Grant the system Administrator role
+PUT {{Episteme.Api_HostAddress}}/api/v1/admin/users/{{userId}}/administrator
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "isAdministrator": true }
+
+### List the caller's token metadata (requires tokens.manage)
+GET {{Episteme.Api_HostAddress}}/api/v1/me/tokens?offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+### Revoke one token belonging to the caller
+DELETE {{Episteme.Api_HostAddress}}/api/v1/me/tokens/{{tokenId}}
+Authorization: Bearer {{accessToken}}
+
+### List the caller's OAuth authorizations
+GET {{Episteme.Api_HostAddress}}/api/v1/me/authorizations?offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+### Revoke one authorization and invalidate its linked tokens in managed validation mode
+DELETE {{Episteme.Api_HostAddress}}/api/v1/me/authorizations/{{authorizationId}}
+Authorization: Bearer {{accessToken}}
+
+### Export supported workspace metadata (not document contents or membership)
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/manifest
+Authorization: Bearer {{accessToken}}
+
+### Read non-sensitive settings and current metadata version
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/configuration
+Authorization: Bearer {{accessToken}}
+
+### Replace settings using the version returned above
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/configuration
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "expectedVersion": "{{workspaceVersion}}",
+  "configuration": { "schemaVersion": 1, "defaultExtension": ".md", "citationStyle": "APA" }
+}
+
+### Export settings in the opt-in v2 manifest
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/manifest?formatVersion=2
+Authorization: Bearer {{accessToken}}
+
+### Export settings and directory skeleton (without document contents)
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/manifest?formatVersion=3
+Authorization: Bearer {{accessToken}}
+
+### Import a directory skeleton into a new workspace
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/import
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "slug": "research-skeleton",
+  "manifest": {
+    "formatVersion": 3,
+    "name": "Research",
+    "type": "Research",
+    "configuration": { "schemaVersion": 1 },
+    "directories": [ "papers", "notes/drafts" ]
+  }
+}
+
+### Import into a new workspace with a unique slug
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/import
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "slug": "research-copy",
+  "manifest": {
+    "formatVersion": 1,
+    "name": "Research",
+    "type": "Research",
+    "description": "Research notes"
+  }
+}
+
+### Create an empty directory
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/directories?path=notes
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "expectedHead": "{{headCommit}}" }
+
+### Move a document
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/move?path=example.md
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "expectedHead": "{{headCommit}}", "destinationPath": "notes/example.md" }
+
+### Move a directory
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/directories/move?path=notes
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "expectedHead": "{{headCommit}}", "destinationPath": "archive" }
+
+### Delete a nonempty directory explicitly
+DELETE {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/directories?path=archive
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "expectedHead": "{{headCommit}}", "recursive": true }
+
+### Create or replace a document at the current HEAD (requires workspaces.write)
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents?path=example.md
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "expectedHead": "{{headCommit}}",
+  "content": "Hello, Episteme!"
+}
+
+### Delete a document, using the commit ID returned by the prior operation
+DELETE {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents?path=example.md
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "expectedHead": "{{headCommit}}"
+}
+
+### Restore a document from a reachable ancestor as a new commit
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/restore?path=example.md
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "expectedHead": "{{headCommit}}",
+  "sourceCommit": "{{sourceCommit}}"
+}
+
+### List committed root directory (requires workspaces.read)
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/directories
+Authorization: Bearer {{accessToken}}
+
+### Read a committed UTF-8 document
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents?path=notes%2Fexample.md
+Authorization: Bearer {{accessToken}}
+
+### Invalid traversal is rejected
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents?path=..%2Fsecret
+Authorization: Bearer {{accessToken}}
+
+### Get document history (requires Editor or Owner)
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/history?path=notes%2Fexample.md&offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+### Read a historical document from an ancestor commit
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/version?path=example.md&commitId={{sourceCommit}}
+Authorization: Bearer {{accessToken}}
+
+### List workspace members (requires workspaces.manage and Owner)
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/members?offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+### Add or change a member role: Owner, Editor or Reader
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/members/{{memberId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "role": "Editor"
+}
+
+### Remove a member; removing the last owner returns 409
+DELETE {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/members/{{memberId}}
+Authorization: Bearer {{accessToken}}
+
+###
+
+### Create workspace (requires workspaces.manage)
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Research",
+  "slug": "research",
+  "type": "Research",
+  "description": "Research notes"
+}
+
+###
+
+### Retry a failed provisioning operation using workspaceId from the error response
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/provision
+Authorization: Bearer {{accessToken}}
+
+###
+
+### Find interrupted provisioning operations belonging to the caller
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/provisioning?offset=0&limit=25
+Authorization: Bearer {{accessToken}}
+
+###
+
+### List accessible workspaces
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces?offset=0&limit=25
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+
+### Update metadata with the concurrency stamp returned by GET
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "name": "Research",
+  "type": "Research",
+  "description": "Research notes",
+  "expectedVersion": "{{workspaceVersion}}"
+}
+
+###
+
+### Archive with the latest concurrency stamp
+POST {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/archive
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "expectedVersion": "{{workspaceVersion}}"
+}
+
+###
+
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+
+GET {{Episteme.Api_HostAddress}}/api/v1/me/workspace-settings
+Accept: application/json
+Authorization: Bearer {{accessToken}}
+
+###
+
+PUT {{Episteme.Api_HostAddress}}/api/v1/me/workspace-settings
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{
+  "defaultWorkspaceDirectory": "research/papers"
+}
+
+###

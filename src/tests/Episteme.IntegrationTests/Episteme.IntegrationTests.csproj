@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../server/Episteme.Infrastructure/Episteme.Infrastructure.csproj" />
+    <ProjectReference Include="../../server/Episteme.Api/Episteme.Api.csproj" />
+    <ProjectReference Include="../../server/Episteme.McpServer/Episteme.McpServer.csproj" />
+    <ProjectReference Include="../../server/Episteme.Auth/Episteme.Auth.csproj" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,34 @@
+@mcp = https://localhost:7243
+@accessToken = replace-with-a-valid-mcp-access-token
+@workspaceId = 00000000-0000-0000-0000-000000000001
+@headCommit = replace-with-current-commit-id
+
+### OAuth protected resource discovery
+GET {{mcp}}/.well-known/oauth-protected-resource/mcp
+
+### Discover tools (stateless Streamable HTTP)
+POST {{mcp}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+MCP-Protocol-Version: 2025-03-26
+Authorization: Bearer {{accessToken}}
+
+{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
+
+### Read a workspace directory
+POST {{mcp}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+MCP-Protocol-Version: 2025-03-26
+Authorization: Bearer {{accessToken}}
+
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_directory","arguments":{"workspaceId":"{{workspaceId}}","path":""}}}
+
+### Write a document using the current HEAD
+POST {{mcp}}/mcp
+Content-Type: application/json
+Accept: application/json, text/event-stream
+MCP-Protocol-Version: 2025-03-26
+Authorization: Bearer {{accessToken}}
+
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"put_document","arguments":{"workspaceId":"{{workspaceId}}","path":"example.md","expectedHead":"{{headCommit}}","content":"Example"}}}
