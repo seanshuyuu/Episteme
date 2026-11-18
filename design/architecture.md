@@ -18,8 +18,9 @@
 | MCP | 官方 C# MCP SDK（Model Context Protocol） | 单独的 MCP Server 宿主和工具定义；远程连接优先使用受保护的 Streamable HTTP transport。只调用 Application 用例，不直接访问 EF/Git。 |
 | HTTP API 客户端 | Refit | `Episteme.Client` 中的强类型 .NET API 客户端，供 .NET 前端/BFF/集成方调用；不是 Web API 服务端框架，也不用于 MCP 内部调用。 |
 | Git 历史 | 系统 Git CLI + `CliWrap` | 每工作空间独立仓库；使用参数化进程调用而非 shell 拼接，显式检查退出码、超时和仓库路径。运维环境需安装受支持的 Git。 |
-| API 文档 | ASP.NET Core OpenAPI | 从 API 契约生成规范；前端可使用生成器，具体前端栈待确认。 |
+| API 文档 | ASP.NET Core OpenAPI | 从 API 契约生成规范；Blazor 客户端以此作为 API 调用契约。 |
 | 日志 | `Microsoft.Extensions.Logging` | 结构化日志抽象；日志禁止输出文档正文、token、密码和敏感配置。 |
+| 前端 | Blazor + MudBlazor（推荐） | 面向工作空间管理、文档浏览/编辑和账户管理的交互式 Web UI；MudBlazor 提供成熟的表单、导航、表格、对话框和主题基础。主题扩展与用户偏好由应用统一管理。 |
 
 > OpenIddict 面向需要标准 OAuth/OIDC token 生命周期的服务端方案。若产品最终确定只需单一第一方 API 且不需要标准 OAuth/OIDC/MCP 授权流，应重新评估认证方案，而不是额外叠加一套 token 实现。
 
@@ -75,14 +76,15 @@ API 和 MCP 分开部署/配置，但可共享 Application、Domain、Infrastruc
     │   └── Episteme.Infrastructure/      # EF Core, migrations, Identity, OpenIddict,
     │                                      # PostgreSQL, Git and filesystem adapters
     ├── clients/
-    │   └── Episteme.Client/              # Refit interfaces and typed client registration
+    │   ├── Episteme.Client/              # Refit interfaces and typed client registration
+    │   └── Episteme.Web/                 # Proposed Blazor UI (created in a later implementation phase)
     └── tests/
         ├── Episteme.Domain.Tests/
         ├── Episteme.Application.Tests/
         └── Episteme.IntegrationTests/
 ```
 
-依赖方向：`Api`、`McpServer` → `Application` → `Domain`；`Infrastructure` 实现 Application 定义的接口并由宿主组合注入。Domain 不依赖 EF Core、ASP.NET Core、Refit、MCP SDK 或 Git CLI。迁移与 provider 配置属于 Infrastructure。前端技术栈尚未确定，因此不在此预设框架；未来前端源码若放在同一仓库，也必须位于 `src/` 下。
+依赖方向：`Api`、`McpServer` → `Application` → `Domain`；`Infrastructure` 实现 Application 定义的接口并由宿主组合注入。Domain 不依赖 EF Core、ASP.NET Core、Refit、MCP SDK 或 Git CLI。迁移与 provider 配置属于 Infrastructure。前端采用 Blazor，建议先评估 MudBlazor 作为基础组件库，再以业务组件封装工作空间文件树、版本历史和权限呈现。UI 通过 Web API/OpenAPI 访问后端，不绕过 API 直接操作数据库或 Git；未来前端源码若放在同一仓库，必须位于 `src/` 下。当前提供[普通用户原型](./prototype.html)与[管理员原型](./prototype-admin.html)，均未创建 Razor 页面。
 
 ## 5. 存储与安全边界
 

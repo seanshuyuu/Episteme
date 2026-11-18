@@ -5,7 +5,7 @@
 ## 当前状态与先决条件
 
 - 用户已确认当前设计，后端正在开发；设计文件在 `design/`。
-- 前端浏览器和文档阅读界面暂不开发，待用户确认后端后再启动。
+- 前端技术方向已确认采用 Blazor，当前先进行业务原型设计与评审；未经明确要求，不在原型阶段创建 Razor 页面。
 - 用户确认后，所有应用代码都放在 `src/`；设计文档放在 `design/`。
 - 开始任何改动前检查工作区现状，保留用户已有的未提交修改；不要清理或覆盖与任务无关的文件。
 
@@ -14,6 +14,7 @@
 - ASP.NET Core 10 Web API、EF Core 10、PostgreSQL/Npgsql。
 - ASP.NET Core Identity 管理用户和系统角色；OpenIddict 管理标准 OAuth/OIDC token 生命周期。
 - Refit 仅用于 .NET API 客户端；MCP 使用官方 C# SDK，并复用应用用例。
+- Blazor UI 优先评估成熟组件库（建议 MudBlazor），支持用户自定义主题与外观配置；普通用户和管理员原型分别见 `design/prototype.html`、`design/prototype-admin.html`，组件方案见 `design/frontend-design.md`。
 - 每个工作空间独立 Git 仓库；Git 是目录、文件正文和版本历史的事实来源，数据库保存身份、授权、工作空间元数据及必要审计。
 - 优先采用成熟库和平台内建功能，不手写密码/token、Git 协议、MCP 协议或 ORM 基础能力。
 

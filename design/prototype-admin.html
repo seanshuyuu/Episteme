@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episteme | 管理员原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --accent: #635bdb;
+      --accent-soft: #f0efff;
+      --canvas: #f6f7fb;
+      --surface: #fff;
+      --ink: #20233a;
+      --muted: #73778d;
+      --line: #e8e9f0;
+      --success: #21836c;
+      --warning: #a76d13;
+      --danger: #b94b5a;
+      --shadow: 0 14px 36px rgba(37, 39, 72, .06);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --canvas: #171923;
+      --surface: #20222e;
+      --ink: #f0f1f8;
+      --muted: #a1a5b8;
+      --line: #363949;
+      --shadow: 0 14px 36px rgba(0, 0, 0, .18);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.5; }
+    button, input, select { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    .app { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
+    aside { display: flex; flex-direction: column; padding: 22px 14px; background: var(--surface); border-right: 1px solid var(--line); }
+    .brand { display: flex; gap: 11px; align-items: center; padding: 0 10px 24px; font-size: 17px; font-weight: 760; }
+    .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; color: white; background: var(--accent); font-weight: 800; }
+    .nav-label { padding: 15px 11px 7px; color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .08em; }
+    .nav { display: grid; gap: 4px; }
+    .nav button { display: flex; gap: 11px; align-items: center; min-height: 40px; padding: 0 11px; border: 0; border-radius: 9px; color: var(--muted); text-align: left; background: transparent; }
+    .nav button:hover, .nav button.active { color: var(--accent); background: var(--accent-soft); }
+    .nav-icon { display: grid; place-items: center; width: 20px; font-size: 16px; }
+    .sidebar-bottom { margin-top: auto; padding: 15px 8px 0; border-top: 1px solid var(--line); }
+    .profile, .row-main { display: flex; gap: 10px; align-items: center; }
+    .avatar { display: grid; flex: 0 0 auto; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); font-weight: 750; }
+    .profile small, .muted, .subtitle { color: var(--muted); }
+    main { min-width: 0; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 0 34px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .crumb { color: var(--muted); font-size: 13px; }
+    .header-actions, .toolbar { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+    .search { width: min(250px, 30vw); padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--canvas); }
+    .search:focus, input:focus, select:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+    .icon-button, .button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .button.primary { border-color: var(--accent); color: white; background: var(--accent); }
+    .icon-button { width: 38px; padding: 0; font-size: 17px; }
+    a.button { color: inherit; text-decoration: none; }
+    .content { max-width: 1440px; margin: auto; padding: 30px 34px 60px; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
+    h2 { margin: 0; font-size: 17px; }
+    h3 { margin: 0; font-size: 14px; }
+    p { margin: 6px 0 0; }
+    .grid { display: grid; gap: 16px; }
+    .metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 20px; }
+    .two-col { grid-template-columns: minmax(0, 1.4fr) minmax(280px, .8fr); }
+    .card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+    .metric { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+    .metric strong { display: block; margin-top: 7px; font-size: 27px; letter-spacing: -.04em; }
+    .metric-mark { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px; color: var(--accent); background: var(--accent-soft); font-size: 18px; }
+    .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .list { display: grid; }
+    .list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 48px; border-bottom: 1px solid var(--line); }
+    .list-row:last-child { border-bottom: 0; }
+    .row-main > div:last-child { min-width: 0; }
+    .row-main strong, .row-main small { display: block; }
+    .row-main small { color: var(--muted); }
+    .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; border-radius: 99px; color: var(--muted); background: var(--canvas); font-size: 12px; white-space: nowrap; }
+    .badge.success { color: var(--success); background: color-mix(in srgb, var(--success) 11%, var(--surface)); }
+    .badge.warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); }
+    .badge.admin { color: var(--accent); background: var(--accent-soft); }
+    .workspace-status { gap: 6px; font-weight: 650; }
+    .workspace-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+    .workspace-status[data-status="Active"] { color: #116049; background: #d9f4e8; }
+    .workspace-status[data-status="Provisioning"] { color: #754900; background: #fff0c7; }
+    .workspace-status[data-status="Archived"] { color: #515c70; background: #e8ecf1; }
+    :root[data-theme="dark"] .workspace-status[data-status="Active"] { color: #a0efc9; background: #164b38; }
+    :root[data-theme="dark"] .workspace-status[data-status="Provisioning"] { color: #ffe09a; background: #594016; }
+    :root[data-theme="dark"] .workspace-status[data-status="Archived"] { color: #d8e0ec; background: #424b5b; }
+    .text-link { padding: 0; border: 0; color: var(--accent); background: transparent; }
+    .filter { min-height: 38px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { color: var(--muted); font-size: 12px; font-weight: 650; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .table-wrap { overflow-x: auto; }
+    .info { margin: 14px 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 9px; color: var(--muted); background: var(--accent-soft); }
+    .status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--success); }
+    dialog { width: min(680px, calc(100vw - 28px)); max-height: 88vh; padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 15px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px rgba(0,0,0,.24); }
+    dialog::backdrop { background: rgba(15, 18, 33, .5); backdrop-filter: blur(2px); }
+    .dialog-head, .dialog-body, .dialog-foot { padding: 19px 22px; }
+    .dialog-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .dialog-body { display: grid; gap: 15px; }
+    .dialog-foot { display: flex; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--line); }
+    .field { display: grid; gap: 6px; }
+    .field input, .field select { width: 100%; min-height: 40px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); }
+    @media (max-width: 1000px) { .metrics { grid-template-columns: repeat(2, 1fr); } .two-col { grid-template-columns: 1fr; } }
+    @media (max-width: 680px) {
+      .app { display: block; }
+      aside { position: sticky; top: 0; z-index: 5; flex-direction: row; align-items: center; gap: 8px; overflow-x: auto; padding: 9px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .brand { flex: 0 0 auto; padding: 0 8px; }
+      .nav-label, .sidebar-bottom { display: none; }
+      .nav { display: flex; gap: 3px; }
+      .nav button { flex: 0 0 auto; min-height: 36px; padding: 0 9px; }
+      .nav button span:last-child { display: none; }
+      header { min-height: 58px; padding: 0 15px; }
+      .search { width: 30vw; }
+      .content { padding: 22px 15px 45px; }
+      .page-heading { align-items: center; }
+      h1 { font-size: 23px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside aria-label="管理员导航">
+      <div class="brand"><span class="brand-mark">E</span><span>Episteme</span></div>
+      <div class="nav-label">系统管理</div>
+      <nav class="nav">
+        <button class="active" data-screen="overview"><span class="nav-icon">▦</span><span>管理总览</span></button>
+        <button data-screen="users"><span class="nav-icon">♙</span><span>用户管理</span></button>
+      </nav>
+      <div class="sidebar-bottom"><div class="profile"><span class="avatar">林</span><span><strong>林知远</strong><br><small>系统管理员</small></span></div></div>
+    </aside>
+    <main>
+      <header>
+        <div class="crumb" id="breadcrumb">系统管理 / 管理总览</div>
+        <div class="header-actions">
+          <a class="button" href="./prototype.html">普通用户原型 ↗</a>
+          <button class="icon-button" id="theme-toggle" aria-label="切换主题" title="切换主题">◐</button>
+          <span class="avatar" aria-label="当前管理员">林</span>
+        </div>
+      </header>
+      <div class="content">
+        <section class="screen active" id="overview">
+          <div class="page-heading"><div><h1>管理总览</h1><p class="subtitle">系统用户与工作空间的管理入口。</p></div><button class="button primary" data-dialog="create-user-dialog">＋ 创建用户</button></div>
+          <div class="grid metrics">
+            <article class="card metric"><div><span class="muted">用户总数</span><strong>128</strong></div><span class="metric-mark">♙</span></article>
+            <article class="card metric"><div><span class="muted">启用账户</span><strong>121</strong></div><span class="metric-mark">✓</span></article>
+            <article class="card metric"><div><span class="muted">工作空间</span><strong>246</strong></div><span class="metric-mark">▦</span></article>
+            <article class="card metric"><div><span class="muted">初始化中</span><strong>2</strong></div><span class="metric-mark">◷</span></article>
+          </div>
+          <div class="grid two-col">
+            <article class="card">
+              <div class="card-heading"><h2>最近创建的用户</h2><button class="text-link" data-go="users">用户管理 →</button></div>
+              <div class="list">
+                <div class="list-row"><div class="row-main"><span class="avatar">周</span><div><strong>周予安</strong><small>zhou@example.test · 2026-11-17</small></div></div><span class="badge success">Active</span></div>
+                <div class="list-row"><div class="row-main"><span class="avatar">沈</span><div><strong>沈明远</strong><small>shen@example.test · 2026-11-16</small></div></div><span class="badge success">Active</span></div>
+                <div class="list-row"><div class="row-main"><span class="avatar">陈</span><div><strong>陈书宁</strong><small>chen@example.test · 2026-11-15</small></div></div><span class="badge warning">Disabled</span></div>
+              </div>
+            </article>
+            <article class="card">
+              <div class="card-heading"><h2>管理提醒</h2></div>
+              <div class="list">
+                <div class="list-row"><span><strong>待完成初始化</strong><br><small class="muted">2 个工作空间正在准备 Git 仓库</small></span><span class="badge warning">2</span></div>
+                <div class="list-row"><span><strong>已停用账户</strong><br><small class="muted">检查是否仍需保留访问</small></span><span class="badge">7</span></div>
+                <div class="list-row"><span><strong>管理员账户</strong><br><small class="muted">避免移除最后一个有效管理员</small></span><span class="badge admin">3</span></div>
+              </div>
+            </article>
+          </div>
+          <div class="info">总览数字为原型示例。用户的“名下工作空间”数量按其 Owner 身份统计；仅共享给该用户的空间不计入。</div>
+        </section>
+
+        <section class="screen" id="users">
+          <div class="page-heading"><div><h1>用户管理</h1><p class="subtitle">查看账户、系统角色和用户所有的工作空间。</p></div><button class="button primary" data-dialog="create-user-dialog">＋ 创建用户</button></div>
+          <article class="card">
+            <div class="card-heading"><h2>用户账户</h2><div class="toolbar"><input class="search" placeholder="搜索邮箱或用户名" aria-label="搜索用户"><select class="filter" aria-label="筛选状态"><option>全部状态</option><option>Active</option><option>Disabled</option></select><select class="filter" aria-label="筛选角色"><option>全部角色</option><option>Administrator</option><option>User</option></select></div></div>
+            <div class="table-wrap"><table><thead><tr><th>用户</th><th>状态</th><th>系统角色</th><th>名下工作空间</th><th>创建时间</th><th>操作</th></tr></thead><tbody>
+              <tr><td><div class="row-main"><span class="avatar">林</span><div><strong>林知远</strong><small>lin@example.test</small></div></div></td><td><span class="badge success"><span class="status-dot"></span>Active</span></td><td><span class="badge admin">Administrator</span></td><td><button class="text-link owned-spaces" data-user="lin">3 个空间</button></td><td>2026-10-12</td><td><button class="button">账户操作</button></td></tr>
+              <tr><td><div class="row-main"><span class="avatar">周</span><div><strong>周予安</strong><small>zhou@example.test</small></div></div></td><td><span class="badge success"><span class="status-dot"></span>Active</span></td><td>User</td><td><button class="text-link owned-spaces" data-user="zhou">5 个空间</button></td><td>2026-10-18</td><td><button class="button">账户操作</button></td></tr>
+              <tr><td><div class="row-main"><span class="avatar">陈</span><div><strong>陈书宁</strong><small>chen@example.test</small></div></div></td><td><span class="badge warning">Disabled</span></td><td>User</td><td><button class="text-link owned-spaces" data-user="chen">1 个空间</button></td><td>2026-09-06</td><td><button class="button">账户操作</button></td></tr>
+              <tr><td><div class="row-main"><span class="avatar">沈</span><div><strong>沈明远</strong><small>shen@example.test</small></div></div></td><td><span class="badge success"><span class="status-dot"></span>Active</span></td><td>User</td><td><button class="text-link owned-spaces" data-user="shen">0 个空间</button></td><td>2026-11-16</td><td><button class="button">账户操作</button></td></tr>
+            </tbody></table></div>
+          </article>
+          <div class="info">“名下工作空间”仅统计该用户为 Owner 的空间。空间共享关系不代表所有权转移；用户管理数据须经过系统管理员授权。</div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="owned-spaces-dialog" aria-labelledby="owned-title">
+    <div class="dialog-head"><div><h2 id="owned-title">用户名下的工作空间</h2><p class="muted" id="owned-subtitle">Owner 空间清单</p></div><button class="icon-button" data-close-dialog aria-label="关闭">×</button></div>
+    <div class="dialog-body"><div class="table-wrap"><table><thead><tr><th>空间名称</th><th>类型</th><th>状态</th><th>创建时间</th></tr></thead><tbody id="owned-space-list"></tbody></table></div></div>
+    <div class="dialog-foot"><button class="button" data-close-dialog>关闭</button></div>
+  </dialog>
+
+  <dialog id="create-user-dialog" aria-labelledby="create-user-title">
+    <form method="dialog">
+      <div class="dialog-head"><div><h2 id="create-user-title">创建用户</h2><p class="muted">新账户由系统管理员创建。</p></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <label class="field"><strong>邮箱</strong><input type="email" required placeholder="user@example.com"></label>
+        <label class="field"><strong>初始密码</strong><input type="password" required autocomplete="new-password"></label>
+        <label class="field"><strong>系统角色</strong><select><option>User</option><option>Administrator</option></select></label>
+        <div class="info">密码操作要求 HTTPS；账户状态、密码策略和管理员保护由服务端校验。</div>
+      </div>
+      <div class="dialog-foot"><button class="button" value="cancel">取消</button><button class="button primary" value="create">创建账户</button></div>
+    </form>
+  </dialog>
+
+  <script>
+    const workspaceData = {
+      lin: { name: "林知远", email: "lin@example.test", spaces: [["Episteme 产品研发", "Code", "Active", "2026-10-12"], ["个人知识库", "Research", "Active", "2026-10-15"], ["写作计划", "BusinessNovel", "Active", "2026-10-21"]] },
+      zhou: { name: "周予安", email: "zhou@example.test", spaces: [["研究资料库", "Research", "Active", "2026-10-18"], ["客户洞察", "Research", "Active", "2026-10-20"], ["设计规范", "Skill", "Active", "2026-10-23"], ["原型实验", "Custom", "Active", "2026-11-01"], ["项目文档", "Code", "Active", "2026-11-07"]] },
+      chen: { name: "陈书宁", email: "chen@example.test", spaces: [["团队知识规范", "Skill", "Archived", "2026-09-06"]] },
+      shen: { name: "沈明远", email: "shen@example.test", spaces: [] }
+    };
+    const labels = { overview: "系统管理 / 管理总览", users: "系统管理 / 用户管理" };
+    function showScreen(id) {
+      document.querySelectorAll(".screen").forEach(screen => screen.classList.toggle("active", screen.id === id));
+      document.querySelectorAll(".nav button").forEach(button => button.classList.toggle("active", button.dataset.screen === id));
+      document.getElementById("breadcrumb").textContent = labels[id] || "系统管理";
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    document.querySelectorAll("[data-screen], [data-go]").forEach(button => button.addEventListener("click", () => showScreen(button.dataset.screen || button.dataset.go)));
+    document.querySelectorAll("[data-dialog]").forEach(button => button.addEventListener("click", () => document.getElementById(button.dataset.dialog).showModal()));
+    document.querySelectorAll("[data-close-dialog]").forEach(button => button.addEventListener("click", () => button.closest("dialog").close()));
+    document.querySelectorAll(".owned-spaces").forEach(button => button.addEventListener("click", () => {
+      const user = workspaceData[button.dataset.user];
+      document.getElementById("owned-title").textContent = `${user.name} 的工作空间`;
+      document.getElementById("owned-subtitle").textContent = `${user.email} · Owner · ${user.spaces.length} 个空间`;
+      const body = document.getElementById("owned-space-list");
+      body.replaceChildren();
+      if (user.spaces.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.colSpan = 4;
+        cell.textContent = "该用户目前没有名下工作空间。";
+        row.append(cell);
+        body.append(row);
+      } else {
+        user.spaces.forEach(space => {
+          const row = document.createElement("tr");
+          space.forEach((value, index) => {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            if (index === 2) {
+              const badge = document.createElement("span");
+              const labels = { Active: "正常 · Active", Provisioning: "初始化中 · Provisioning", Archived: "已归档 · Archived" };
+              badge.className = "badge workspace-status";
+              badge.dataset.status = value;
+              badge.textContent = labels[value] || `未知状态 · ${value}`;
+              cell.replaceChildren(badge);
+            }
+            row.append(cell);
+          });
+          body.append(row);
+        });
+      }
+      document.getElementById("owned-spaces-dialog").showModal();
+    }));
+    document.getElementById("theme-toggle").addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem("episteme-admin-prototype-theme", next);
+    });
+    document.documentElement.dataset.theme = localStorage.getItem("episteme-admin-prototype-theme") || "light";
+  </script>
+</body>
+</html>

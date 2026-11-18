@@ -1,0 +1,1257 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Episteme | 业务原型</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --accent: #635bdb;
+      --accent-soft: #f0efff;
+      --canvas: #f6f7fb;
+      --surface: #fff;
+      --ink: #20233a;
+      --muted: #73778d;
+      --line: #e8e9f0;
+      --success: #21836c;
+      --warning: #a76d13;
+      --danger: #b94b5a;
+      --shadow: 0 14px 36px rgba(37, 39, 72, .06);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --canvas: #171923;
+      --surface: #20222e;
+      --ink: #f0f1f8;
+      --muted: #a1a5b8;
+      --line: #363949;
+      --shadow: 0 14px 36px rgba(0, 0, 0, .18);
+    }
+    :root[data-density="compact"] { --space: 12px; --row: 42px; }
+    :root[data-density="comfortable"] { --space: 18px; --row: 50px; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-width: 320px; background: var(--canvas); color: var(--ink); font-size: 14px; line-height: 1.5; }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; cursor: pointer; }
+    .app { min-height: 100vh; }
+    .profile, .row-main { display: flex; gap: 10px; align-items: center; }
+    .avatar { display: grid; flex: 0 0 auto; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--accent); background: var(--accent-soft); font-weight: 750; }
+    .profile small, .muted, .subtitle { color: var(--muted); }
+    main { min-width: 0; }
+    header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; padding: 0 28px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .crumb { color: var(--muted); font-size: 13px; }
+    .header-actions, .toolbar { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+    .search { width: min(250px, 30vw); padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; outline: 0; color: var(--ink); background: var(--canvas); }
+    .search:focus, input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: 2px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+    .search-wrap { position: relative; }
+    .search-results { position: absolute; top: calc(100% + 7px); left: 0; z-index: 8; display: none; width: min(440px, 86vw); padding: 8px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); }
+    .search-results.open { display: grid; }
+    .search-results strong { padding: 7px 9px; font-size: 12px; }
+    .search-result { display: flex; justify-content: space-between; gap: 12px; padding: 9px; border: 0; border-radius: 7px; color: var(--ink); text-align: left; background: transparent; }
+    .search-result:hover { background: var(--accent-soft); }
+    .search-result small { color: var(--muted); }
+    .icon-button, .button { display: inline-flex; gap: 8px; align-items: center; justify-content: center; min-height: 38px; padding: 0 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+    .button.primary { border-color: var(--accent); color: white; background: var(--accent); }
+    .button.subtle { border-color: transparent; color: var(--accent); background: var(--accent-soft); }
+    a.button { color: inherit; text-decoration: none; }
+    .icon-button { width: 38px; padding: 0; font-size: 17px; }
+    .content { max-width: 1800px; margin: auto; padding: 20px 24px 40px; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .page-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    h1 { margin: 0; font-size: 26px; letter-spacing: -.04em; }
+    h2 { margin: 0; font-size: 17px; }
+    h3 { margin: 0; font-size: 14px; }
+    p { margin: 6px 0 0; }
+    .grid { display: grid; gap: var(--space, 16px); }
+    .two-col { grid-template-columns: minmax(0, 1.4fr) minmax(260px, .8fr); }
+    .workspace-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { min-width: 0; padding: 20px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); }
+    .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .text-link { border: 0; color: var(--accent); background: transparent; }
+    .list { display: grid; }
+    .list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--row, 48px); border-bottom: 1px solid var(--line); }
+    .list-row:last-child { border-bottom: 0; }
+    .row-main > div:last-child { min-width: 0; }
+    .row-main strong, .row-main small { display: block; }
+    .row-main small { color: var(--muted); }
+    .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; border-radius: 99px; color: var(--muted); background: var(--canvas); font-size: 12px; white-space: nowrap; }
+    .badge.success { color: var(--success); background: color-mix(in srgb, var(--success) 11%, var(--surface)); }
+    .badge.warning { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); }
+    .badge.owner { color: var(--accent); background: var(--accent-soft); }
+    .badge.readwrite { color: #23689b; background: color-mix(in srgb, #3885ba 13%, var(--surface)); }
+    .workspace-status { gap: 6px; font-weight: 650; }
+    .workspace-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
+    .workspace-status[data-status="Active"] { color: #116049; background: #d9f4e8; }
+    .workspace-status[data-status="Provisioning"] { color: #754900; background: #fff0c7; }
+    .workspace-status[data-status="Archived"] { color: #515c70; background: #e8ecf1; }
+    :root[data-theme="dark"] .workspace-status[data-status="Active"] { color: #a0efc9; background: #164b38; }
+    :root[data-theme="dark"] .workspace-status[data-status="Provisioning"] { color: #ffe09a; background: #594016; }
+    :root[data-theme="dark"] .workspace-status[data-status="Archived"] { color: #d8e0ec; background: #424b5b; }
+    .type-icon, .metric-mark { display: grid; flex: 0 0 auto; place-items: center; width: 40px; height: 40px; border-radius: 11px; color: var(--accent); background: var(--accent-soft); }
+    .workspace-card { padding: 19px; cursor: pointer; transition: transform .15s, border-color .15s; }
+    .workspace-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+    .workspace-card .card-heading { margin-bottom: 12px; }
+    .workspace-card footer { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+    .workspace-card { cursor: default; }
+    .workspace-meta { display: grid; gap: 4px; margin: 12px 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .workspace-card footer { flex-wrap: wrap; }
+    .view-switch [aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+    .workspace-action-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .workspace-action-list .button { min-height: 32px; padding: 0 9px; font-size: 12px; }
+    .workspace-details-table td { min-width: 120px; }
+    .filter { min-height: 38px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); }
+    .workspace-layout { --tree-width: 250px; --history-width: 310px; --tree-track: var(--tree-width); --history-track: var(--history-width); display: grid; grid-template-columns: var(--tree-track) 28px minmax(0, 1fr) 28px var(--history-track); grid-template-areas: "tree tree-h document history-h history"; gap: 4px; align-items: start; }
+    .workspace-layout.hide-tree { --tree-track: 0px; }
+    .workspace-layout.hide-history { --history-track: 0px; }
+    .workspace-layout.hide-tree .tree, .workspace-layout.hide-history .history-panel { display: none; }
+    .tree { grid-area: tree; }
+    .document { grid-area: document; min-width: 0; }
+    .history-panel { grid-area: history; }
+    .panel-handle { position: sticky; top: 88px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 120px; }
+    .tree-handle { grid-area: tree-h; }
+    .history-handle { grid-area: history-h; }
+    .panel-mini { display: grid; place-items: center; width: 26px; height: 32px; padding: 0; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--surface); }
+    .panel-mini:hover, .panel-mini:focus-visible { color: var(--accent); border-color: var(--accent); }
+    .panel-grip { display: grid; place-items: center; width: 24px; min-height: 85px; border-radius: 7px; color: var(--muted); cursor: col-resize; touch-action: none; user-select: none; }
+    .panel-grip:hover, .panel-grip:focus-visible { color: var(--accent); background: var(--accent-soft); outline: 1px solid var(--accent); }
+    .workspace-layout.hide-tree .tree-handle .panel-grip, .workspace-layout.hide-history .history-handle .panel-grip { display: none; }
+    .tree, .history-panel { position: sticky; top: 88px; max-height: calc(100vh - 108px); overflow: auto; padding: 13px; }
+    .tree-item { display: flex; gap: 9px; align-items: center; width: 100%; min-height: 37px; padding: 0 9px; border: 0; border-radius: 8px; color: var(--muted); text-align: left; background: transparent; }
+    .tree-item.selected { color: var(--accent); background: var(--accent-soft); }
+    .tree-indent { padding-left: 25px; }
+    .tree-actions { display: flex; gap: 5px; align-items: center; }
+    .tree-menu { position: relative; }
+    .tree-menu summary { list-style: none; cursor: pointer; }
+    .tree-menu summary::-webkit-details-marker { display: none; }
+    .tree-menu .download-popover { left: auto; right: 0; min-width: 150px; }
+    .tree-row { display: flex; align-items: center; }
+    .tree-row .tree-item { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+    .tree-row .tree-more { flex: 0 0 30px; width: 30px; min-height: 30px; border: 0; background: transparent; color: var(--muted); }
+    .tree-item.drop-target { outline: 2px solid var(--accent); background: var(--accent-soft); }
+    .tree-context { position: fixed; z-index: 20; display: none; min-width: 150px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); }
+    .tree-context.open { display: grid; }
+    .tree-context button { padding: 9px; border: 0; border-radius: 7px; color: var(--ink); text-align: left; background: transparent; }
+    .tree-context button:hover { color: var(--accent); background: var(--accent-soft); }
+    .form-error { color: var(--danger); }
+    .document { min-height: calc(100vh - 112px); padding: 23px clamp(18px, 4vw, 42px); }
+    .document-top { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; padding-bottom: 17px; border-bottom: 1px solid var(--line); }
+    .document-body { max-width: 760px; margin: 28px auto; }
+    .document-body h2 { margin: 22px 0 8px; font-size: 21px; }
+    .document-body p { margin: 12px 0; color: var(--muted); }
+    .document-body blockquote { margin: 18px 0; padding: 11px 15px; border-left: 3px solid var(--accent); color: var(--muted); background: var(--accent-soft); }
+    .document-editor { width: 100%; min-height: 380px; padding: 16px; border: 1px solid var(--line); border-radius: 9px; color: var(--ink); background: var(--surface); font: 14px/1.75 ui-monospace, Consolas, monospace; resize: vertical; }
+    .document-view { display: none; }
+    .document-view.active { display: block; }
+    .document-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .download-popover { position: absolute; top: calc(100% + 7px); right: 0; z-index: 8; display: grid; min-width: 235px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); }
+    .download-popover button { padding: 10px; border: 0; border-radius: 7px; color: var(--ink); text-align: left; background: transparent; }
+    .download-popover button:hover { color: var(--accent); background: var(--accent-soft); }
+    .pdf-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--line); border-bottom: 0; border-radius: 9px 9px 0 0; background: var(--canvas); }
+    .pdf-page { max-width: 740px; min-height: 600px; margin: 0 auto; padding: 48px clamp(22px, 8vw, 76px); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); line-height: 1.9; }
+    .pdf-page h2 { margin: 4px 0 20px; font-size: 23px; }
+    .pdf-page p { margin: 16px 0; color: var(--ink); }
+    mark { border-radius: 3px; background: #ffed9a; color: #332b13; }
+    .docx-page { max-width: 740px; min-height: 500px; margin: 0 auto; padding: 48px clamp(22px, 8vw, 76px); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); }
+    .toast { position: fixed; right: 24px; bottom: 24px; z-index: 12; display: none; max-width: min(420px, calc(100vw - 32px)); padding: 13px 17px; border-radius: 10px; color: white; background: #29334b; box-shadow: var(--shadow); }
+    .toast.open { display: block; }
+    .annotation-list { display: grid; gap: 8px; margin-top: 12px; }
+    .annotation { padding: 10px; border-left: 3px solid #e6b941; border-radius: 0 7px 7px 0; background: color-mix(in srgb, #ffed9a 20%, var(--surface)); }
+    .annotation small { display: block; margin-top: 4px; color: var(--muted); }
+    .search-filter-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .search-filter-row .search { width: min(380px, 100%); }
+    .history-item { position: relative; display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 9px; padding: 2px 0 18px; }
+    .history-item:not(:last-child)::after { position: absolute; top: 17px; bottom: 0; left: 7px; width: 1px; background: var(--line); content: ""; }
+    .history-dot { z-index: 1; width: 15px; height: 15px; border: 3px solid var(--surface); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--line); }
+    .history-meta { min-width: 0; }
+    .history-meta strong { display: block; font-size: 13px; }
+    .history-meta small { display: block; margin-top: 3px; color: var(--muted); }
+    .history-meta code { display: inline-block; margin-top: 6px; padding: 2px 6px; border-radius: 5px; background: var(--canvas); font-size: 11px; }
+    .history-meta .button { margin-top: 8px; min-height: 30px; padding: 0 9px; font-size: 12px; }
+    .account-menu { position: relative; }
+    .account-menu summary { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; list-style: none; }
+    .account-menu summary::-webkit-details-marker { display: none; }
+    .account-menu[open] summary { border-color: var(--accent); }
+    .account-menu-popover { position: absolute; top: calc(100% + 8px); right: 0; z-index: 7; display: grid; min-width: 190px; padding: 7px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); }
+    .account-menu-popover button { padding: 10px; border: 0; border-radius: 7px; color: var(--ink); text-align: left; background: transparent; }
+    .account-menu-popover button:hover { color: var(--accent); background: var(--accent-soft); }
+    .code { overflow: auto; padding: 14px 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); color: var(--muted); font: 12px/1.8 ui-monospace, Consolas, monospace; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 13px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+    th { color: var(--muted); font-size: 12px; font-weight: 650; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .table-wrap { overflow-x: auto; }
+    .setting-row { display: grid; grid-template-columns: minmax(170px, .8fr) minmax(220px, 1.2fr); gap: 20px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }
+    .setting-row:last-child { border-bottom: 0; }
+    .setting-control { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+    .setting-control select, .setting-control input, .setting-control textarea { min-height: 39px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); }
+    .setting-control textarea { min-height: 76px; padding-top: 9px; }
+    .swatch { width: 28px; height: 28px; padding: 0; border: 3px solid var(--surface); border-radius: 50%; outline: 1px solid var(--line); }
+    .swatch[aria-pressed="true"] { outline: 2px solid var(--ink); }
+    .notice { margin: 16px 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--line)); border-radius: 9px; color: var(--warning); background: color-mix(in srgb, var(--warning) 8%, var(--surface)); }
+    .info { margin: 14px 0; padding: 12px 14px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line)); border-radius: 9px; color: var(--muted); background: var(--accent-soft); }
+    .empty-note { padding: 20px; border: 1px dashed var(--line); border-radius: 10px; color: var(--muted); text-align: center; }
+    .settings-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 17px; }
+    .settings-nav { display: grid; align-content: start; gap: 4px; padding: 10px; }
+    .settings-nav button { min-height: 39px; padding: 0 10px; border: 0; border-radius: 8px; color: var(--muted); text-align: left; background: transparent; }
+    .settings-nav button.active, .settings-nav button:hover { color: var(--accent); background: var(--accent-soft); }
+    .settings-panel { display: none; }
+    .settings-panel.active { display: block; }
+    dialog { width: min(600px, calc(100vw - 28px)); max-height: min(88vh, 760px); padding: 0; overflow: auto; border: 1px solid var(--line); border-radius: 15px; color: var(--ink); background: var(--surface); box-shadow: 0 24px 80px rgba(0,0,0,.24); }
+    dialog::backdrop { background: rgba(15, 18, 33, .5); backdrop-filter: blur(2px); }
+    .dialog-head, .dialog-body, .dialog-foot { padding: 19px 22px; }
+    .dialog-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }
+    .dialog-body { display: grid; gap: 15px; }
+    .dialog-foot { display: flex; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--line); }
+    .field { display: grid; gap: 6px; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 40px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--surface); }
+    .field textarea { min-height: 80px; resize: vertical; }
+    @media (max-width: 1200px) {
+      .workspace-layout { grid-template-columns: minmax(0, var(--tree-track)) 28px minmax(0, 1fr); grid-template-areas: "tree tree-h document" "tree tree-h history-h" "tree tree-h history"; }
+      .workspace-layout .history-panel { position: static; max-height: none; }
+      .history-handle { position: static; min-height: 0; align-items: flex-end; }
+      .history-handle .panel-grip { display: none; }
+    }
+    @media (max-width: 1000px) { .workspace-grid { grid-template-columns: repeat(2, 1fr); } .two-col { grid-template-columns: 1fr; } }
+    @media (max-width: 680px) {
+      header { position: static; flex-wrap: wrap; min-height: 58px; padding: 10px 15px; }
+      .header-actions { justify-content: flex-end; }
+      .header-actions > .search { display: none; }
+      .content { padding: 16px 12px 35px; }
+      .workspace-grid, .settings-layout { grid-template-columns: 1fr; }
+      .workspace-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "tree-h" "tree" "document" "history-h" "history"; }
+      .workspace-layout .tree, .workspace-layout .history-panel { position: static; max-height: 360px; }
+      .panel-handle { position: static; min-height: 0; align-items: flex-end; }
+      .panel-grip { display: none; }
+      .settings-nav { display: flex; overflow-x: auto; }
+      .settings-nav button { flex: 0 0 auto; }
+      .setting-row { grid-template-columns: 1fr; gap: 10px; }
+      .page-heading { align-items: center; }
+      h1 { font-size: 23px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <main>
+      <header>
+        <div class="crumb" id="breadcrumb"><strong>Episteme</strong>　/　默认工作区：产品研发</div>
+        <div class="header-actions">
+          <select class="filter" aria-label="切换工作空间"><option>Episteme 产品研发 · 默认</option><option>研究资料库 · 共享</option><option>团队知识规范 · 共享</option></select>
+          <div class="search-wrap"><input class="search" id="workspace-search" aria-label="搜索工作空间文档" placeholder="搜索当前空间文档…"><div class="search-results" id="search-results" role="listbox"></div></div>
+          <a class="button" href="./prototype-admin.html">管理员原型 ↗</a>
+          <details class="account-menu">
+            <summary><span class="avatar" aria-label="当前用户">林</span><span>林知远</span>⌄</summary>
+            <div class="account-menu-popover">
+              <button data-go="spaces">工作空间管理</button>
+              <button data-go="settings">设置</button>
+            </div>
+          </details>
+        </div>
+      </header>
+      <div class="content">
+        <section class="screen active" id="workspace">
+          <div class="page-heading">
+            <div><h1>Episteme 产品研发</h1><p class="subtitle">Code · Owner · 默认工作空间</p></div>
+          </div>
+          <div class="workspace-layout" id="workspace-layout">
+            <article class="card tree" id="document-tree">
+              <div class="card-heading"><div><h3>文档目录</h3><p class="muted">当前空间</p></div><div class="tree-actions"><details class="tree-menu"><summary class="icon-button" aria-label="新建或上传">＋</summary><div class="download-popover"><button type="button" data-create="folder">新建文件夹</button><button type="button" data-create="document">新建文档</button><button type="button" data-upload="files">上传文档</button><button type="button" data-upload="folder">上传文件夹</button></div></details><button class="icon-button" id="download-workspace" title="下载整个工作空间为 ZIP" aria-label="下载整个工作空间为 ZIP">⇩</button></div></div>
+              <p class="muted" id="current-folder" style="margin:0 0 8px">操作路径：/（根目录）</p>
+              <div id="tree-list"></div>
+              <p class="muted" style="margin:12px 0 0">选择目录或文档确定操作路径；可拖拽移动，也可通过右键或 ⋯ 操作。</p>
+              <input id="upload-files" type="file" multiple hidden>
+              <input id="upload-folder" type="file" webkitdirectory multiple hidden>
+            </article>
+            <div class="panel-handle tree-handle">
+              <button class="panel-mini" id="toggle-tree" type="button" aria-controls="document-tree" aria-expanded="true" aria-label="隐藏目录" title="隐藏目录">‹</button>
+              <div class="panel-grip" id="resize-tree" role="separator" aria-label="调整目录宽度" aria-controls="document-tree" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="600" aria-valuenow="250" tabindex="0" title="拖动或使用方向键调整目录宽度">⋮</div>
+            </div>
+            <article class="card document">
+              <div class="document-top">
+                <div><p class="muted" id="document-path">docs / product-overview.md</p><h2 style="margin-top:5px" id="document-title">产品概览</h2><p class="muted" id="document-status">Markdown · 已保存 · HEAD 3f8b2a1</p></div>
+                <div class="document-actions">
+                  <button class="button primary" id="save-document" type="button">保存更改</button>
+                  <button class="button" id="open-document-history" data-go="history">查看此文档历史</button>
+                </div>
+              </div>
+              <div class="info owner-notice"><strong>空间所有者：林知远</strong> · 此文档归属于“Episteme 产品研发”空间，内容所有权归空间所有者。共享成员按其只读/读写权限访问。</div>
+              <div class="document-body document-view active" id="view-md"><div class="toolbar" style="margin-bottom:10px"><span class="badge">Markdown</span><button class="button subtle">预览</button><button class="button">源码</button></div><textarea class="document-editor" aria-label="Markdown 文档内容"># 让知识有序沉淀
+
+Episteme 将工作空间、目录和文档组织在一起，并以 Git 提交保留内容的变更历史。团队成员通过角色获得空间级访问权限。
+
+## 核心能力
+
+- 为不同项目创建独立的知识工作空间。
+- 通过熟悉的目录结构浏览和编辑文档。
+- 回看历史版本，并以新提交恢复旧版内容。
+
+正文和目录结构以工作空间 Git 仓库为事实来源；账号与授权信息由服务端管理。</textarea><p class="muted">保存时基于当前提交 HEAD 3f8b2a1；如其他成员已提交修改，系统提示冲突，不会静默覆盖。</p></div>
+              <div class="document-body document-view" id="view-txt"><div class="toolbar" style="margin-bottom:10px"><span class="badge">纯文本 · UTF-8</span><button class="button">自动换行：开</button></div><textarea class="document-editor" aria-label="TXT 文档内容">会议记录 - 2026-11-18
+
+议题：文档存储和共享策略
+
+1. 每个工作空间维护独立 Git 仓库。
+2. 共享用户获得 Reader 或 Editor 权限。
+3. 归档操作保留文档和提交历史。
+
+待办：
+- 补充全文检索设计
+- 评估 PDF 标注存储方案</textarea><p class="muted">文本文件按纯文本编辑，保存为新的 Git 提交。</p></div>
+              <div class="document-body document-view" id="view-code"><div class="toolbar" style="margin-bottom:10px"><span class="badge">C# · UTF-8</span><button class="button">缩进：4 空格</button><button class="button">换行：开</button></div><textarea class="document-editor" aria-label="代码文件内容" spellcheck="false">public sealed class WorkspaceService
+{
+    public async Task&lt;DocumentResult&gt; ReadAsync(
+        Guid workspaceId,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        return await repository.ReadAsync(
+            workspaceId, relativePath, cancellationToken);
+    }
+}</textarea><p class="muted">代码编辑器可提供语法高亮、行号和查找；语言服务/智能补全属于额外集成范围。</p></div>
+              <div class="document-body document-view" id="view-pdf">
+                <div class="pdf-toolbar"><span class="badge">PDF · 第 2 / 8 页</span><button class="button">−</button><span>100%</span><button class="button">＋</button><button class="button" id="highlight-toggle" aria-pressed="false">标记模式：关闭</button><button class="button">添加批注</button><button class="button">上一条 / 下一条</button></div>
+                <article class="pdf-page"><small class="muted">EPISTEME · RESEARCH BRIEF</small><h2>工作空间文档架构调研</h2><p>文档系统需要同时支持结构化知识组织与长期可追溯的内容变更。工作空间可以作为权限、配置与内容历史的边界。</p><p>调研发现，<mark>统一的检索入口应覆盖文本、Markdown 和代码文件，并清楚展示命中文档路径及上下文片段。</mark>对于 PDF 等二进制文件，可提供预览和按页标注，但需要额外定义标注的持久化及版本关联。</p><p>标注不应破坏原始 PDF 文件。建议将批注作为独立记录，至少包含文档路径、PDF 内容版本、页码、区域坐标、引用文本、批注正文及创建者。</p><p>当文档更新时，旧批注仍应关联原内容版本，并提示用户核对是否需要迁移到新版本。</p></article>
+                <div class="annotation-list"><div class="annotation"><strong>标记批注 · 第 2 页</strong><small>林知远 · 引用：统一的检索入口应覆盖文本、Markdown 和代码文件。</small><span>搜索结果需要按权限过滤，并提供片段定位。</span></div></div>
+                <p class="muted">PDF 标注为原型演示。实际批注需服务端保存并与 PDF 版本绑定。</p>
+              </div>
+              <div class="document-body document-view" id="view-docx"><div class="info"><strong>DOCX 兼容性评估</strong> · 此预览为示意。DOCX 原生编辑/高保真渲染需要专用编辑器或文档转换服务。</div><article class="docx-page"><h2>项目方案书</h2><p>目标：评估在工作空间中提供常见办公文档的检索、预览与协作能力。</p><h3 style="margin-top:24px">建议支持方式</h3><ol><li>首期提取 DOCX 文本用于全文检索。</li><li>提供只读 HTML/PDF 预览；原文件仍按二进制文件下载。</li><li>若要浏览器内编辑并保留分页、样式和批注，需引入第三方文档套件或构建复杂转换链路。</li></ol><p class="muted">版本历史保存原始 DOCX 文件的 Git blob；编辑后的 Office 文件也应以新 blob/提交保存。</p></article><p class="muted">建议 DOCX 首期只读，原生在线编辑作为单独的产品/成本决策。</p></div>
+              <div class="document-body document-view" id="view-generic"><div class="toolbar" style="margin-bottom:10px"><span class="badge" id="generic-type">文本</span></div><textarea class="document-editor" id="generic-editor" aria-label="文档内容"></textarea><p class="muted">仅为原型中的临时内容，刷新页面后不会保留。</p></div>
+              <div class="document-body document-view" id="view-unsupported"><div class="empty-note">此文档类型暂不支持预览或编辑。可下载原文件后使用其他工具打开。</div><p class="muted">上传文件在此静态原型中仅展示名称，不读取或保存文件内容；正式支持情况以实际查看器为准。</p></div>
+              <div class="document-body document-view" id="view-upload"><div class="empty-note">静态原型仅展示上传文件的名称和目录，未读取或保存内容，无法演示该文件的预览或编辑。</div></div>
+              <div class="document-body document-view" id="view-empty"><div class="empty-note">请选择一个文档。</div></div>
+            </article>
+            <div class="panel-handle history-handle">
+              <button class="panel-mini" id="toggle-history" type="button" aria-controls="document-history" aria-expanded="true" aria-label="隐藏版本历史" title="隐藏版本历史">›</button>
+              <div class="panel-grip" id="resize-history" role="separator" aria-label="调整版本历史宽度" aria-controls="document-history" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="600" aria-valuenow="310" tabindex="0" title="拖动或使用方向键调整版本历史宽度">⋮</div>
+            </div>
+            <aside class="card history-panel" id="document-history">
+              <div class="card-heading"><div><h3>文档版本历史</h3><p class="muted">product-overview.md</p></div><span class="badge success">HEAD</span></div>
+              <div class="history-item"><span class="history-dot"></span><div class="history-meta"><strong>补充产品核心能力说明</strong><small>林知远 · 今天 09:12</small><code>3f8b2a1</code><span class="badge success" style="margin-left:4px">当前</span></div></div>
+              <div class="history-item"><span class="history-dot"></span><div class="history-meta"><strong>完善目录结构介绍</strong><small>周予安 · 昨天 16:40</small><code>1c91da4</code><br><button class="button">查看版本</button><button class="button">恢复</button></div></div>
+              <div class="history-item"><span class="history-dot"></span><div class="history-meta"><strong>创建产品概览</strong><small>林知远 · 11 月 16 日</small><code>8a73c0f</code><br><button class="button">查看版本</button><button class="button">恢复</button></div></div>
+              <div class="info">恢复旧版本会创建新提交，不会覆盖历史。</div>
+              <button class="text-link" data-go="history">打开完整历史 →</button>
+              <p class="muted" id="no-demo-history" hidden>此项目没有可展示的示例历史；原型不保存真实版本。</p>
+            </aside>
+          </div>
+        </section>
+
+        <section class="screen" id="spaces">
+          <div class="page-heading"><div><h1>工作空间管理</h1><p class="subtitle">管理你拥有的空间，以及其他所有者共享给你的空间。</p></div><div class="toolbar"><button class="button" data-go="workspace">返回默认工作区</button><button class="button" data-dialog="import-dialog">⇧ 导入配置</button><button class="button primary" data-dialog="new-dialog">＋ 新建空间</button></div></div>
+          <div class="toolbar" style="margin-bottom:16px">
+            <input class="search" id="space-search" aria-label="搜索工作空间" placeholder="按名称或路径搜索">
+            <select class="filter" id="space-type-filter" aria-label="筛选类型"><option value="">全部类型</option><option>Code</option><option>Skill</option><option>Research</option><option>BusinessNovel</option><option>Custom</option></select>
+            <select class="filter" id="space-access-filter" aria-label="筛选访问"><option value="">全部空间</option><option value="owner">我拥有的</option><option value="shared">与我共享的</option></select>
+            <div class="toolbar view-switch" aria-label="视图"><button class="button" type="button" data-space-view="tiles" aria-pressed="true">▦ 平铺</button><button class="button" type="button" data-space-view="list" aria-pressed="false">☰ 详细列表</button></div>
+          </div>
+          <div class="grid workspace-grid" id="space-tiles"></div>
+          <div class="card table-wrap" id="space-list" hidden><table class="workspace-details-table"><thead><tr><th>工作空间</th><th>类型</th><th>个人工作路径</th><th>所有者 / 我的权限</th><th>状态</th><th>MCP</th><th>操作</th></tr></thead><tbody id="space-list-body"></tbody></table></div>
+          <p class="empty-note" id="space-empty" hidden>没有符合条件的工作空间。</p>
+        </section>
+
+        <section class="screen" id="history">
+          <div class="page-heading"><div><p class="crumb">Episteme 产品研发 / docs / product-overview.md</p><h1 style="margin-top:7px">文档版本历史</h1><p class="subtitle">显示此文档被修改的提交。恢复旧版会产生新提交，不重写历史。</p></div><button class="button" data-go="workspace">← 返回工作区</button></div>
+          <article class="card"><div class="card-heading"><h2>product-overview.md</h2><span class="badge">当前 HEAD · 3f8b2a1</span></div><div class="table-wrap"><table><thead><tr><th>提交说明</th><th>操作者</th><th>时间</th><th>提交 ID</th><th></th></tr></thead><tbody>
+            <tr><td><strong>补充产品核心能力说明</strong><br><span class="muted">更新 1 个文档</span></td><td>林知远</td><td>今天 09:12</td><td><code>3f8b2a1</code></td><td><span class="badge success">当前版本</span></td></tr>
+            <tr><td><strong>完善目录结构介绍</strong></td><td>林知远</td><td>昨天 16:40</td><td><code>1c91da4</code></td><td><button class="button">查看 / 恢复</button></td></tr>
+            <tr><td><strong>创建产品概览</strong></td><td>周予安</td><td>11 月 16 日</td><td><code>8a73c0f</code></td><td><button class="button">查看 / 恢复</button></td></tr>
+          </tbody></table></div></article>
+          <div class="info">目录创建、移动、删除与文档写入均作为 Git 提交保存；当前原型重点展示单个文档的历史。空间名称/描述等元数据设置另有并发版本戳，但当前不提供可浏览的设置变更历史。</div>
+        </section>
+
+        <section class="screen" id="settings">
+          <div class="page-heading"><div><h1>设置</h1><p class="subtitle">管理个人偏好与账户安全。</p></div><button class="button" data-go="workspace">返回默认工作区</button></div>
+          <div class="settings-layout">
+            <nav class="card settings-nav" aria-label="设置分类">
+              <button class="active" data-panel="appearance-settings">偏好设置</button>
+              <button data-panel="account-settings">登录与安全</button>
+            </nav>
+            <div>
+              <section class="card settings-panel active" id="appearance-settings">
+                <div class="card-heading"><div><h2>偏好设置</h2><p class="muted">个人外观与默认工作方式。</p></div><span class="badge">主题交互为原型演示</span></div>
+                <div class="setting-row"><div><strong>颜色模式</strong><p class="muted">可跟随设备外观。</p></div><div class="setting-control"><select id="theme-mode" aria-label="颜色模式"><option value="light">浅色</option><option value="dark">深色</option><option value="system">跟随系统</option></select></div></div>
+                <div class="setting-row"><div><strong>强调色</strong><p class="muted">用于按钮、链接和选中状态。</p></div><div class="setting-control">
+                  <button class="swatch" data-accent="#635bdb" style="background:#635bdb" aria-label="紫色" aria-pressed="true"></button><button class="swatch" data-accent="#276fbd" style="background:#276fbd" aria-label="蓝色" aria-pressed="false"></button><button class="swatch" data-accent="#16806e" style="background:#16806e" aria-label="绿色" aria-pressed="false"></button><button class="swatch" data-accent="#b65c7a" style="background:#b65c7a" aria-label="玫红" aria-pressed="false"></button>
+                </div></div>
+                <div class="setting-row"><div><strong>显示密度</strong><p class="muted">调整列表与卡片间距。</p></div><div class="setting-control"><select id="density-mode" aria-label="显示密度"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div></div>
+                <div class="setting-row"><div><strong>默认进入空间</strong><p class="muted">登录后直接打开该空间继续工作。</p></div><div class="setting-control"><select aria-label="默认进入空间"><option>Episteme 产品研发</option><option>研究资料库</option></select></div></div>
+                <div class="toolbar"><button class="button" id="reset-theme">恢复默认外观</button><span class="muted">主题当前保存在此浏览器；跨设备同步需后端偏好 API 支持。</span></div>
+              </section>
+              <section class="card settings-panel" id="account-settings">
+                <div class="card-heading"><div><h2>登录与安全</h2><p class="muted">管理登录凭据、授权应用和令牌。</p></div></div>
+                <div class="setting-row"><div><strong>登录信息</strong><p class="muted">当前账号 lin@example.test</p></div><div class="setting-control"><button class="button">修改密码</button><button class="button">退出登录</button></div></div>
+                <div class="setting-row"><div><strong>有效令牌</strong><p class="muted">只展示元数据，绝不显示令牌密钥。</p></div><div class="setting-control"><span>VS Code MCP · Access · 有效</span><button class="button">撤销</button></div></div>
+                <div class="setting-row"><div><strong>已授权应用</strong><p class="muted">查看或撤销第三方客户端授权。</p></div><div class="setting-control"><span>Episteme Web · VS Code MCP</span><button class="button">管理授权</button></div></div>
+              </section>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="download-toast" role="status" aria-live="polite"></div>
+  <div class="tree-context" id="tree-context" role="menu" aria-label="目录操作"><button type="button" role="menuitem" data-tree-action="move">移动</button><button type="button" role="menuitem" data-tree-action="download">下载</button><button type="button" role="menuitem" data-tree-action="delete">删除</button></div>
+
+  <dialog id="entry-dialog" aria-labelledby="entry-title">
+    <form id="entry-form">
+      <div class="dialog-head"><div><h2 id="entry-title">新建文档</h2><p class="muted" id="entry-location"></p></div><button class="icon-button" type="button" data-close="entry-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <label class="field"><strong id="entry-name-label">文档名称（不含后缀）</strong><input id="entry-name" required maxlength="120" autocomplete="off"></label>
+        <label class="field" id="entry-type-field"><strong>文档类型</strong><select id="entry-type"><option value=".md">Markdown（.md）</option><option value=".txt">纯文本（.txt）</option><option value=".cs">C#（.cs）</option></select></label>
+        <p class="muted" id="entry-suffix"></p><p class="form-error" id="entry-error" role="alert"></p>
+      </div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="entry-dialog">取消</button><button class="button primary" type="submit">创建</button></div>
+    </form>
+  </dialog>
+  <dialog id="move-dialog" aria-labelledby="move-title">
+    <form id="move-form">
+      <div class="dialog-head"><div><h2 id="move-title">移动</h2><p class="muted" id="move-source"></p></div><button class="icon-button" type="button" data-close="move-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body"><label class="field"><strong>目标目录</strong><select id="move-destination"></select></label><p class="form-error" id="move-error" role="alert"></p></div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="move-dialog">取消</button><button class="button primary" type="submit">移动</button></div>
+    </form>
+  </dialog>
+  <dialog id="delete-dialog" aria-labelledby="delete-title">
+    <form id="delete-form">
+      <div class="dialog-head"><div><h2 id="delete-title">确认删除</h2><p class="muted">此操作在原型中只影响临时数据。</p></div><button class="icon-button" type="button" data-close="delete-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body"><p id="delete-description"></p></div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="delete-dialog">取消</button><button class="button primary" type="submit">确认删除</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="new-dialog" aria-labelledby="new-title">
+    <form id="new-space-form">
+      <div class="dialog-head"><div><h2 id="new-title">新建工作空间</h2><p class="muted">正式创建后将初始化独立 Git 仓库。</p></div><button class="icon-button" type="button" data-close="new-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <label class="field"><strong>空间名称</strong><input id="new-space-name" required maxlength="120" placeholder="例如：产品研发空间"></label>
+        <label class="field"><strong>唯一标识（slug）</strong><input id="new-space-slug" required maxlength="80" placeholder="product-knowledge"></label>
+        <label class="field"><strong>空间类型</strong><select id="new-space-type"><option>Code</option><option>Skill</option><option>Research</option><option>BusinessNovel</option><option>Custom</option></select></label>
+        <label class="field" id="new-custom-field" hidden><strong>自定义类型名称</strong><input id="new-custom-type" maxlength="80" placeholder="例如：实验项目"></label>
+        <label class="field"><strong>描述（可选）</strong><textarea id="new-space-description" maxlength="2000" placeholder="介绍这个空间的用途"></textarea></label>
+        <div class="info">创建者成为 Owner；可在工作空间管理中添加共享成员。自定义类型名称需要扩展后端。</div>
+        <p class="form-error" id="new-space-error" role="alert"></p>
+      </div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="new-dialog">取消</button><button class="button primary" type="submit">创建空间</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="manage-space-dialog" aria-labelledby="manage-space-title">
+    <div class="dialog-head"><div><h2 id="manage-space-title">管理工作空间</h2><p class="muted">以下更改仅在当前原型页面中生效。</p></div><button class="icon-button" type="button" data-close="manage-space-dialog" aria-label="关闭">×</button></div>
+    <form id="manage-space-form">
+      <div class="dialog-body">
+        <label class="field"><strong>空间名称</strong><input id="manage-name" required maxlength="120"></label>
+        <label class="field"><strong>空间类型</strong><select id="manage-type"><option>Code</option><option>Skill</option><option>Research</option><option>BusinessNovel</option><option>Custom</option></select></label>
+        <label class="field" id="manage-custom-field" hidden><strong>自定义类型名称</strong><input id="manage-custom-type" maxlength="80"></label>
+        <label class="field"><strong>描述</strong><textarea id="manage-description" maxlength="2000"></textarea></label>
+        <label class="field"><strong>个人默认工作目录</strong><input id="manage-path" placeholder="例如 docs 或留空表示根目录"><small class="muted">空间内相对路径，不是服务器磁盘路径。逐空间保存个人目录需扩展后端；现有设置按用户保存，不区分空间。</small></label>
+        <label><input id="manage-mcp" type="checkbox"> 允许通过 MCP 访问此工作空间</label>
+        <p class="muted">此开关是待实现的空间级策略；启用后仍需验证用户、成员角色与 OAuth scope。当前后端没有此开关。</p>
+        <p class="form-error" id="manage-space-error" role="alert"></p>
+      </div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="manage-space-dialog">取消</button><button class="button primary" type="submit">保存设置</button></div>
+    </form>
+  </dialog>
+  <dialog id="share-space-dialog" aria-labelledby="share-space-title">
+    <div class="dialog-head"><div><h2 id="share-space-title">共享与权限</h2><p class="muted" id="share-space-name"></p></div><button class="icon-button" type="button" data-close="share-space-dialog" aria-label="关闭">×</button></div>
+    <div class="dialog-body">
+      <div class="info">文档所有权归空间 Owner。共享用户仅获得所选只读或读写权限；正式实现需选择系统用户并由后端授权。</div>
+      <form id="share-space-form" class="grid">
+        <label class="field"><strong>共享给指定用户</strong><select id="share-user" required><option value="">选择示例用户</option><option value="zhou">周予安 · zhou@example.test</option><option value="chen">陈书宁 · chen@example.test</option><option value="li">李明 · li@example.test</option></select></label>
+        <label class="field"><strong>权限</strong><select id="share-role"><option value="Reader">只读</option><option value="Editor">读写</option></select></label>
+        <p class="form-error" id="share-error" role="alert"></p><div><button class="button primary" type="submit">共享空间</button></div>
+      </form>
+      <h3>已共享用户</h3><div id="share-members" class="list"></div>
+      <p class="muted">Owner 不在撤回共享列表中；修改权限或撤回均需后端验证。</p>
+    </div>
+    <div class="dialog-foot"><button class="button" type="button" data-close="share-space-dialog">关闭</button></div>
+  </dialog>
+  <dialog id="space-path-dialog" aria-labelledby="space-path-title">
+    <form id="space-path-form">
+      <div class="dialog-head"><div><h2 id="space-path-title">个人工作路径</h2><p class="muted" id="space-path-name"></p></div><button class="icon-button" type="button" data-close="space-path-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body"><label class="field"><strong>空间内相对路径</strong><input id="space-personal-path" placeholder="留空表示根目录"><small class="muted">仅影响当前用户；逐空间保存个人目录需扩展后端。</small></label><p class="form-error" id="space-path-error" role="alert"></p></div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="space-path-dialog">取消</button><button class="button primary" type="submit">保存</button></div>
+    </form>
+  </dialog>
+  <dialog id="space-confirm-dialog" aria-labelledby="space-confirm-title">
+    <form id="space-confirm-form">
+      <div class="dialog-head"><h2 id="space-confirm-title">确认操作</h2><button class="icon-button" type="button" data-close="space-confirm-dialog" aria-label="关闭">×</button></div>
+      <div class="dialog-body"><p id="space-confirm-description"></p></div>
+      <div class="dialog-foot"><button class="button" type="button" data-close="space-confirm-dialog">取消</button><button class="button primary" type="submit">确认</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog" aria-labelledby="import-title">
+    <form method="dialog">
+      <div class="dialog-head"><div><h2 id="import-title">导入工作空间配置</h2><p class="muted">导入空间元数据与可选的空目录骨架。</p></div><button class="icon-button" value="cancel" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <label class="field"><strong>配置文件</strong><input type="file" accept=".json,application/json"></label>
+        <label class="field"><strong>新空间名称</strong><input required value="导入的研究空间"></label>
+        <label class="field"><strong>唯一标识（slug）</strong><input required value="imported-research"></label>
+        <div class="empty-note">选择 episteme.workspace.json 后显示格式版本、空间类型和目录预览。</div>
+        <div class="notice">配置导入不包含文档正文、成员权限、token 或 Git 历史；导入者成为新空间 Owner。</div>
+      </div>
+      <div class="dialog-foot"><button class="button" value="cancel">取消</button><button class="button primary" value="import">校验并导入</button></div>
+    </form>
+  </dialog>
+
+  <script>
+    const root = document.documentElement;
+    const screenNames = {
+      workspace: "默认工作区 / Episteme 产品研发",
+      spaces: "工作区 / 全部空间",
+      history: "默认工作区 / 文档版本历史",
+      settings: "设置"
+    };
+    function showScreen(id) {
+      if (id === "workspace" && getSpace("product").status !== "Active") {
+        notify("默认空间已在原型中归档，请选择其他空间；原型不支持切换真实空间。");
+        return;
+      }
+      document.querySelectorAll(".screen").forEach(screen => screen.classList.toggle("active", screen.id === id));
+      document.getElementById("breadcrumb").textContent = screenNames[id] || "Episteme";
+      document.querySelector(".account-menu").open = false;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+    const entries = [
+      { id: "docs", parent: "", name: "docs", folder: true, expanded: true },
+      { id: "md", parent: "docs", name: "product-overview.md", view: "view-md", title: "产品概览", status: "Markdown · 已保存 · HEAD 3f8b2a1", text: "工作空间 Git 文档历史" },
+      { id: "txt", parent: "docs", name: "meeting-notes.txt", view: "view-txt", title: "会议记录", status: "纯文本 · UTF-8 · HEAD b1e42a0", text: "全文检索 PDF 标注待办" },
+      { id: "pdf", parent: "docs", name: "research-brief.pdf", view: "view-pdf", title: "工作空间文档架构调研", status: "PDF · 8 页 · HEAD 8fe9012", text: "统一检索 文档路径 上下文片段 PDF 标注" },
+      { id: "docx", parent: "docs", name: "proposal.docx", view: "view-docx", title: "项目方案书", status: "DOCX · 只读预览 · HEAD 21a9c11", text: "项目方案 文档检索 在线编辑" },
+      { id: "src", parent: "", name: "src", folder: true, expanded: true },
+      { id: "code", parent: "src", name: "WorkspaceService.cs", view: "view-code", status: "C# · UTF-8 · HEAD 5ca321d", text: "WorkspaceService relativePath repository" },
+      { id: "research", parent: "", name: "research", folder: true, expanded: true },
+      { id: "readme", parent: "", name: "README.md", view: "view-generic", content: "# Episteme\n", status: "Markdown · 示例" },
+      { id: "unknown", parent: "", name: "archive.bin", view: "view-unsupported", status: "不支持预览或编辑" }
+    ];
+    let selectedFolder = "";
+    let selectedFile = "md";
+    let treeSelection = "";
+    let contextId = null;
+    let createKind = "document";
+    let nextId = 1;
+    let draggedId = null;
+    const treeList = document.getElementById("tree-list");
+    const treeContext = document.getElementById("tree-context");
+    const findEntry = id => entries.find(entry => entry.id === id);
+    function entryPath(id) {
+      const parts = [];
+      while (id) {
+        const entry = findEntry(id);
+        parts.unshift(entry.name);
+        id = entry.parent;
+      }
+      return parts.join("/");
+    }
+    function folderLabel(id) { return id ? `/${entryPath(id)}` : "/（根目录）"; }
+    function notify(message) {
+      const toast = document.getElementById("download-toast");
+      toast.textContent = message;
+      toast.classList.add("open");
+      window.clearTimeout(notify.timer);
+      notify.timer = window.setTimeout(() => toast.classList.remove("open"), 5000);
+    }
+    function downloadNotice(scope) {
+      notify(`${scope}：静态原型不会生成文件；正式版本需由后端授权并流式返回。`);
+    }
+    const sampleUsers = {
+      zhou: "周予安 · zhou@example.test",
+      chen: "陈书宁 · chen@example.test",
+      li: "李明 · li@example.test"
+    };
+    const spaces = [
+      { id: "product", name: "Episteme 产品研发", slug: "product", type: "Code", custom: "", description: "产品代码、设计和开发文档。", path: "docs", owner: "林知远", role: "Owner", status: "Active", mcp: false, members: [{ user: "zhou", role: "Editor" }, { user: "chen", role: "Reader" }] },
+      { id: "research-space", name: "研究资料库", slug: "research", type: "Research", custom: "", description: "项目调研、阅读笔记与资料归档。", path: "", owner: "周予安", role: "Editor", status: "Active", mcp: null, members: [] },
+      { id: "standards", name: "团队知识规范", slug: "standards", type: "Skill", custom: "", description: "协作流程与常用技能说明。", path: "", owner: "陈书宁", role: "Reader", status: "Active", mcp: null, members: [] },
+      { id: "pending", name: "新项目空间", slug: "new-project", type: "Custom", custom: "新项目", description: "仓库正在准备中。", path: "", owner: "林知远", role: "Owner", status: "Provisioning", mcp: false, members: [] }
+    ];
+    let activeSpaceId = null;
+    let spaceView = "tiles";
+    let spaceSequence = 1;
+    let confirmSpaceAction = null;
+    const getSpace = id => spaces.find(space => space.id === id);
+    const typeLabel = space => space.type === "Custom" ? `Custom · ${space.custom || "未命名"}` : space.type;
+    const pathLabel = space => space.path ? `/${space.path}` : "/（根目录）";
+    const permissionLabel = space => space.role === "Owner" ? "我拥有 · Owner" : `与我共享 · ${space.role === "Reader" ? "只读" : "读写"} · ${space.role}`;
+    function element(tag, text, className) {
+      const node = document.createElement(tag);
+      if (text !== null) node.textContent = text;
+      if (className) node.className = className;
+      return node;
+    }
+    function workspaceStatus(status) {
+      const labels = { Active: "正常 · Active", Provisioning: "初始化中 · Provisioning", Archived: "已归档 · Archived" };
+      const badge = element("span", labels[status] || `未知状态 · ${status}`, "badge workspace-status");
+      badge.dataset.status = status;
+      return badge;
+    }
+    function spaceActions(space) {
+      const actions = element("div", null, "workspace-action-list");
+      const add = (label, action) => {
+        const button = element("button", label, "button");
+        button.type = "button";
+        button.dataset.spaceAction = action;
+        button.dataset.spaceId = space.id;
+        actions.append(button);
+      };
+      if (space.status === "Active") {
+        add("打开", "open");
+        add("导出配置", "export");
+        if (space.role === "Owner") { add("设置", "settings"); add("共享", "share"); add("归档", "archive"); }
+        else add("个人路径", "path");
+      } else {
+        actions.append(element("span", space.status === "Archived" ? "已归档 · 示例" : "初始化中", "muted"));
+      }
+      return actions;
+    }
+    function renderSpaces() {
+      const query = document.getElementById("space-search").value.trim().toLocaleLowerCase();
+      const type = document.getElementById("space-type-filter").value;
+      const access = document.getElementById("space-access-filter").value;
+      const visible = spaces.filter(space =>
+        `${space.name} ${space.slug} ${space.path} ${space.custom}`.toLocaleLowerCase().includes(query) &&
+        (!type || space.type === type) &&
+        (!access || (access === "owner" ? space.role === "Owner" : space.role !== "Owner")));
+      const tiles = document.getElementById("space-tiles");
+      const list = document.getElementById("space-list");
+      const body = document.getElementById("space-list-body");
+      tiles.replaceChildren();
+      body.replaceChildren();
+      tiles.hidden = spaceView !== "tiles";
+      list.hidden = spaceView !== "list";
+      document.getElementById("space-empty").hidden = visible.length > 0;
+      visible.forEach(space => {
+        const card = element("article", null, "card workspace-card");
+        const heading = element("div", null, "card-heading");
+        heading.append(element("span", "◇", "type-icon"), workspaceStatus(space.status));
+        card.append(heading, element("h3", space.name), element("p", space.description || "暂无描述", "subtitle"));
+        const meta = element("div", null, "workspace-meta");
+        [`类型：${typeLabel(space)}`, `个人工作路径：${pathLabel(space)}`, `所有者：${space.owner}`, `MCP：${space.mcp === null ? "未提供" : space.mcp ? "允许（示例）" : "关闭（示例）"}`].forEach(value => meta.append(element("span", value)));
+        const footer = element("footer");
+        footer.append(element("span", permissionLabel(space)), spaceActions(space));
+        card.append(meta, footer);
+        tiles.append(card);
+        const row = element("tr");
+        const values = [space.name, typeLabel(space), pathLabel(space), `${space.owner} · ${permissionLabel(space)}`];
+        values.forEach(value => row.append(element("td", value)));
+        const statusCell = element("td");
+        statusCell.append(workspaceStatus(space.status));
+        row.append(statusCell, element("td", space.mcp === null ? "未提供" : space.mcp ? "允许（示例）" : "关闭（示例）"));
+        const actionsCell = element("td");
+        actionsCell.append(spaceActions(space));
+        row.append(actionsCell);
+        body.append(row);
+      });
+    }
+    ["space-search", "space-type-filter", "space-access-filter"].forEach(id => document.getElementById(id).addEventListener(id === "space-search" ? "input" : "change", renderSpaces));
+    document.querySelectorAll("[data-space-view]").forEach(button => button.addEventListener("click", () => {
+      spaceView = button.dataset.spaceView;
+      document.querySelectorAll("[data-space-view]").forEach(item => item.setAttribute("aria-pressed", String(item === button)));
+      renderSpaces();
+    }));
+    function toggleCustom(prefix) {
+      const custom = document.getElementById(prefix === "new" ? "new-space-type" : "manage-type").value === "Custom";
+      const field = document.getElementById(`${prefix}-custom-field`);
+      const input = document.getElementById(`${prefix}-custom-type`);
+      field.hidden = !custom;
+      input.required = custom;
+    }
+    document.getElementById("new-space-type").addEventListener("change", () => toggleCustom("new"));
+    document.getElementById("manage-type").addEventListener("change", () => toggleCustom("manage"));
+    document.getElementById("new-space-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const name = document.getElementById("new-space-name").value.trim();
+      const slug = document.getElementById("new-space-slug").value.trim();
+      const type = document.getElementById("new-space-type").value;
+      const custom = document.getElementById("new-custom-type").value.trim();
+      const error = document.getElementById("new-space-error");
+      if (!name || (type === "Custom" && !custom)) { error.textContent = "请填写空间名称和自定义类型名称。"; return; }
+      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) { error.textContent = "slug 只能使用小写字母、数字和单个连字符。"; return; }
+      if (spaces.some(space => space.slug === slug)) { error.textContent = "slug 已存在，请使用其他标识。"; return; }
+      spaces.push({ id: `space-${spaceSequence++}`, name, slug, type, custom: type === "Custom" ? custom : "", description: document.getElementById("new-space-description").value.trim(), path: "", owner: "林知远", role: "Owner", status: "Active", mcp: false, members: [] });
+      event.currentTarget.reset();
+      toggleCustom("new");
+      error.textContent = "";
+      document.getElementById("new-dialog").close();
+      renderSpaces();
+      notify("已添加原型示例空间；未创建仓库，刷新后不保留。");
+    });
+    function renderMembers(space) {
+      const list = document.getElementById("share-members");
+      list.replaceChildren();
+      if (!space.members.length) { list.append(element("p", "暂无共享用户", "muted")); return; }
+      space.members.forEach(member => {
+        const row = element("div", null, "list-row");
+        row.append(element("span", sampleUsers[member.user]));
+        const controls = element("div", null, "toolbar");
+        const select = document.createElement("select");
+        select.className = "filter";
+        select.setAttribute("aria-label", `${sampleUsers[member.user]} 的权限`);
+        select.add(new Option("只读", "Reader"));
+        select.add(new Option("读写", "Editor"));
+        select.value = member.role;
+        select.addEventListener("change", () => { member.role = select.value; notify("权限已在原型中更新，未写入服务端。"); });
+        const revoke = element("button", "撤回共享", "button");
+        revoke.type = "button";
+        revoke.addEventListener("click", () => {
+          confirmSpaceAction = { kind: "revoke", spaceId: space.id, user: member.user };
+          document.getElementById("space-confirm-title").textContent = "确认撤回共享";
+          document.getElementById("space-confirm-description").textContent = `撤回 ${sampleUsers[member.user]} 对“${space.name}”的访问权限？`;
+          document.getElementById("space-confirm-dialog").showModal();
+        });
+        controls.append(select, revoke);
+        row.append(controls);
+        list.append(row);
+      });
+    }
+    document.getElementById("spaces").addEventListener("click", event => {
+      const button = event.target.closest("[data-space-action]");
+      if (!button) return;
+      const space = getSpace(button.dataset.spaceId);
+      if (!space || space.status !== "Active") { notify("该空间当前不可操作。"); return; }
+      const action = button.dataset.spaceAction;
+      if (action === "open") {
+        if (space.id === "product") showScreen("workspace");
+        else notify("当前原型仅提供默认空间内容示例，未切换真实工作空间。");
+      } else if (action === "export") {
+        notify(`导出“${space.name}”配置：原型不会生成文件；不包含文档、成员、令牌或 Git 历史。`);
+      } else if (action === "path") {
+        activeSpaceId = space.id;
+        document.getElementById("space-path-name").textContent = `${space.name} · 仅当前用户`;
+        document.getElementById("space-personal-path").value = space.path;
+        document.getElementById("space-path-error").textContent = "";
+        document.getElementById("space-path-dialog").showModal();
+      } else if (space.role !== "Owner") {
+        notify("只有空间所有者可管理该空间。");
+      } else if (action === "settings") {
+        activeSpaceId = space.id;
+        document.getElementById("manage-space-title").textContent = `设置 · ${space.name}`;
+        document.getElementById("manage-name").value = space.name;
+        document.getElementById("manage-type").value = space.type;
+        document.getElementById("manage-custom-type").value = space.custom;
+        document.getElementById("manage-description").value = space.description;
+        document.getElementById("manage-path").value = space.path;
+        document.getElementById("manage-mcp").checked = space.mcp;
+        document.getElementById("manage-space-error").textContent = "";
+        toggleCustom("manage");
+        document.getElementById("manage-space-dialog").showModal();
+      } else if (action === "share") {
+        activeSpaceId = space.id;
+        document.getElementById("share-space-name").textContent = `${space.name} · Owner：${space.owner}`;
+        document.getElementById("share-space-form").reset();
+        document.getElementById("share-error").textContent = "";
+        renderMembers(space);
+        document.getElementById("share-space-dialog").showModal();
+      } else if (action === "archive") {
+        confirmSpaceAction = { kind: "archive", spaceId: space.id };
+        document.getElementById("space-confirm-title").textContent = "确认归档空间";
+        document.getElementById("space-confirm-description").textContent = `归档“${space.name}”？归档后空间不可继续访问或修改，仓库不会删除。${space.id === "product" ? "这是默认空间，需要另选默认空间。" : ""} 当前仅为原型演示。`;
+        document.getElementById("space-confirm-dialog").showModal();
+      }
+    });
+    function validPersonalPath(path) {
+      return !path || (!path.startsWith("/") && path.split("/").every(part => validName(part)));
+    }
+    document.getElementById("space-path-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const space = getSpace(activeSpaceId);
+      const path = document.getElementById("space-personal-path").value.trim();
+      const error = document.getElementById("space-path-error");
+      if (!space || space.status !== "Active") { error.textContent = "空间不可访问，请重新选择。"; return; }
+      if (!validPersonalPath(path)) { error.textContent = "请输入有效的空间内相对路径，不能包含空段或 ..。"; return; }
+      space.path = path;
+      document.getElementById("space-path-dialog").close();
+      renderSpaces();
+      notify("个人路径已更新为原型示例；未写入服务端。");
+    });
+    document.getElementById("manage-space-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const space = getSpace(activeSpaceId);
+      const name = document.getElementById("manage-name").value.trim();
+      const type = document.getElementById("manage-type").value;
+      const custom = document.getElementById("manage-custom-type").value.trim();
+      const path = document.getElementById("manage-path").value.trim();
+      const error = document.getElementById("manage-space-error");
+      if (!space || space.role !== "Owner" || space.status !== "Active") { error.textContent = "空间不可管理，请重新选择。"; return; }
+      if (!name || (type === "Custom" && !custom)) { error.textContent = "请填写空间名称和自定义类型名称。"; return; }
+      if (!validPersonalPath(path)) { error.textContent = "请输入有效的空间内相对路径，不能包含空段或 ..。"; return; }
+      Object.assign(space, { name, type, custom: type === "Custom" ? custom : "", path, description: document.getElementById("manage-description").value.trim(), mcp: document.getElementById("manage-mcp").checked });
+      if (space.id === "product") {
+        document.querySelector("#workspace .page-heading h1").textContent = name;
+        document.querySelector("#workspace .page-heading .subtitle").textContent = `${typeLabel(space)} · Owner · 默认工作空间`;
+        document.querySelector("#workspace .owner-notice").textContent = `空间所有者：林知远 · 此文档归属于“${name}”空间，内容所有权归空间所有者。共享成员按其只读/读写权限访问。`;
+        screenNames.workspace = `默认工作区 / ${name}`;
+        document.querySelector('select[aria-label="切换工作空间"] option').textContent = `${name} · 默认`;
+        document.querySelector('select[aria-label="默认进入空间"] option').textContent = name;
+      }
+      document.getElementById("manage-space-dialog").close();
+      renderSpaces();
+      notify("设置已更新为原型示例；未写入服务端。");
+    });
+    document.getElementById("share-space-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const space = getSpace(activeSpaceId);
+      const user = document.getElementById("share-user").value;
+      const error = document.getElementById("share-error");
+      if (!space || space.role !== "Owner" || space.status !== "Active") { error.textContent = "空间不可管理，请重新选择。"; return; }
+      if (!sampleUsers[user]) { error.textContent = "请选择示例用户。"; return; }
+      if (space.members.some(member => member.user === user)) { error.textContent = "该用户已共享，请直接修改其权限。"; return; }
+      space.members.push({ user, role: document.getElementById("share-role").value });
+      error.textContent = "";
+      renderMembers(space);
+      notify("已添加示例共享；未写入服务端。");
+    });
+    document.getElementById("space-confirm-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const action = confirmSpaceAction;
+      const space = action && getSpace(action.spaceId);
+      if (!space || space.role !== "Owner" || space.status !== "Active") { notify("空间不可管理，请重新选择。"); }
+      else if (action.kind === "archive") {
+        space.status = "Archived";
+        renderSpaces();
+        notify("已在原型中归档；未修改真实空间，刷新后恢复。");
+      } else if (action.kind === "revoke") {
+        space.members = space.members.filter(member => member.user !== action.user);
+        renderMembers(space);
+        notify("已在原型中撤回共享；未写入服务端。");
+      }
+      confirmSpaceAction = null;
+      document.getElementById("space-confirm-dialog").close();
+    });
+    renderSpaces();
+    function setFolder(id) {
+      selectedFolder = id;
+      document.getElementById("current-folder").textContent = `操作路径：${folderLabel(id)}`;
+    }
+    function showContext(id, x, y) {
+      contextId = id;
+      treeContext.classList.add("open");
+      treeContext.style.left = `${Math.max(0, Math.min(x, window.innerWidth - treeContext.offsetWidth - 8))}px`;
+      treeContext.style.top = `${Math.max(0, Math.min(y, window.innerHeight - treeContext.offsetHeight - 8))}px`;
+      treeContext.querySelector("button").focus();
+    }
+    function renderTree() {
+      treeList.replaceChildren();
+      const rootRow = document.createElement("button");
+      rootRow.type = "button";
+      rootRow.className = "tree-item";
+      rootRow.dataset.folder = "";
+      rootRow.textContent = "⌂　工作空间根目录";
+      rootRow.addEventListener("click", () => { treeSelection = ""; setFolder(""); renderTree(); });
+      rootRow.classList.toggle("selected", treeSelection === "");
+      addDropTarget(rootRow, "");
+      treeList.append(rootRow);
+      function renderChildren(parent, depth) {
+        entries.filter(entry => entry.parent === parent).forEach(entry => {
+          const row = document.createElement("div");
+          row.className = "tree-row";
+          row.style.paddingLeft = `${depth * 16}px`;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "tree-item";
+          button.dataset.entry = entry.id;
+          if (!entry.folder) button.dataset.file = entry.id;
+          button.classList.toggle("selected", treeSelection === entry.id);
+          button.textContent = `${entry.folder ? (entry.expanded ? "▾　📁" : "▸　📁") : "▤"}　${entry.name}`;
+          button.draggable = true;
+          button.addEventListener("click", () => {
+            if (entry.folder) {
+              treeSelection = entry.id;
+              setFolder(entry.id);
+              entry.expanded = !entry.expanded;
+              renderTree();
+            } else openFile(entry.id);
+          });
+          button.addEventListener("contextmenu", event => { event.preventDefault(); showContext(entry.id, event.clientX, event.clientY); });
+          button.addEventListener("dragstart", event => {
+            draggedId = entry.id;
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", entry.id);
+          });
+          button.addEventListener("dragend", () => { draggedId = null; document.querySelectorAll(".drop-target").forEach(item => item.classList.remove("drop-target")); });
+          if (entry.folder) addDropTarget(button, entry.id);
+          const more = document.createElement("button");
+          more.type = "button";
+          more.className = "tree-more";
+          more.textContent = "⋯";
+          more.setAttribute("aria-label", `${entry.name} 的操作`);
+          more.addEventListener("click", () => { const rect = more.getBoundingClientRect(); showContext(entry.id, rect.right, rect.bottom); });
+          row.append(button, more);
+          treeList.append(row);
+          if (entry.folder && entry.expanded) renderChildren(entry.id, depth + 1);
+        });
+      }
+      renderChildren("", 0);
+    }
+    function addDropTarget(button, destination) {
+      button.addEventListener("dragover", event => {
+        if (!draggedId) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+        button.classList.add("drop-target");
+      });
+      button.addEventListener("dragleave", () => button.classList.remove("drop-target"));
+      button.addEventListener("drop", event => {
+        event.preventDefault();
+        button.classList.remove("drop-target");
+        if (!draggedId) return;
+        const error = moveEntry(draggedId, destination);
+        if (error) notify(error);
+      });
+    }
+    function moveEntry(id, destination) {
+      const entry = findEntry(id);
+      if (!entry) return "找不到要移动的项目。";
+      if (destination === id || (entry.folder && destination && entryPath(destination).startsWith(`${entryPath(id)}/`))) return "不能将文件夹移动到自身或其子目录。";
+      if (entry.parent === destination) return "项目已位于该目录。";
+      if (sameName(destination, entry.name)) return "目标目录已有同名项目，请选择其他目录。";
+      entry.parent = destination;
+      if (destination) findEntry(destination).expanded = true;
+      setFolder(treeSelection === selectedFile && selectedFile ? findEntry(selectedFile).parent : selectedFolder);
+      renderTree();
+      if (selectedFile) updateDocument();
+      notify(`已在原型中移动到 ${folderLabel(destination)}；刷新后不保留。`);
+      return "";
+    }
+    function updateDocument() {
+      const file = findEntry(selectedFile);
+      document.querySelectorAll(".document-view").forEach(view => view.classList.toggle("active", view.id === (file ? file.view : "view-empty")));
+      document.getElementById("document-path").textContent = file ? entryPath(file.id).split("/").join(" / ") : "未选择文档";
+      document.getElementById("document-title").textContent = file ? (file.title || file.name) : "请选择文档";
+      document.getElementById("document-status").textContent = file ? file.status : "";
+      const showExampleHistory = !!file && ["md", "txt", "code", "pdf", "docx"].includes(file.id);
+      document.querySelector("#document-history .card-heading p").textContent = file ? `${file.name}${showExampleHistory ? " · 历史为示例" : ""}` : "未选择文档";
+      document.querySelector("#document-history .card-heading .badge").hidden = !showExampleHistory;
+      document.getElementById("open-document-history").disabled = !showExampleHistory;
+      document.getElementById("save-document").disabled = !file || !["view-md", "view-txt", "view-code", "view-generic"].includes(file.view);
+      document.querySelectorAll("#document-history .history-item, #document-history .info, #document-history [data-go='history']").forEach(item => item.hidden = !showExampleHistory);
+      document.getElementById("no-demo-history").hidden = showExampleHistory;
+      if (file && file.view === "view-generic") {
+        document.getElementById("generic-editor").value = file.content || "";
+        document.getElementById("generic-type").textContent = file.name.split(".").pop().toUpperCase();
+      }
+    }
+    function openFile(id) {
+      const file = findEntry(id);
+      if (!file || file.folder) return;
+      selectedFile = id;
+      treeSelection = id;
+      setFolder(file.parent);
+      let parent = file.parent;
+      while (parent) { findEntry(parent).expanded = true; parent = findEntry(parent).parent; }
+      updateDocument();
+      renderTree();
+      document.querySelector(".search-results").classList.remove("open");
+      document.getElementById("workspace-search").value = "";
+    }
+    document.getElementById("generic-editor").addEventListener("input", event => {
+      const file = findEntry(selectedFile);
+      if (file && file.view === "view-generic") file.content = event.target.value;
+    });
+    document.querySelectorAll("[data-screen], [data-go]").forEach(button => {
+      button.addEventListener("click", () => showScreen(button.dataset.screen || button.dataset.go));
+    });
+    renderTree();
+    const searchInput = document.getElementById("workspace-search");
+    const searchResults = document.getElementById("search-results");
+    searchInput.addEventListener("input", () => {
+      const query = searchInput.value.trim().toLocaleLowerCase();
+      searchResults.replaceChildren();
+      if (!query) {
+        searchResults.classList.remove("open");
+        return;
+      }
+      const matches = entries.filter(file => !file.folder && `${file.name} ${entryPath(file.id)} ${file.text || ""}`.toLocaleLowerCase().includes(query));
+      const heading = document.createElement("strong");
+      heading.textContent = `当前工作空间 · ${matches.length} 个结果`;
+      searchResults.append(heading);
+      if (matches.length === 0) {
+        const empty = document.createElement("span");
+        empty.className = "muted";
+        empty.textContent = "未找到匹配文档";
+        searchResults.append(empty);
+      } else {
+        matches.forEach(file => {
+          const button = document.createElement("button");
+          button.className = "search-result";
+          button.setAttribute("role", "option");
+          const name = document.createElement("span");
+          name.textContent = file.name;
+          const path = document.createElement("small");
+          path.textContent = entryPath(file.id);
+          button.append(name, path);
+          button.addEventListener("click", () => openFile(file.id));
+          searchResults.append(button);
+        });
+      }
+      searchResults.classList.add("open");
+    });
+    document.addEventListener("click", event => {
+      if (!event.target.closest(".search-wrap"))
+        searchResults.classList.remove("open");
+      if (!event.target.closest("#tree-context") && !event.target.closest(".tree-more"))
+        treeContext.classList.remove("open");
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape") treeContext.classList.remove("open");
+    });
+    document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => document.getElementById(button.dataset.close).close()));
+    document.querySelectorAll("[data-create]").forEach(button => button.addEventListener("click", () => {
+      createKind = button.dataset.create;
+      button.closest("details").open = false;
+      document.getElementById("entry-form").reset();
+      document.getElementById("entry-title").textContent = createKind === "folder" ? "新建文件夹" : "新建文档";
+      document.getElementById("entry-name-label").textContent = createKind === "folder" ? "文件夹名称" : "文档名称（不含后缀）";
+      document.getElementById("entry-type-field").hidden = createKind === "folder";
+      document.getElementById("entry-location").textContent = `创建位置：${folderLabel(selectedFolder)}`;
+      document.getElementById("entry-error").textContent = "";
+      updateSuffix();
+      document.getElementById("entry-dialog").showModal();
+      document.getElementById("entry-name").focus();
+    }));
+    function updateSuffix() {
+      document.getElementById("entry-suffix").textContent = createKind === "document" ? `确认后自动添加 ${document.getElementById("entry-type").value} 后缀。` : "";
+    }
+    document.getElementById("entry-type").addEventListener("change", updateSuffix);
+    function validName(name) {
+      return name && name !== "." && name !== ".." && !/[\\/:*?"<>|]/.test(name) && !/[. ]$/.test(name);
+    }
+    function sameName(parent, name, list = entries) {
+      return list.some(item => item.parent === parent && item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    }
+    document.getElementById("entry-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const base = document.getElementById("entry-name").value.trim();
+      const suffix = document.getElementById("entry-type").value;
+      const error = document.getElementById("entry-error");
+      if (!validName(base)) { error.textContent = "请输入有效名称，不能包含路径分隔符或特殊字符。"; return; }
+      if (createKind === "document" && /\.(md|txt|cs)$/i.test(base)) { error.textContent = "名称不需要填写文件类型后缀，系统会自动添加。"; return; }
+      const name = createKind === "document" ? base + suffix : base;
+      if (sameName(selectedFolder, name)) { error.textContent = "当前目录已有同名项目。"; return; }
+      const id = `new-${nextId++}`;
+      const entry = createKind === "folder"
+        ? { id, parent: selectedFolder, name, folder: true, expanded: true }
+        : { id, parent: selectedFolder, name, view: "view-generic", content: "", status: "新建文档 · 原型临时数据" };
+      entries.push(entry);
+      if (selectedFolder) findEntry(selectedFolder).expanded = true;
+      document.getElementById("entry-dialog").close();
+      if (entry.folder) { treeSelection = id; setFolder(id); renderTree(); } else openFile(id);
+      notify(`已在原型中创建 ${name}；刷新后不保留。`);
+    });
+    document.querySelectorAll("[data-upload]").forEach(button => button.addEventListener("click", () => {
+      button.closest("details").open = false;
+      const input = document.getElementById(button.dataset.upload === "folder" ? "upload-folder" : "upload-files");
+      if (button.dataset.upload === "folder" && !("webkitdirectory" in input)) {
+        notify("当前浏览器不支持选择文件夹，请改用支持文件夹选择的浏览器。");
+        return;
+      }
+      input.click();
+    }));
+    document.querySelectorAll("#upload-files, #upload-folder").forEach(input => input.addEventListener("change", () => {
+      if (!input.files.length) return;
+      const pending = [];
+      let error = "";
+      for (const file of input.files) {
+        const parts = input.id === "upload-folder" ? file.webkitRelativePath.split("/") : [file.name];
+        if (parts.some(part => !validName(part))) { error = "文件或文件夹名称无效，未添加任何项目。"; break; }
+        let parent = selectedFolder;
+        for (const [index, name] of parts.entries()) {
+          const isFolder = index < parts.length - 1;
+          const existing = entries.concat(pending).find(item => item.parent === parent && item.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+          if (existing) {
+            if (!isFolder || !existing.folder) { error = `存在同名项目 ${name}，未添加任何项目。`; break; }
+            parent = existing.id;
+          } else {
+            const id = `new-${nextId++}`;
+            const known = /\.(md|txt|cs|pdf|docx)$/i.test(name);
+            pending.push(isFolder ? { id, parent, name, folder: true, expanded: true } : { id, parent, name, view: known ? "view-upload" : "view-unsupported", status: "上传示意 · 内容未保存" });
+            parent = id;
+          }
+        }
+        if (error) break;
+      }
+      input.value = "";
+      if (error) { notify(error); return; }
+      entries.push(...pending);
+      if (selectedFolder) findEntry(selectedFolder).expanded = true;
+      renderTree();
+      notify("已在原型中展示所选文件名；未上传或保存内容，空文件夹无法通过此选择器读取。");
+    }));
+    document.getElementById("download-workspace").addEventListener("click", () => downloadNotice("整个工作空间（ZIP）"));
+    document.querySelectorAll("[data-tree-action]").forEach(button => button.addEventListener("click", () => {
+      const entry = findEntry(contextId);
+      treeContext.classList.remove("open");
+      if (!entry) { notify("项目不存在，请重新选择。"); return; }
+      const path = `/${entryPath(entry.id)}`;
+      if (button.dataset.treeAction === "download") {
+        downloadNotice(entry.folder ? `目录 ${path}（ZIP）` : `文件 ${path}`);
+      } else if (button.dataset.treeAction === "move") {
+        const select = document.getElementById("move-destination");
+        select.replaceChildren(new Option("/（根目录）", ""));
+        entries.filter(item => item.folder && item.id !== entry.id && !(entry.folder && entryPath(item.id).startsWith(`${entryPath(entry.id)}/`))).forEach(folder => select.add(new Option(`/${entryPath(folder.id)}`, folder.id)));
+        select.value = entry.parent;
+        document.getElementById("move-source").textContent = `移动 ${path}`;
+        document.getElementById("move-error").textContent = "";
+        document.getElementById("move-dialog").showModal();
+      } else {
+        document.getElementById("delete-description").textContent = entry.folder ? `删除文件夹 ${path} 及其所有子文件和子文件夹？` : `删除文件 ${path}？`;
+        document.getElementById("delete-dialog").showModal();
+      }
+    }));
+    document.getElementById("move-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const error = moveEntry(contextId, document.getElementById("move-destination").value);
+      if (error) document.getElementById("move-error").textContent = error;
+      else document.getElementById("move-dialog").close();
+    });
+    document.getElementById("delete-form").addEventListener("submit", event => {
+      event.preventDefault();
+      const entry = findEntry(contextId);
+      if (!entry) { document.getElementById("delete-dialog").close(); notify("项目不存在，请重新选择。"); return; }
+      const removedPath = entryPath(entry.id);
+      const removedIds = new Set(entries.filter(item => item.id === entry.id || entryPath(item.id).startsWith(`${removedPath}/`)).map(item => item.id));
+      for (let i = entries.length - 1; i >= 0; i--) if (removedIds.has(entries[i].id)) entries.splice(i, 1);
+      if (removedIds.has(selectedFolder)) setFolder("");
+      if (removedIds.has(treeSelection)) treeSelection = selectedFolder;
+      if (removedIds.has(selectedFile)) { selectedFile = null; updateDocument(); }
+      renderTree();
+      document.getElementById("delete-dialog").close();
+      notify("已在原型中删除；刷新后恢复示例数据。");
+    });
+    document.getElementById("save-document").addEventListener("click", () => {
+      notify("静态原型不会保存到服务端或创建版本；刷新后更改不保留。");
+    });
+    document.getElementById("highlight-toggle").addEventListener("click", event => {
+      const active = event.currentTarget.getAttribute("aria-pressed") !== "true";
+      event.currentTarget.setAttribute("aria-pressed", String(active));
+      event.currentTarget.textContent = `标记模式：${active ? "开启" : "关闭"}`;
+      document.querySelector("#view-pdf .pdf-page").style.cursor = active ? "crosshair" : "auto";
+    });
+    document.querySelectorAll("[data-dialog]").forEach(button => {
+      button.addEventListener("click", () => document.getElementById(button.dataset.dialog).showModal());
+    });
+    document.querySelectorAll(".settings-nav button").forEach(button => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".settings-nav button").forEach(item => item.classList.toggle("active", item === button));
+        document.querySelectorAll(".settings-panel").forEach(panel => panel.classList.toggle("active", panel.id === button.dataset.panel));
+      });
+    });
+    const layout = document.getElementById("workspace-layout");
+    const panelWidths = { tree: 250, history: 310 };
+    const panelNames = { tree: "目录", history: "版本历史" };
+    function setPanelHidden(panel, hidden) {
+      layout.classList.toggle(`hide-${panel}`, hidden);
+      const button = document.getElementById(`toggle-${panel}`);
+      button.setAttribute("aria-expanded", String(!hidden));
+      button.setAttribute("aria-label", `${hidden ? "显示" : "隐藏"}${panelNames[panel]}`);
+      button.title = button.getAttribute("aria-label");
+      button.textContent = panel === "tree" ? (hidden ? "›" : "‹") : (hidden ? "‹" : "›");
+    }
+    function maxPanelWidth(panel) {
+      const historyBeside = window.innerWidth > 1200;
+      const other = panel === "tree" ? "history" : "tree";
+      const otherWidth = historyBeside && !layout.classList.contains(`hide-${other}`) ? panelWidths[other] : 0;
+      return Math.max(200, Math.min(600, layout.clientWidth - otherWidth - (historyBeside ? 72 : 36) - 340));
+    }
+    function resizePanel(panel, width) {
+      if (width < 160) { setPanelHidden(panel, true); return; }
+      const value = Math.round(Math.max(200, Math.min(width, maxPanelWidth(panel))));
+      panelWidths[panel] = value;
+      layout.style.setProperty(`--${panel}-width`, `${value}px`);
+      document.getElementById(`resize-${panel}`).setAttribute("aria-valuenow", String(value));
+    }
+    ["tree", "history"].forEach(panel => {
+      const button = document.getElementById(`toggle-${panel}`);
+      const grip = document.getElementById(`resize-${panel}`);
+      button.addEventListener("click", () => {
+        const hidden = layout.classList.contains(`hide-${panel}`);
+        if (hidden) resizePanel(panel, panelWidths[panel]);
+        setPanelHidden(panel, !hidden);
+      });
+      grip.addEventListener("pointerdown", event => {
+        if (event.button !== 0) return;
+        const startX = event.clientX;
+        const startWidth = panelWidths[panel];
+        const move = moveEvent => {
+          if (moveEvent.pointerId !== event.pointerId || layout.classList.contains(`hide-${panel}`)) return;
+          const delta = moveEvent.clientX - startX;
+          const width = startWidth + (panel === "tree" ? delta : -delta);
+          if (width < 160) {
+            resizePanel(panel, startWidth);
+            setPanelHidden(panel, true);
+            button.focus();
+          } else resizePanel(panel, width);
+        };
+        const finish = endEvent => {
+          if (endEvent.pointerId !== event.pointerId) return;
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", finish);
+          window.removeEventListener("pointercancel", finish);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", finish);
+        window.addEventListener("pointercancel", finish);
+      });
+      grip.addEventListener("keydown", event => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        const delta = (event.key === "ArrowRight" ? 20 : -20) * (panel === "tree" ? 1 : -1);
+        if (delta < 0 && panelWidths[panel] === 200) setPanelHidden(panel, true);
+        else resizePanel(panel, panelWidths[panel] + delta);
+        if (layout.classList.contains(`hide-${panel}`)) button.focus();
+      });
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth <= 680) return;
+      ["tree", "history"].forEach(panel => {
+        if (!layout.classList.contains(`hide-${panel}`) && (panel === "tree" || window.innerWidth > 1200)) resizePanel(panel, panelWidths[panel]);
+      });
+    });
+    const defaultAccent = "#635bdb";
+    function applyTheme(preferences) {
+      const mode = preferences.mode || "light";
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      root.dataset.theme = mode === "system" ? (systemDark ? "dark" : "light") : mode;
+      root.dataset.density = preferences.density || "comfortable";
+      root.style.setProperty("--accent", preferences.accent || defaultAccent);
+      root.style.setProperty("--accent-soft", `color-mix(in srgb, ${preferences.accent || defaultAccent} 10%, var(--surface))`);
+      document.getElementById("theme-mode").value = mode;
+      document.getElementById("density-mode").value = preferences.density || "comfortable";
+      document.querySelectorAll(".swatch").forEach(swatch => swatch.setAttribute("aria-pressed", String(swatch.dataset.accent === (preferences.accent || defaultAccent))));
+    }
+    function saveTheme() {
+      const preferences = {
+        mode: document.getElementById("theme-mode").value,
+        density: document.getElementById("density-mode").value,
+        accent: document.querySelector('.swatch[aria-pressed="true"]')?.dataset.accent || defaultAccent
+      };
+      localStorage.setItem("episteme-prototype-theme", JSON.stringify(preferences));
+      applyTheme(preferences);
+    }
+    document.getElementById("theme-mode").addEventListener("change", saveTheme);
+    document.getElementById("density-mode").addEventListener("change", saveTheme);
+    document.querySelectorAll(".swatch").forEach(swatch => swatch.addEventListener("click", () => {
+      document.querySelectorAll(".swatch").forEach(item => item.setAttribute("aria-pressed", String(item === swatch)));
+      saveTheme();
+    }));
+    document.getElementById("reset-theme").addEventListener("click", () => {
+      localStorage.removeItem("episteme-prototype-theme");
+      applyTheme({ mode: "light", density: "comfortable", accent: defaultAccent });
+    });
+    try {
+      applyTheme(JSON.parse(localStorage.getItem("episteme-prototype-theme") || "{}"));
+    } catch (error) {
+      localStorage.removeItem("episteme-prototype-theme");
+      applyTheme({ mode: "light", density: "comfortable", accent: defaultAccent });
+    }
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (document.getElementById("theme-mode").value === "system") saveTheme();
+    });
+  </script>
+</body>
+</html>
