@@ -38,7 +38,21 @@ public sealed class EfWorkspaceListingRepository(EpistemeDbContext dbContext) : 
                         workspace.Type,
                         workspace.Description,
                         workspace.DefaultBranch,
-                        workspace.ConcurrencyStamp))
+                        workspace.ConcurrencyStamp,
+                        null,
+                        dbContext.WorkspaceMembers
+                            .Where(member => member.WorkspaceId == workspace.Id &&
+                                member.UserId == user.Id && member.Status == WorkspaceMemberStatus.Active)
+                            .Select(member => (WorkspaceRole?)member.Role)
+                            .FirstOrDefault(),
+                        (from member in dbContext.WorkspaceMembers
+                                    join owner in dbContext.Users on member.UserId equals owner.Id
+                                    where member.WorkspaceId == workspace.Id &&
+                                        member.Status == WorkspaceMemberStatus.Active &&
+                                        member.Role == WorkspaceRole.Owner
+                                    select owner.UserName).FirstOrDefault(),
+                        workspace.Status,
+                        workspace.CreatedAt))
                     .ToList()
             })
             .SingleOrDefaultAsync(cancellationToken);

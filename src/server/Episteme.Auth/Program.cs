@@ -190,6 +190,7 @@ public sealed class AuthProgram
         app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
+        app.MapStaticAssets();
         app.MapControllers();
         app.MapRazorPages();
         app.Run();

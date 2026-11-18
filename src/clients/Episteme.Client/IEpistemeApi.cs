@@ -32,6 +32,13 @@ public interface IEpistemeApi
     [Get("/api/v1/admin/users")]
     Task<ManagedUserListResponse> ListUsersAsync(int offset = 0, int limit = 25, CancellationToken cancellationToken = default);
 
+    [Get("/api/v1/admin/overview")]
+    Task<UserAdministrationOverviewResponse> GetAdminOverviewAsync(CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/admin/users/{userId}/workspaces")]
+    Task<AdminOwnedWorkspaceListResponse> ListUserOwnedWorkspacesAsync(Guid userId, int offset = 0,
+        int limit = 25, CancellationToken cancellationToken = default);
+
     [Put("/api/v1/admin/users/{userId}/status")]
     Task<ManagedUserResponse> SetUserStatusAsync(Guid userId, [Body] SetUserStatusRequest request, CancellationToken cancellationToken = default);
 
@@ -156,7 +163,11 @@ public sealed record WorkspaceResponse(
     string Type,
     string? Description,
     string DefaultBranch,
-    Guid ConcurrencyStamp);
+    Guid ConcurrencyStamp,
+    string? Role = null,
+    string? OwnerName = null,
+    string Status = "Active",
+    DateTimeOffset CreatedAt = default);
 
 public sealed record WorkspaceConfiguration(int SchemaVersion, string? DefaultExtension = null, string? Language = null,
     string? SkillFormat = null, string? CitationStyle = null, string? Genre = null);
@@ -204,5 +215,10 @@ public sealed record CreateUserRequest(string Email, string Password)
 }
 public sealed record SetAdministratorRequest(bool IsAdministrator);
 public sealed record ManagedUserResponse(Guid Id, string? UserName, string? Email, string Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
 public sealed record ManagedUserListResponse(IReadOnlyList<ManagedUserResponse> Items, int Offset, int Limit, bool HasMore);
+public sealed record UserAdministrationOverviewResponse(int TotalUsers, int ActiveUsers, int TotalWorkspaces,
+    int ProvisioningWorkspaces, int AdministratorCount, IReadOnlyList<ManagedUserResponse> RecentUsers);
+public sealed record AdminOwnedWorkspaceResponse(Guid Id, string Name, string Type, string Status, DateTimeOffset CreatedAt);
+public sealed record AdminOwnedWorkspaceListResponse(
+    IReadOnlyList<AdminOwnedWorkspaceResponse> Items, int Offset, int Limit, bool HasMore);

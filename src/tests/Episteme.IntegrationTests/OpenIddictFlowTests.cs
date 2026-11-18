@@ -31,6 +31,82 @@ namespace Episteme.IntegrationTests;
 
 public sealed class OpenIddictFlowTests
 {
+    [Fact]
+    public async Task Login_page_serves_its_styles_and_available_account_links()
+    {
+        await using var factory = new StaticAssetsAuthFactory();
+        using var client = factory.CreateClient();
+        var html = await client.GetStringAsync("/Identity/Account/Login");
+        await AssertLoginAssetsAsync(client, html);
+        Assert.Contains("/Identity/Account/Register", html);
+        Assert.DoesNotContain("/Identity/Account/ForgotPassword", html);
+        Assert.DoesNotContain("/Identity/Account/ResendEmailConfirmation", html);
+    }
+
+    [PostgresFact]
+    public async Task Login_retry_preserves_return_url()
+    {
+        var connection = Environment.GetEnvironmentVariable("EPISTEME_TEST_POSTGRES")!;
+        var clientId = $"auth-login-retry-{Guid.NewGuid():N}";
+        var email = $"{Guid.NewGuid():N}@example.test";
+        const string password = "Episteme-Test-Password-42!";
+        const string returnUrl = "/Identity/Account/Manage?tab=profile&source=login";
+        await using var factory = new AuthFactory(connection, clientId);
+        using var browser = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://auth.example"),
+            AllowAutoRedirect = false
+        });
+        var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = email, Email = email };
+        await using (var setup = factory.Services.CreateAsyncScope())
+        {
+            var users = setup.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var created = await users.CreateAsync(user, password);
+            Assert.True(created.Succeeded, string.Join(", ", created.Errors.Select(e => e.Code)));
+        }
+        try
+        {
+            var loginUrl = QueryHelpers.AddQueryString("/Identity/Account/Login", "returnUrl", returnUrl);
+            var loginPage = await browser.GetStringAsync(loginUrl);
+            using var failedLogin = await browser.PostAsync(loginUrl, new FormUrlEncodedContent(
+                new Dictionary<string, string>
+                {
+                    ["Input.Email"] = email,
+                    ["Input.Password"] = "Incorrect-Password-42!",
+                    ["__RequestVerificationToken"] = AntiForgeryToken(loginPage)
+                }));
+            Assert.Equal(HttpStatusCode.OK, failedLogin.StatusCode);
+            var failedPage = await failedLogin.Content.ReadAsStringAsync();
+            Assert.Contains("Invalid login attempt.", failedPage);
+            var loginForm = Regex.Match(failedPage, "<form[^>]*class=\"login-form\"[^>]*>");
+            Assert.True(loginForm.Success, "Login form was not found.");
+            var action = Regex.Match(loginForm.Value, "action=\"([^\"]+)\"");
+            Assert.True(action.Success, "Login form action was not found.");
+            var retryUrl = WebUtility.HtmlDecode(action.Groups[1].Value);
+            using var login = await browser.PostAsync(retryUrl, new FormUrlEncodedContent(
+                new Dictionary<string, string>
+                {
+                    ["Input.Email"] = email,
+                    ["Input.Password"] = password,
+                    ["__RequestVerificationToken"] = AntiForgeryToken(failedPage)
+                }));
+            Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+            Assert.Equal(returnUrl, login.Headers.Location?.OriginalString);
+        }
+        finally
+        {
+            await using var cleanup = factory.Services.CreateAsyncScope();
+            var users = cleanup.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var currentUser = await users.FindByIdAsync(user.Id.ToString());
+            if (currentUser is not null)
+                Assert.True((await users.DeleteAsync(currentUser)).Succeeded);
+            var apps = cleanup.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+            var application = await apps.FindByClientIdAsync(clientId);
+            if (application is not null)
+                await apps.DeleteAsync(application);
+        }
+    }
+
     [PostgresFact]
     public async Task Bootstrap_can_create_first_administrator_from_configured_credentials()
     {
@@ -216,7 +292,12 @@ public sealed class OpenIddictFlowTests
             { BaseAddress = new Uri("https://auth.example"), AllowAutoRedirect = false });
             using var loginPage = await browser.GetAsync("/Identity/Account/Login");
             Assert.Equal(HttpStatusCode.OK, loginPage.StatusCode);
-            var antiforgery = AntiForgeryToken(await loginPage.Content.ReadAsStringAsync());
+            var html = await loginPage.Content.ReadAsStringAsync();
+            await AssertLoginAssetsAsync(browser, html);
+            Assert.DoesNotContain("/Identity/Account/Register", html);
+            Assert.DoesNotContain("/Identity/Account/ForgotPassword", html);
+            Assert.DoesNotContain("/Identity/Account/ResendEmailConfirmation", html);
+            var antiforgery = AntiForgeryToken(html);
             var cookie = loginPage.Headers.GetValues("Set-Cookie")
                 .Single(value => value.StartsWith(".AspNetCore.Antiforgery.", StringComparison.Ordinal))
                 .Split(';')[0];
@@ -992,6 +1073,33 @@ public sealed class OpenIddictFlowTests
         return WebUtility.HtmlDecode(match.Groups[1].Value);
     }
 
+    private static async Task AssertLoginAssetsAsync(HttpClient client, string html)
+    {
+        var assetPaths = Regex.Matches(html, @"/css/auth-login\.css")
+            .Select(match => match.Value)
+            .Distinct()
+            .ToArray();
+        Assert.Single(assetPaths);
+        foreach (var path in assetPaths)
+        {
+            using var response = await client.GetAsync(path);
+            Assert.True(response.StatusCode == HttpStatusCode.OK, $"{path} returned {response.StatusCode}.");
+            Assert.NotEmpty(await response.Content.ReadAsByteArrayAsync());
+        }
+    }
+
+    private sealed class StaticAssetsAuthFactory : WebApplicationFactory<AuthProgram>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Development");
+            builder.UseSetting("ConnectionStrings:Episteme", "Host=127.0.0.1;Database=unused;Username=unused;Password=unused");
+            builder.UseSetting("Authentication:Issuer", "https://auth.example/");
+            builder.UseSetting("Authentication:ApiAudience", "https://api.example/");
+            builder.UseSetting("Authentication:McpAudience", "https://mcp.example/mcp");
+        }
+    }
+
     private sealed class AuthFactory(string connection, string clientId, AuditFailureInterceptor? auditFailure = null) : WebApplicationFactory<AuthProgram>
     {
         public string ClientId => clientId;
@@ -1034,6 +1142,7 @@ public sealed class OpenIddictFlowTests
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Production");
+            builder.UseStaticWebAssets();
             builder.UseSetting("ConnectionStrings:Episteme", connection);
             builder.UseSetting("Authentication:Issuer", "https://auth.example/");
             builder.UseSetting("Authentication:ApiAudience", "https://api.example/");

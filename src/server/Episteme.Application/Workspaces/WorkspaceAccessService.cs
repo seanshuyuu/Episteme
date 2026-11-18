@@ -34,7 +34,11 @@ public sealed record WorkspaceSummary(
     string? Description,
     string DefaultBranch,
     Guid ConcurrencyStamp = default,
-    WorkspaceConfiguration? Configuration = null);
+    WorkspaceConfiguration? Configuration = null,
+    WorkspaceRole? MemberRole = null,
+    string? OwnerName = null,
+    WorkspaceStatus Status = WorkspaceStatus.Active,
+    DateTimeOffset CreatedAt = default);
 
 public sealed record WorkspaceAccessRequest(
     Guid WorkspaceId,

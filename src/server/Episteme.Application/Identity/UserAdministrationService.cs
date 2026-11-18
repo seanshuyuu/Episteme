@@ -5,7 +5,15 @@ using System.ComponentModel.DataAnnotations;
 namespace Episteme.Application.Identity;
 
 public sealed record ManagedUser(Guid Id, string? UserName, string? Email, UserAccountStatus Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
+public sealed record AdminOwnedWorkspace(Guid Id, string Name, string Type, string Status, DateTimeOffset CreatedAt);
+public sealed record AdminOwnedWorkspaceListResult(
+    IReadOnlyList<AdminOwnedWorkspace>? Items, bool HasMore, UserAdministrationFailure? Failure);
+public sealed record UserAdministrationOverview(
+    int TotalUsers, int ActiveUsers, int TotalWorkspaces, int ProvisioningWorkspaces,
+    int AdministratorCount, IReadOnlyList<ManagedUser> RecentUsers);
+public sealed record UserAdministrationOverviewResult(
+    UserAdministrationOverview? Overview, UserAdministrationFailure? Failure);
 public enum UserAdministrationFailure { Unauthorized, InvalidInput, NotFound, Conflict }
 public sealed record ManagedUserListResult(IReadOnlyList<ManagedUser>? Items, bool HasMore, UserAdministrationFailure? Failure);
 public sealed record ManagedUserResult(ManagedUser? User, UserAdministrationFailure? Failure);
@@ -21,6 +29,9 @@ public sealed record ResetManagedUserPassword(string Password)
 public interface IUserAdministrationRepository
 {
     Task<ManagedUserListResult> ListAsync(Guid actorId, int offset, int limit, CancellationToken cancellationToken);
+    Task<AdminOwnedWorkspaceListResult> ListOwnedWorkspacesAsync(
+        Guid actorId, Guid userId, int offset, int limit, CancellationToken cancellationToken);
+    Task<UserAdministrationOverviewResult> GetOverviewAsync(Guid actorId, CancellationToken cancellationToken);
     Task<ManagedUserResult> SetStatusAsync(Guid actorId, Guid userId, UserAccountStatus status, CancellationToken cancellationToken);
     Task<ManagedUserResult> SetAdministratorAsync(Guid actorId, Guid userId, bool isAdministrator, CancellationToken cancellationToken);
     Task<ManagedUserResult> CreateAsync(Guid actorId, CreateManagedUser request, CancellationToken cancellationToken);
@@ -33,6 +44,9 @@ public interface IUserAdministrationRepository
 public interface IUserAdministrationService
 {
     Task<ManagedUserListResult> ListAsync(WorkspaceActor actor, int offset, int limit, CancellationToken cancellationToken);
+    Task<AdminOwnedWorkspaceListResult> ListOwnedWorkspacesAsync(
+        WorkspaceActor actor, Guid userId, int offset, int limit, CancellationToken cancellationToken);
+    Task<UserAdministrationOverviewResult> GetOverviewAsync(WorkspaceActor actor, CancellationToken cancellationToken);
     Task<ManagedUserResult> SetStatusAsync(WorkspaceActor actor, Guid userId, UserAccountStatus status, CancellationToken cancellationToken);
     Task<ManagedUserResult> SetAdministratorAsync(WorkspaceActor actor, Guid userId, bool isAdministrator, CancellationToken cancellationToken);
     Task<ManagedUserResult> CreateAsync(WorkspaceActor actor, CreateManagedUser request, CancellationToken cancellationToken);
@@ -77,6 +91,24 @@ public sealed class UserAdministrationService(IUserAdministrationRepository repo
         if (offset < 0 || offset > 10000 || limit is < 1 or > 100)
             return Task.FromResult(new ManagedUserListResult(null, false, UserAdministrationFailure.InvalidInput));
         return repository.ListAsync(actor.UserId, offset, limit, cancellationToken);
+    }
+
+    public Task<AdminOwnedWorkspaceListResult> ListOwnedWorkspacesAsync(
+        WorkspaceActor actor, Guid userId, int offset, int limit, CancellationToken cancellationToken)
+    {
+        if (!Authorized(actor))
+            return Task.FromResult(new AdminOwnedWorkspaceListResult(null, false, UserAdministrationFailure.Unauthorized));
+        if (userId == Guid.Empty || offset < 0 || offset > 10000 || limit is < 1 or > 100)
+            return Task.FromResult(new AdminOwnedWorkspaceListResult(null, false, UserAdministrationFailure.InvalidInput));
+        return repository.ListOwnedWorkspacesAsync(actor.UserId, userId, offset, limit, cancellationToken);
+    }
+
+    public Task<UserAdministrationOverviewResult> GetOverviewAsync(
+        WorkspaceActor actor, CancellationToken cancellationToken)
+    {
+        if (!Authorized(actor))
+            return Task.FromResult(new UserAdministrationOverviewResult(null, UserAdministrationFailure.Unauthorized));
+        return repository.GetOverviewAsync(actor.UserId, cancellationToken);
     }
 
     public Task<ManagedUserResult> SetStatusAsync(WorkspaceActor actor, Guid userId, UserAccountStatus status, CancellationToken cancellationToken)

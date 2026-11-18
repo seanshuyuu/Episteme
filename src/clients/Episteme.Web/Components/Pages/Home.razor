@@ -1,0 +1,1159 @@
+@page "/"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+@using System.Security.Claims
+@using System.Text.Json
+@inject IEpistemeApi Api
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ThemeService Theme
+@inject IJSRuntime JS
+
+<PageTitle>Episteme</PageTitle>
+
+<div class="app">
+    <main>
+        <header>
+            <div class="crumb"><strong>Episteme</strong>　/　@Breadcrumb</div>
+            <div class="header-actions">
+                @if (Workspaces.Count > 0)
+                {
+                    <select class="filter" aria-label="切换工作空间" value="@CurrentWorkspace?.Id" @onchange="OnWorkspaceChanged">
+                        @foreach (var workspace in Workspaces)
+                        {
+                            <option value="@workspace.Id">@workspace.Name · @RoleLabel(workspace.Role)</option>
+                        }
+                    </select>
+                }
+                <div class="search-wrap">
+                    <input class="search" aria-label="搜索当前空间文档" placeholder="搜索当前空间文档…" @bind="SearchText" @bind:event="oninput" />
+                    @if (!string.IsNullOrWhiteSpace(SearchText))
+                    {
+                        <div class="search-results open" role="listbox">
+                            <strong>当前工作空间 · @SearchMatches.Count 个结果</strong>
+                            @foreach (var match in SearchMatches)
+                            {
+                                <button class="search-result" role="option" @onclick="() => OpenDocumentAsync(match)">
+                                    <span>@match.Name</span><small>@match.Path</small>
+                                </button>
+                            }
+                            @if (SearchMatches.Count == 0)
+                            {
+                                <span class="muted">未找到匹配文档</span>
+                            }
+                        </div>
+                    }
+                </div>
+                <AuthorizeView Roles="Administrator">
+                    <a class="button" href="/admin">管理总览 ↗</a>
+                </AuthorizeView>
+                <details class="account-menu">
+                    <summary><span class="avatar">@AvatarText</span><span>@DisplayName</span>⌄</summary>
+                    <div class="account-menu-popover">
+                        <button type="button" @onclick='() => ShowScreen("spaces")'>工作空间管理</button>
+                        <button type="button" @onclick='() => ShowScreen("settings")'>设置</button>
+                        <a href="/authentication/logout">退出登录</a>
+                    </div>
+                </details>
+            </div>
+        </header>
+
+        <div class="content">
+            @if (IsLoading)
+            {
+                <div class="card">正在读取工作空间…</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="error operation-error" role="alert">@ErrorMessage</div>
+            }
+            @if (Workspaces.Count == 0 && !IsLoading)
+            {
+                <section class="screen active">
+                    <div class="page-heading"><div><h1>工作空间</h1><p class="subtitle">当前账号没有可访问的工作空间。</p></div></div>
+                    <button class="button primary" @onclick="OpenNewWorkspace">＋ 新建空间</button>
+                </section>
+            }
+            else if (CurrentWorkspace is not null)
+            {
+                <section class="screen @(Screen == "workspace" ? "active" : "")">
+                    <div class="page-heading">
+                        <div>
+                            <h1>@CurrentWorkspace.Name</h1>
+                            <p class="subtitle">@CurrentWorkspace.Type · @RoleLabel(CurrentWorkspace.Role) · @(CurrentWorkspace.Role == "Owner" ? "默认工作空间" : "与我共享")</p>
+                        </div>
+                    </div>
+                    <div class="workspace-layout @(IsTreeHidden ? "hide-tree" : "") @(IsHistoryHidden ? "hide-history" : "")">
+                        <article class="card tree">
+                            <div class="card-heading">
+                                <div><h3>文档目录</h3><p class="muted">当前空间</p></div>
+                                <div class="tree-actions">
+                                    <button class="icon-button" title="新建文件夹" disabled="@(!CanWrite)" @onclick="() => OpenCreateEntry(true)">＋</button>
+                                    <button class="icon-button" title="新建文档" disabled="@(!CanWrite)" @onclick="() => OpenCreateEntry(false)">▤</button>
+                                    <button class="icon-button" title="上传文档：当前 API 尚未提供" disabled>⇧</button>
+                                    <button class="icon-button" title="下载 ZIP：当前 API 尚未提供" disabled>⇩</button>
+                                </div>
+                            </div>
+                            <p class="muted">操作路径：@(SelectedFolderPath.Length == 0 ? "/（根目录）" : "/" + SelectedFolderPath)</p>
+                            <button type="button" class="tree-item @(SelectedTreePath is null ? "selected" : "")" @onclick="SelectRootFolder">⌂　工作空间根目录</button>
+                            @if (RootNodes.Count == 0)
+                            {
+                                <p class="empty-note">此工作空间根目录为空。</p>
+                            }
+                            else
+                            {
+                                @foreach (var node in RootNodes)
+                                {
+                                    <TreeNode @key="node.Path" Node="node" CurrentPath="SelectedTreePath"
+                                              OnSelect="OpenDocumentAsync" OnToggleDirectory="ToggleDirectoryAsync" />
+                                }
+                            }
+                            <p class="muted">目录与文档内容由工作空间 Git 仓库保存。</p>
+                        </article>
+                        <div class="panel-handle tree-handle">
+                            <button class="panel-mini" title="显示/隐藏目录" aria-expanded="@(!IsTreeHidden)" @onclick="() => IsTreeHidden = !IsTreeHidden">@(IsTreeHidden ? "›" : "‹")</button>
+                            <div class="panel-grip">⋮</div>
+                        </div>
+                        <article class="card document">
+                            <div class="document-top">
+                                <div>
+                                    <p class="muted">@DocumentPathLabel</p>
+                                    <h2 style="margin-top:5px">@DocumentTitle</h2>
+                                    <p class="muted">@DocumentStatus</p>
+                                </div>
+                                <div class="document-actions">
+                                    <button class="button primary" disabled="@(!CanEditDocument)" @onclick="SaveDocumentAsync">保存更改</button>
+                                    <button class="button" disabled="@(SelectedFile is null)" @onclick="OpenHistoryAsync">查看此文档历史</button>
+                                </div>
+                            </div>
+                            <div class="info"><strong>空间所有者：@(CurrentWorkspace.OwnerName ?? "未提供")</strong> · 此文档归属于“@CurrentWorkspace.Name”空间，内容所有权归空间所有者。</div>
+                            @if (SelectedFile is null)
+                            {
+                                <div class="document-body"><div class="empty-note">请选择一个文档。</div></div>
+                            }
+                            else if (CurrentDocument is not null)
+                            {
+                                <div class="document-body">
+                                    <div class="toolbar" style="margin-bottom:10px">
+                                        <span class="badge">@FileTypeLabel</span>
+                                        @if (IsMarkdown)
+                                        {
+                                            <button class="button" @onclick="ToggleMarkdownPreview">@(ShowMarkdownPreview ? "源码" : "预览")</button>
+                                        }
+                                    </div>
+                                    @if (ShowMarkdownPreview && IsMarkdown)
+                                    {
+                                        <pre class="document-preview">@CurrentDocument.Content</pre>
+                                    }
+                                    else
+                                    {
+                                        <textarea class="document-editor" aria-label="文档内容" spellcheck="@(!IsCodeFile)"
+                                                  disabled="@IsReadOnlyVersion"
+                                                  @bind="EditedContent" @bind:event="oninput"></textarea>
+                                    }
+                                    <p class="muted">保存使用已读取的 Git HEAD；发生并发修改时会明确返回冲突，不会静默覆盖。</p>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="document-body">
+                                    <div class="empty-note">@UnsupportedDocumentMessage</div>
+                                    <p class="muted">此版本的内容 API 仅支持不超过 1 MiB 的 UTF-8 文本文件。</p>
+                                </div>
+                            }
+                        </article>
+                        <div class="panel-handle history-handle">
+                            <button class="panel-mini" title="显示/隐藏版本历史" aria-expanded="@(!IsHistoryHidden)" @onclick="() => IsHistoryHidden = !IsHistoryHidden">@(IsHistoryHidden ? "‹" : "›")</button>
+                            <div class="panel-grip">⋮</div>
+                        </div>
+                        <aside class="card history-panel">
+                            <div class="card-heading">
+                                <div><h3>文档版本历史</h3><p class="muted">@SelectedFile?.Name</p></div>
+                                <span class="badge success">HEAD</span>
+                            </div>
+                            @if (History.Count == 0)
+                            {
+                                <p class="empty-note">没有可展示的历史版本。</p>
+                            }
+                            else
+                            {
+                                @foreach (var commit in History)
+                                {
+                                    <div class="history-item">
+                                        <span class="history-dot"></span>
+                                        <div class="history-meta">
+                                            <strong>@(commit == CurrentDocument?.CommitId ? "当前版本" : "Git 提交")</strong>
+                                            <small>提交说明和操作者信息未由当前历史 API 提供</small>
+                                            <code>@commit</code>
+                                            @if (commit != CurrentDocument?.CommitId)
+                                            {
+                                                <div class="toolbar">
+                                                    <button class="button" @onclick="() => ViewVersionAsync(commit)">查看版本</button>
+                                                    <button class="button" disabled="@(!CanWrite)" @onclick="() => RestoreVersionAsync(commit)">恢复</button>
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            }
+                            <div class="info">恢复旧版本会创建新提交，不会覆盖历史。</div>
+                            <button class="text-link" disabled="@(SelectedFile is null)" @onclick="OpenHistoryAsync">打开完整历史 →</button>
+                        </aside>
+                    </div>
+                </section>
+
+                <section class="screen @(Screen == "spaces" ? "active" : "")">
+                    <div class="page-heading">
+                        <div><h1>工作空间管理</h1><p class="subtitle">管理你拥有的空间，以及其他所有者共享给你的空间。</p></div>
+                        <div class="toolbar">
+                            <button class="button" @onclick='() => ShowScreen("workspace")'>返回工作区</button>
+                            <button class="button" @onclick="OpenImportWorkspace">⇧ 导入配置</button>
+                            <button class="button primary" @onclick="OpenNewWorkspace">＋ 新建空间</button>
+                        </div>
+                    </div>
+                    <div class="toolbar" style="margin-bottom:16px">
+                        <input class="search" placeholder="按名称或路径搜索" aria-label="搜索工作空间" @bind="WorkspaceSearch" @bind:event="oninput" />
+                        <select class="filter" aria-label="筛选类型" @bind="WorkspaceTypeFilter">
+                            <option value="">全部类型</option>
+                            <option>Code</option><option>Skill</option><option>Research</option><option>BusinessNovel</option><option>Custom</option>
+                        </select>
+                        <select class="filter" aria-label="筛选访问关系" @bind="AccessFilter">
+                            <option value="">全部空间</option><option value="owner">我拥有的</option><option value="shared">与我共享的</option>
+                        </select>
+                        <div class="toolbar view-switch">
+                            <button class="button @(WorkspaceView == "tiles" ? "subtle" : "")" @onclick='() => WorkspaceView = "tiles"'>▦ 平铺</button>
+                            <button class="button @(WorkspaceView == "list" ? "subtle" : "")" @onclick='() => WorkspaceView = "list"'>☰ 详细列表</button>
+                        </div>
+                    </div>
+                    @if (FilteredWorkspaces.Count == 0)
+                    {
+                        <p class="empty-note">没有符合条件的工作空间。</p>
+                    }
+                    else if (WorkspaceView == "tiles")
+                    {
+                        <div class="grid workspace-grid">
+                            @foreach (var workspace in FilteredWorkspaces)
+                            {
+                                <article class="card workspace-card" @key="workspace.Id">
+                                    <div class="card-heading"><span class="type-icon">◇</span><span class="badge workspace-status" data-status="@workspace.Status">@StatusLabel(workspace.Status)</span></div>
+                                    <h3>@workspace.Name</h3><p class="subtitle">@workspace.Description</p>
+                                    <div class="workspace-meta">
+                                        <span>类型：@workspace.Type</span>
+                                        <span>所有者：@(workspace.OwnerName ?? "未提供")</span>
+                                        <span>我的权限：@RoleLabel(workspace.Role)</span>
+                                        <span>MCP：未提供</span>
+                                    </div>
+                                    <footer>
+                                        <span>@(workspace.Role == "Owner" ? "我拥有" : "与我共享")</span>
+                                        <div class="workspace-action-list">
+                                            <button class="button" @onclick="() => SelectWorkspaceAsync(workspace)">打开</button>
+                                            <button class="button" @onclick="() => ExportManifestAsync(workspace)">导出配置</button>
+                                            @if (workspace.Role == "Owner")
+                                            {
+                                                <button class="button" @onclick="() => OpenManageWorkspace(workspace)">设置</button>
+                                                <button class="button" @onclick="() => OpenShareWorkspaceAsync(workspace)">共享</button>
+                                                <button class="button" @onclick="() => ConfirmArchive(workspace)">归档</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="button" disabled title="逐空间个人路径接口尚未提供">个人路径</button>
+                                            }
+                                        </div>
+                                    </footer>
+                                </article>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="card table-wrap">
+                            <table class="workspace-details-table">
+                                <thead><tr><th>工作空间</th><th>类型</th><th>所有者 / 我的权限</th><th>状态</th><th>MCP</th><th>操作</th></tr></thead>
+                                <tbody>
+                                    @foreach (var workspace in FilteredWorkspaces)
+                                    {
+                                        <tr @key="workspace.Id">
+                                            <td>@workspace.Name</td><td>@workspace.Type</td>
+                                            <td>@(workspace.OwnerName ?? "未提供") · @RoleLabel(workspace.Role)</td>
+                                            <td><span class="badge workspace-status" data-status="@workspace.Status">@StatusLabel(workspace.Status)</span></td>
+                                            <td>未提供</td>
+                                            <td><div class="workspace-action-list">
+                                                <button class="button" @onclick="() => SelectWorkspaceAsync(workspace)">打开</button>
+                                                <button class="button" @onclick="() => ExportManifestAsync(workspace)">导出配置</button>
+                                                @if (workspace.Role == "Owner")
+                                                {
+                                                    <button class="button" @onclick="() => OpenManageWorkspace(workspace)">设置</button>
+                                                    <button class="button" @onclick="() => OpenShareWorkspaceAsync(workspace)">共享</button>
+                                                    <button class="button" @onclick="() => ConfirmArchive(workspace)">归档</button>
+                                                }
+                                            </div></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </section>
+
+                <section class="screen @(Screen == "history" ? "active" : "")">
+                    <div class="page-heading">
+                        <div><p class="crumb">@CurrentWorkspace.Name / @SelectedFile?.Path</p><h1 style="margin-top:7px">文档版本历史</h1><p class="subtitle">恢复旧版会产生新提交，不重写历史。</p></div>
+                        <button class="button" @onclick='() => ShowScreen("workspace")'>← 返回工作区</button>
+                    </div>
+                    <article class="card">
+                        <div class="card-heading"><h2>@SelectedFile?.Name</h2><span class="badge">当前 HEAD · @(CurrentDocument?.CommitId ?? "—")</span></div>
+                        <div class="table-wrap">
+                            <table><thead><tr><th>版本</th><th>操作者 / 时间</th><th>提交 ID</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var commit in History)
+                                    {
+                                        <tr @key="commit"><td>@(commit == CurrentDocument?.CommitId ? "当前版本" : "Git 提交")</td><td>当前 API 未提供</td><td><code>@commit</code></td>
+                                            <td>@if (commit != CurrentDocument?.CommitId) { <button class="button" @onclick="() => ViewVersionAsync(commit)">查看 / 恢复</button> }</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </article>
+                    <div class="info">目录创建、移动、删除与文档写入均作为 Git 提交保存。空间元数据版本戳不是可浏览的设置历史。</div>
+                </section>
+
+                <section class="screen @(Screen == "settings" ? "active" : "")">
+                    <div class="page-heading"><div><h1>设置</h1><p class="subtitle">管理个人偏好与账户安全。</p></div><button class="button" @onclick='() => ShowScreen("workspace")'>返回工作区</button></div>
+                    <div class="settings-layout">
+                        <nav class="card settings-nav">
+                            <button class="@(SettingsTab == "appearance" ? "active" : "")" @onclick='() => SettingsTab = "appearance"'>偏好设置</button>
+                            <button class="@(SettingsTab == "security" ? "active" : "")" @onclick="OpenSecuritySettingsAsync">登录与安全</button>
+                        </nav>
+                        <div>
+                            @if (SettingsTab == "appearance")
+                            {
+                                <section class="card">
+                                    <div class="card-heading"><div><h2>偏好设置</h2><p class="muted">个人外观与默认工作方式。</p></div></div>
+                                    <div class="setting-row"><div><strong>颜色模式</strong><p class="muted">可跟随设备外观。</p></div>
+                                        <div class="setting-control"><select aria-label="颜色模式" @bind="ThemeMode" @bind:after="SaveThemeAsync"><option value="light">浅色</option><option value="dark">深色</option><option value="system">跟随系统</option></select></div></div>
+                                    <div class="setting-row"><div><strong>强调色</strong><p class="muted">用于按钮、链接和选中状态。</p></div>
+                                        <div class="setting-control">
+                                            @foreach (var accent in AccentColors)
+                                            {
+                                                <button class="swatch" style="background:@accent.Value" aria-label="@accent.Name" aria-pressed="@(ThemePreferences.Accent == accent.Value)" @onclick="() => SetAccentAsync(accent.Value)"></button>
+                                            }
+                                        </div></div>
+                                    <div class="setting-row"><div><strong>显示密度</strong><p class="muted">调整列表与卡片间距。</p></div>
+                                        <div class="setting-control"><select aria-label="显示密度" @bind="ThemeDensity" @bind:after="SaveThemeAsync"><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></div></div>
+                                    <div class="setting-row"><div><strong>默认进入空间</strong><p class="muted">登录后直接打开该空间继续工作。</p></div>
+                                        <div class="setting-control"><select aria-label="默认进入空间" disabled><option>@CurrentWorkspace.Name</option></select></div></div>
+                                    <div class="toolbar"><button class="button" @onclick="ResetThemeAsync">恢复默认外观</button><span class="muted">主题保存在此浏览器；默认空间的跨设备偏好接口尚未提供。</span></div>
+                                    <div class="setting-row"><div><strong>默认工作目录</strong><p class="muted">当前用户的空间内相对目录。</p></div>
+                                        <div class="setting-control"><input aria-label="默认工作目录" @bind="DefaultDirectory" /><button class="button" @onclick="SaveDefaultDirectoryAsync">保存</button></div></div>
+                                </section>
+                            }
+                            else
+                            {
+                                <section class="card">
+                                    <div class="card-heading"><div><h2>登录与安全</h2><p class="muted">管理登录凭据、授权应用和令牌。</p></div></div>
+                                    <div class="setting-row"><div><strong>登录信息</strong><p class="muted">@CurrentEmail</p></div><div class="setting-control"><span>密码修改由身份服务负责</span></div></div>
+                                    <div class="setting-row"><div><strong>有效令牌</strong><p class="muted">只展示元数据，绝不显示令牌密钥。</p></div>
+                                        <div class="setting-control"><div class="list">
+                                            @foreach (var token in Tokens)
+                                            {
+                                                <div class="list-row"><span>@(token.ClientId ?? "应用") · @token.Type · @token.Status</span><button class="button" @onclick="() => RevokeTokenAsync(token.Id)">撤销</button></div>
+                                            }
+                                        </div></div>
+                                    </div>
+                                    <div class="setting-row"><div><strong>已授权应用</strong><p class="muted">查看或撤销第三方客户端授权。</p></div>
+                                        <div class="setting-control"><div class="list">
+                                            @foreach (var authorization in Authorizations)
+                                            {
+                                                <div class="list-row"><span>@(authorization.ClientId ?? "应用") · @authorization.Status</span><button class="button" @onclick="() => RevokeAuthorizationAsync(authorization.Id)">撤销授权</button></div>
+                                            }
+                                        </div></div>
+                                    </div>
+                                </section>
+                            }
+                        </div>
+                    </div>
+                </section>
+            }
+        </div>
+    </main>
+</div>
+
+@if (IsDialogOpen)
+{
+    <div class="dialog-backdrop" role="presentation">
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+            <div class="dialog-head"><div><h2 id="dialog-title">@DialogTitle</h2><p class="muted">@DialogSubtitle</p></div><button class="icon-button" @onclick="CloseDialog">×</button></div>
+            <div class="dialog-body">
+                @if (DialogKind is "create" or "manage")
+                {
+                    <label class="field"><strong>空间名称</strong><input @bind="WorkspaceName" maxlength="120" /></label>
+                    @if (DialogKind == "create")
+                    {
+                        <label class="field"><strong>唯一标识（slug）</strong><input @bind="WorkspaceSlug" maxlength="80" /></label>
+                    }
+                    <label class="field"><strong>空间类型</strong>
+                        <select @bind="WorkspaceType"><option>Code</option><option>Skill</option><option>Research</option><option>BusinessNovel</option><option>Custom</option></select>
+                    </label>
+                    @if (WorkspaceType == "Custom")
+                    {
+                        <div class="notice">当前工作空间 API 不支持保存自定义类型名称；请选择已支持的类型。</div>
+                    }
+                    <label class="field"><strong>描述</strong><textarea @bind="WorkspaceDescription" maxlength="2000"></textarea></label>
+                }
+                else if (DialogKind == "import")
+                {
+                    <label class="field"><strong>配置文件</strong><InputFile OnChange="ReadManifestAsync" accept=".json,application/json" /></label>
+                    <label class="field"><strong>新空间名称</strong><input @bind="ImportName" maxlength="120" /></label>
+                    <label class="field"><strong>唯一标识（slug）</strong><input @bind="ImportSlug" maxlength="80" /></label>
+                    @if (ImportManifest is not null)
+                    {
+                        <div class="info">已校验配置 v@ImportManifest.FormatVersion · @ImportManifest.Type · @(ImportManifest.Directories?.Count ?? 0) 个目录</div>
+                    }
+                    <div class="notice">配置导入不包含文档正文、成员权限、token 或 Git 历史。</div>
+                }
+                else if (DialogKind == "share")
+                {
+                    <div class="info">成员 API 使用用户 ID。当前系统尚无用户名/邮箱搜索接口，以下操作须输入用户 ID。</div>
+                    <label class="field"><strong>用户 ID</strong><input @bind="MemberUserId" /></label>
+                    <label class="field"><strong>权限</strong><select @bind="MemberRole"><option value="Reader">只读</option><option value="Editor">读写</option></select></label>
+                    <button class="button primary" @onclick="SetMemberAsync">添加或更新共享</button>
+                    <h3>已共享用户</h3>
+                    @foreach (var member in Members)
+                    {
+                        <div class="list-row"><span>@member.UserId · @RoleLabel(member.Role)</span><button class="button" @onclick="() => RemoveMemberAsync(member.UserId)">撤回共享</button></div>
+                    }
+                }
+                else if (DialogKind == "archive")
+                {
+                    <p>归档“@WorkspaceName”？归档后空间不可继续访问或修改，仓库不会删除。</p>
+                    <p class="muted">如果这是默认工作空间，请先在可用空间中选择其他空间。</p>
+                }
+                else if (DialogKind is "create-folder" or "create-document")
+                {
+                    <label class="field"><strong>@(DialogKind == "create-folder" ? "文件夹名称" : "文档名称（不含后缀）")</strong><input @bind="WorkspaceName" maxlength="120" /></label>
+                    @if (DialogKind == "create-document")
+                    {
+                        <label class="field"><strong>文档类型</strong><select @bind="NewDocumentExtension"><option value=".md">Markdown</option><option value=".txt">TXT</option><option value=".cs">C#</option></select></label>
+                    }
+                    <p class="muted">创建位置：/@SelectedFolderPath</p>
+                }
+                @if (!string.IsNullOrWhiteSpace(DialogError))
+                {
+                    <p class="error" role="alert">@DialogError</p>
+                }
+            </div>
+            <div class="dialog-foot">
+                <button class="button" @onclick="CloseDialog">取消</button>
+                @if (DialogKind is "create" or "manage")
+                {
+                    <button class="button primary" disabled="@(WorkspaceType == "Custom")" @onclick="SaveWorkspaceAsync">@(DialogKind == "create" ? "创建空间" : "保存设置")</button>
+                }
+                else if (DialogKind == "import")
+                {
+                    <button class="button primary" disabled="@(ImportManifest is null)" @onclick="ImportWorkspaceAsync">校验并导入</button>
+                }
+                else if (DialogKind == "archive")
+                {
+                    <button class="button primary" @onclick="ArchiveWorkspaceAsync">确认归档</button>
+                }
+                else if (DialogKind is "create-folder" or "create-document")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="CreateEntryAsync">创建</button>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(ToastMessage))
+{
+    <div class="toast" role="status">@ToastMessage</div>
+}
+
+@code {
+    private static readonly (string Name, string Value)[] AccentColors =
+    [
+        ("紫色", "#635bdb"), ("蓝色", "#276fbd"), ("绿色", "#16806e"), ("玫红", "#b65c7a")
+    ];
+
+    private readonly CancellationTokenSource _disposeToken = new();
+    private readonly List<WorkspaceResponse> Workspaces = [];
+    private readonly List<string> History = [];
+    private readonly List<WorkspaceMemberResponse> Members = [];
+    private readonly List<UserTokenResponse> Tokens = [];
+    private readonly List<UserAuthorizationResponse> Authorizations = [];
+    private ClaimsPrincipal CurrentUser = new();
+    private List<WorkspaceTreeNode> RootNodes = [];
+    private WorkspaceResponse? CurrentWorkspace;
+    private WorkspaceResponse? DialogWorkspace;
+    private WorkspaceTreeNode? SelectedFile;
+    private WorkspaceDocumentResponse? CurrentDocument;
+    private WorkspaceManifestResponse? ImportManifest;
+    private ThemePreferences ThemePreferences = ThemePreferences.Default;
+    private string Screen = "workspace";
+    private string SettingsTab = "appearance";
+    private string WorkspaceView = "tiles";
+    private string SearchText = "";
+    private string WorkspaceSearch = "";
+    private string WorkspaceTypeFilter = "";
+    private string AccessFilter = "";
+    private string EditedContent = "";
+    private string SelectedFolderPath = "";
+    private string? SelectedTreePath;
+    private string DefaultDirectory = "";
+    private string WorkspaceName = "";
+    private string WorkspaceSlug = "";
+    private string WorkspaceType = "Code";
+    private string WorkspaceDescription = "";
+    private string ImportName = "";
+    private string ImportSlug = "";
+    private string MemberUserId = "";
+    private string MemberRole = "Reader";
+    private string NewDocumentExtension = ".md";
+    private string DialogKind = "";
+    private string DialogTitle = "";
+    private string DialogSubtitle = "";
+    private string DialogError = "";
+    private string ErrorMessage = "";
+    private string? ToastMessage;
+    private bool IsLoading = true;
+    private bool IsDialogOpen;
+    private bool IsMarkdown;
+    private bool IsCodeFile;
+    private bool ShowMarkdownPreview;
+    private bool IsReadOnlyVersion;
+    private bool IsTreeHidden;
+    private bool IsHistoryHidden;
+    private string CurrentHead = "";
+    private bool IsDisposed;
+
+    private string DisplayName => CurrentUser.Identity?.Name
+        ?? CurrentUser.FindFirst("preferred_username")?.Value
+        ?? CurrentUser.FindFirst("email")?.Value
+        ?? "用户";
+    private string AvatarText => DisplayName.Length > 0 ? DisplayName[..1] : "用";
+    private string CurrentEmail => CurrentUser.FindFirst("email")?.Value ?? DisplayName;
+    private string Breadcrumb => Screen switch
+    {
+        "spaces" => "工作区 / 全部空间",
+        "history" => $"{CurrentWorkspace?.Name ?? "工作区"} / 文档版本历史",
+        "settings" => "设置",
+        _ => $"默认工作区：{CurrentWorkspace?.Name ?? "工作区"}"
+    };
+    private bool CanWrite => CurrentWorkspace?.Role is not "Reader";
+    private bool CanEditDocument => CanWrite && CurrentDocument is not null && !ShowMarkdownPreview;
+    private string DocumentPathLabel => SelectedFile?.Path.Replace('/', ' ') ?? "未选择文档";
+    private string DocumentTitle => SelectedFile?.Name ?? "请选择文档";
+    private string DocumentStatus => SelectedFile is null ? "" : CurrentDocument is null
+        ? "暂不支持预览或编辑"
+        : $"{FileTypeLabel} · {(IsReadOnlyVersion ? "历史版本 · 只读" : EditedContent == CurrentDocument.Content ? "已保存" : "未保存更改")} · HEAD {ShortCommit(CurrentHead)}";
+    private string FileTypeLabel => SelectedFile?.Name.Split('.').LastOrDefault()?.ToUpperInvariant() ?? "文本";
+    private string UnsupportedDocumentMessage => SelectedFile is null ? "" : $"{SelectedFile.Name} 暂不支持预览或编辑。";
+    private string ThemeMode
+    {
+        get => ThemePreferences.Mode;
+        set => ThemePreferences = ThemePreferences with { Mode = value };
+    }
+    private string ThemeDensity
+    {
+        get => ThemePreferences.Density;
+        set => ThemePreferences = ThemePreferences with { Density = value };
+    }
+    private List<WorkspaceResponse> FilteredWorkspaces => Workspaces.Where(workspace =>
+        (string.IsNullOrWhiteSpace(WorkspaceSearch) ||
+         $"{workspace.Name} {workspace.Slug}".Contains(WorkspaceSearch, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrWhiteSpace(WorkspaceTypeFilter) || workspace.Type == WorkspaceTypeFilter) &&
+        (string.IsNullOrWhiteSpace(AccessFilter) ||
+         (AccessFilter == "owner" ? workspace.Role == "Owner" : workspace.Role != "Owner"))).ToList();
+    private List<WorkspaceTreeNode> SearchMatches => FlattenNodes(RootNodes)
+        .Where(node => !node.IsDirectory &&
+            $"{node.Name} {node.Path}".Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentUser = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        try
+        {
+            await LoadWorkspacesAsync(_disposeToken.Token);
+            var settings = await Api.GetUserWorkspaceSettingsAsync(_disposeToken.Token);
+            DefaultDirectory = settings.DefaultWorkspaceDirectory;
+            if (CurrentWorkspace is not null)
+                await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+        }
+        catch (ApiException exception)
+        {
+            ErrorMessage = ApiError(exception);
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = "无法连接到 Episteme API。请检查 API 地址和服务状态。";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        var storedTheme = await Theme.LoadAsync(_disposeToken.Token);
+        ThemePreferences = storedTheme ?? ThemePreferences.Default;
+        await Theme.SaveAsync(ThemePreferences, _disposeToken.Token);
+        StateHasChanged();
+    }
+
+    private async Task LoadWorkspacesAsync(CancellationToken cancellationToken)
+    {
+        var selectedWorkspaceId = CurrentWorkspace?.Id;
+        Workspaces.Clear();
+        var offset = 0;
+        WorkspaceListResponse page;
+        do
+        {
+            page = await Api.ListWorkspacesAsync(offset, 100, cancellationToken);
+            Workspaces.AddRange(page.Items);
+            offset += page.Limit;
+        } while (page.HasMore);
+        CurrentWorkspace = Workspaces.FirstOrDefault(workspace => workspace.Id == selectedWorkspaceId)
+            ?? Workspaces.FirstOrDefault(workspace => workspace.Role == "Owner")
+            ?? Workspaces.FirstOrDefault();
+    }
+
+    private async Task LoadWorkspaceAsync(WorkspaceResponse workspace, CancellationToken cancellationToken)
+    {
+        CurrentWorkspace = workspace;
+        RootNodes.Clear();
+        SelectedFile = null;
+        CurrentDocument = null;
+        CurrentHead = "";
+        IsReadOnlyVersion = false;
+        SearchText = "";
+        History.Clear();
+        SelectedFolderPath = "";
+        SelectedTreePath = null;
+        var root = await Api.ListDirectoryAsync(workspace.Id, "", cancellationToken);
+        foreach (var entry in root.Entries)
+            RootNodes.Add(new WorkspaceTreeNode(entry.Name, entry.Name, entry.Kind));
+    }
+
+    private async Task OnWorkspaceChanged(ChangeEventArgs args)
+    {
+        if (Guid.TryParse(args.Value?.ToString(), out var id) && Workspaces.FirstOrDefault(item => item.Id == id) is { } workspace)
+            await RunApiAsync(async () => await LoadWorkspaceAsync(workspace, _disposeToken.Token));
+    }
+
+    private async Task SelectWorkspaceAsync(WorkspaceResponse workspace)
+    {
+        await RunApiAsync(async () =>
+        {
+            await LoadWorkspaceAsync(workspace, _disposeToken.Token);
+            ShowScreen("workspace");
+        });
+    }
+
+    private async Task ToggleDirectoryAsync(WorkspaceTreeNode node)
+    {
+        SelectedFolderPath = node.Path;
+        SelectedTreePath = node.Path;
+        if (!node.IsLoaded)
+        {
+            await RunApiAsync(async () =>
+            {
+                var response = await Api.ListDirectoryAsync(CurrentWorkspace!.Id, node.Path, _disposeToken.Token);
+                node.Children.Clear();
+                foreach (var entry in response.Entries)
+                    node.Children.Add(new WorkspaceTreeNode(entry.Name, $"{node.Path}/{entry.Name}", entry.Kind));
+                node.IsLoaded = true;
+                node.IsExpanded = true;
+            });
+        }
+        else
+        {
+            node.IsExpanded = !node.IsExpanded;
+        }
+    }
+
+    private async Task OpenDocumentAsync(WorkspaceTreeNode node)
+    {
+        SelectedFile = node;
+        SelectedTreePath = node.Path;
+        SelectedFolderPath = ParentPath(node.Path);
+        IsMarkdown = node.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
+        IsCodeFile = IsSourceFile(node.Name);
+        ShowMarkdownPreview = false;
+        IsReadOnlyVersion = false;
+        CurrentDocument = null;
+        EditedContent = "";
+        History.Clear();
+        if (!IsEditableTextFile(node.Name))
+        {
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        await RunApiAsync(async () =>
+        {
+            CurrentDocument = await Api.ReadDocumentAsync(CurrentWorkspace!.Id, node.Path, _disposeToken.Token);
+            EditedContent = CurrentDocument.Content;
+            var history = await Api.GetDocumentHistoryAsync(CurrentWorkspace.Id, node.Path, 0, 100, _disposeToken.Token);
+            History.AddRange(history.Commits);
+            CurrentHead = history.HeadCommitId;
+        });
+    }
+
+    private async Task SaveDocumentAsync()
+    {
+        if (CurrentWorkspace is null || SelectedFile is null || CurrentDocument is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var result = await Api.PutDocumentAsync(CurrentWorkspace.Id, SelectedFile.Path,
+                new PutWorkspaceDocumentRequest(CurrentHead, EditedContent), _disposeToken.Token);
+            CurrentDocument = new WorkspaceDocumentResponse(result.CommitId, EditedContent);
+            CurrentHead = result.CommitId;
+            await OpenDocumentAsync(SelectedFile);
+            ShowToast("文档已保存为新的 Git 提交。");
+        });
+    }
+
+    private async Task OpenHistoryAsync()
+    {
+        if (SelectedFile is null || CurrentWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var result = await Api.GetDocumentHistoryAsync(CurrentWorkspace.Id, SelectedFile.Path, 0, 100, _disposeToken.Token);
+            History.Clear();
+            History.AddRange(result.Commits);
+            ShowScreen("history");
+        });
+    }
+
+    private async Task ViewVersionAsync(string commit)
+    {
+        if (SelectedFile is null || CurrentWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var version = await Api.ReadDocumentVersionAsync(CurrentWorkspace.Id, SelectedFile.Path, commit, _disposeToken.Token);
+            CurrentDocument = version;
+            EditedContent = version.Content;
+            IsReadOnlyVersion = true;
+            ShowScreen("workspace");
+            ShowToast($"已读取版本 {ShortCommit(commit)}。");
+        });
+    }
+
+    private async Task RestoreVersionAsync(string commit)
+    {
+        if (CurrentWorkspace is null || CurrentDocument is null || SelectedFile is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var result = await Api.RestoreDocumentAsync(CurrentWorkspace.Id, SelectedFile.Path,
+                new RestoreWorkspaceDocumentRequest(CurrentHead, commit), _disposeToken.Token);
+            await OpenDocumentAsync(SelectedFile);
+            ShowToast($"已恢复为新提交 {ShortCommit(result.CommitId)}。");
+        });
+    }
+
+    private async Task SaveDefaultDirectoryAsync()
+    {
+        await RunApiAsync(async () =>
+        {
+            var result = await Api.UpdateUserWorkspaceSettingsAsync(
+                new UpdateUserWorkspaceSettingsRequest(DefaultDirectory), _disposeToken.Token);
+            DefaultDirectory = result.DefaultWorkspaceDirectory;
+            ShowToast("默认工作目录已保存。");
+        });
+    }
+
+    private async Task OpenSecuritySettingsAsync()
+    {
+        SettingsTab = "security";
+        await RunApiAsync(async () =>
+        {
+            Tokens.Clear();
+            Authorizations.Clear();
+            var tokens = await Api.ListUserTokensAsync(0, 100, _disposeToken.Token);
+            Tokens.AddRange(tokens.Items);
+            var authorizations = await Api.ListUserAuthorizationsAsync(0, 100, _disposeToken.Token);
+            Authorizations.AddRange(authorizations.Items);
+        });
+    }
+
+    private async Task RevokeTokenAsync(string tokenId)
+    {
+        await RunApiAsync(async () =>
+        {
+            await Api.RevokeUserTokenAsync(tokenId, _disposeToken.Token);
+            Tokens.RemoveAll(token => token.Id == tokenId);
+            ShowToast("令牌已撤销。");
+        });
+    }
+
+    private async Task RevokeAuthorizationAsync(string authorizationId)
+    {
+        await RunApiAsync(async () =>
+        {
+            await Api.RevokeUserAuthorizationAsync(authorizationId, _disposeToken.Token);
+            Authorizations.RemoveAll(item => item.Id == authorizationId);
+            ShowToast("应用授权已撤销。");
+        });
+    }
+
+    private async Task OpenShareWorkspaceAsync(WorkspaceResponse workspace)
+    {
+        DialogWorkspace = workspace;
+        DialogKind = "share";
+        DialogTitle = "共享与权限";
+        DialogSubtitle = workspace.Name;
+        DialogError = "";
+        Members.Clear();
+        IsDialogOpen = true;
+        await RunApiAsync(async () =>
+        {
+            var response = await Api.ListWorkspaceMembersAsync(workspace.Id, 0, 100, _disposeToken.Token);
+            Members.AddRange(response.Items.Where(member => member.Role != "Owner"));
+        });
+    }
+
+    private async Task SetMemberAsync()
+    {
+        if (DialogWorkspace is null || !Guid.TryParse(MemberUserId, out var userId))
+        {
+            DialogError = "请输入有效的用户 ID。";
+            return;
+        }
+        await RunApiAsync(async () =>
+        {
+            await Api.SetWorkspaceMemberAsync(DialogWorkspace.Id, userId,
+                new SetWorkspaceMemberRequest(MemberRole), _disposeToken.Token);
+            var refreshed = await Api.ListWorkspaceMembersAsync(DialogWorkspace.Id, 0, 100, _disposeToken.Token);
+            Members.Clear();
+            Members.AddRange(refreshed.Items.Where(member => member.Role != "Owner"));
+            DialogError = "";
+        }, dialog: true);
+    }
+
+    private async Task RemoveMemberAsync(Guid userId)
+    {
+        if (DialogWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            await Api.RemoveWorkspaceMemberAsync(DialogWorkspace.Id, userId, _disposeToken.Token);
+            Members.RemoveAll(member => member.UserId == userId);
+        }, dialog: true);
+    }
+
+    private void OpenNewWorkspace()
+    {
+        DialogKind = "create";
+        DialogTitle = "新建工作空间";
+        DialogSubtitle = "正式创建后将初始化独立 Git 仓库。";
+        WorkspaceName = "";
+        WorkspaceSlug = "";
+        WorkspaceType = "Code";
+        WorkspaceDescription = "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private void OpenManageWorkspace(WorkspaceResponse workspace)
+    {
+        DialogWorkspace = workspace;
+        DialogKind = "manage";
+        DialogTitle = $"设置 · {workspace.Name}";
+        DialogSubtitle = "空间元数据使用并发版本戳保护。";
+        WorkspaceName = workspace.Name;
+        WorkspaceType = workspace.Type;
+        WorkspaceDescription = workspace.Description ?? "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task SaveWorkspaceAsync()
+    {
+        await RunApiAsync(async () =>
+        {
+            if (DialogKind == "create")
+            {
+                var created = await Api.CreateWorkspaceAsync(new CreateWorkspaceRequest(
+                    WorkspaceName, WorkspaceSlug, WorkspaceType, WorkspaceDescription), _disposeToken.Token);
+                await LoadWorkspacesAsync(_disposeToken.Token);
+                CurrentWorkspace = Workspaces.First(workspace => workspace.Id == created.Id);
+                await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+                ShowToast("工作空间已创建。");
+            }
+            else
+            {
+                if (DialogWorkspace is null)
+                    throw new InvalidOperationException("The workspace being edited is no longer available.");
+                var updated = await Api.UpdateWorkspaceAsync(DialogWorkspace.Id, new UpdateWorkspaceRequest(
+                    WorkspaceName, WorkspaceType, WorkspaceDescription, DialogWorkspace.ConcurrencyStamp), _disposeToken.Token);
+                await LoadWorkspacesAsync(_disposeToken.Token);
+                if (CurrentWorkspace?.Id == updated.Id)
+                    CurrentWorkspace = updated;
+                await LoadWorkspaceAsync(CurrentWorkspace!, _disposeToken.Token);
+                ShowToast("工作空间设置已保存。");
+            }
+            IsDialogOpen = false;
+        }, dialog: true);
+    }
+
+    private void OpenImportWorkspace()
+    {
+        DialogKind = "import";
+        DialogTitle = "导入工作空间配置";
+        DialogSubtitle = "导入非敏感元数据和可选的空目录骨架。";
+        ImportManifest = null;
+        ImportName = "";
+        ImportSlug = "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task ReadManifestAsync(InputFileChangeEventArgs args)
+    {
+        try
+        {
+            await using var stream = args.File.OpenReadStream(1_048_576, _disposeToken.Token);
+            ImportManifest = await JsonSerializer.DeserializeAsync<WorkspaceManifestResponse>(
+                stream, new JsonSerializerOptions(JsonSerializerDefaults.Web), _disposeToken.Token);
+            if (ImportManifest is null)
+            {
+                DialogError = "配置文件内容为空。";
+                return;
+            }
+            ImportName = ImportManifest.Name;
+            DialogError = "";
+        }
+        catch (JsonException)
+        {
+            DialogError = "配置文件不是有效的 Episteme JSON manifest。";
+        }
+        catch (IOException)
+        {
+            DialogError = "读取配置文件失败。";
+        }
+    }
+
+    private async Task ImportWorkspaceAsync()
+    {
+        if (ImportManifest is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var manifest = ImportManifest with { Name = ImportName };
+            var imported = await Api.ImportWorkspaceManifestAsync(new ImportWorkspaceManifestRequest(ImportSlug, manifest), _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspacesAsync(_disposeToken.Token);
+            CurrentWorkspace = Workspaces.First(workspace => workspace.Id == imported.Id);
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("工作空间配置已导入。");
+        }, dialog: true);
+    }
+
+    private async Task ExportManifestAsync(WorkspaceResponse workspace)
+    {
+        await RunApiAsync(async () =>
+        {
+            var manifest = await Api.ExportWorkspaceManifestV3Async(workspace.Id, _disposeToken.Token);
+            var json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true });
+            await JS.InvokeVoidAsync("episteme.downloadText", $"{workspace.Slug}.episteme.workspace.json", json, "application/json");
+        });
+    }
+
+    private void ConfirmArchive(WorkspaceResponse workspace)
+    {
+        DialogWorkspace = workspace;
+        WorkspaceName = workspace.Name;
+        DialogKind = "archive";
+        DialogTitle = "确认归档空间";
+        DialogSubtitle = "归档保留仓库及 Git 历史。";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task ArchiveWorkspaceAsync()
+    {
+        if (DialogWorkspace is null)
+            return;
+        var archivedId = DialogWorkspace.Id;
+        await RunApiAsync(async () =>
+        {
+            await Api.ArchiveWorkspaceAsync(archivedId,
+                new ArchiveWorkspaceRequest(DialogWorkspace.ConcurrencyStamp), _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspacesAsync(_disposeToken.Token);
+            if (CurrentWorkspace is not null)
+                await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("工作空间已归档。");
+        }, dialog: true);
+    }
+
+    private void OpenCreateEntry(bool folder)
+    {
+        DialogKind = folder ? "create-folder" : "create-document";
+        DialogTitle = folder ? "新建文件夹" : "新建文档";
+        DialogSubtitle = $"创建位置：/{SelectedFolderPath}";
+        WorkspaceName = "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task CreateEntryAsync()
+    {
+        if (CurrentWorkspace is null)
+            return;
+        if (string.IsNullOrWhiteSpace(WorkspaceName))
+        {
+            DialogError = "请输入名称。";
+            return;
+        }
+        var name = WorkspaceName.Trim();
+        await RunApiAsync(async () =>
+        {
+            var expectedHead = await Api.ListDirectoryAsync(CurrentWorkspace.Id, SelectedFolderPath, _disposeToken.Token);
+            var path = string.IsNullOrEmpty(SelectedFolderPath) ? name : $"{SelectedFolderPath}/{name}";
+            if (DialogKind == "create-folder")
+            {
+                await Api.CreateDirectoryAsync(CurrentWorkspace.Id, path,
+                    new DeleteWorkspaceDocumentRequest(expectedHead.CommitId), _disposeToken.Token);
+            }
+            else
+            {
+                path += NewDocumentExtension;
+                await Api.PutDocumentAsync(CurrentWorkspace.Id, path,
+                    new PutWorkspaceDocumentRequest(expectedHead.CommitId, ""), _disposeToken.Token);
+            }
+            IsDialogOpen = false;
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+        }, dialog: true);
+    }
+
+    private void ToggleMarkdownPreview() => ShowMarkdownPreview = !ShowMarkdownPreview;
+
+    private void ShowScreen(string screen)
+    {
+        Screen = screen;
+        ErrorMessage = "";
+    }
+
+    private void SelectRootFolder()
+    {
+        SelectedFolderPath = "";
+        SelectedTreePath = null;
+    }
+
+    private void CloseDialog() => IsDialogOpen = false;
+    private async Task SetAccentAsync(string accent)
+    {
+        ThemePreferences = ThemePreferences with { Accent = accent };
+        await SaveThemeAsync();
+    }
+    private Task SaveThemeAsync() => Theme.SaveAsync(ThemePreferences, _disposeToken.Token).AsTask();
+    private async Task ResetThemeAsync()
+    {
+        ThemePreferences = ThemePreferences.Default;
+        await SaveThemeAsync();
+    }
+
+    private async Task RunApiAsync(Func<Task> action, bool dialog = false)
+    {
+        ErrorMessage = "";
+        if (dialog)
+            DialogError = "";
+        try
+        {
+            await action();
+        }
+        catch (ApiException exception)
+        {
+            var message = ApiError(exception);
+            if (dialog)
+                DialogError = message;
+            else
+                ErrorMessage = message;
+        }
+        catch (HttpRequestException)
+        {
+            const string message = "无法连接到 Episteme API。请检查 API 地址和服务状态。";
+            if (dialog)
+                DialogError = message;
+            else
+                ErrorMessage = message;
+        }
+    }
+
+    private void ShowToast(string message)
+    {
+        ToastMessage = message;
+        _ = ClearToastAsync();
+    }
+
+    private async Task ClearToastAsync()
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(4), _disposeToken.Token);
+        }
+        catch (OperationCanceledException) when (_disposeToken.IsCancellationRequested)
+        {
+            return;
+        }
+        if (!IsDisposed)
+        {
+            ToastMessage = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string ApiError(ApiException exception) =>
+        $"请求失败（HTTP {(int)exception.StatusCode} {exception.StatusCode}）。请检查权限、输入或并发版本后重试。";
+    private static string RoleLabel(string? role) => role switch
+    {
+        "Owner" => "Owner",
+        "Editor" => "读写 · Editor",
+        "Reader" => "只读 · Reader",
+        _ => "权限未提供"
+    };
+    private static string StatusLabel(string? status) => status switch
+    {
+        "Active" => "正常 · Active",
+        "Provisioning" => "初始化中 · Provisioning",
+        "Archived" => "已归档 · Archived",
+        _ => $"未知状态 · {status}"
+    };
+    private static string ParentPath(string path)
+    {
+        var index = path.LastIndexOf('/');
+        return index < 0 ? "" : path[..index];
+    }
+    private static IEnumerable<WorkspaceTreeNode> FlattenNodes(IEnumerable<WorkspaceTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            yield return node;
+            foreach (var descendant in FlattenNodes(node.Children))
+                yield return descendant;
+        }
+    }
+    private static bool IsEditableTextFile(string name) =>
+        name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) ||
+        name.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
+        IsSourceFile(name);
+    private static bool IsSourceFile(string name) =>
+        Path.GetExtension(name).ToLowerInvariant() is ".cs" or ".js" or ".ts" or ".json" or ".xml" or ".yml" or ".yaml";
+    private static string ShortCommit(string commit) => commit.Length > 7 ? commit[..7] : commit;
+
+    public ValueTask DisposeAsync()
+    {
+        IsDisposed = true;
+        _disposeToken.Cancel();
+        _disposeToken.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

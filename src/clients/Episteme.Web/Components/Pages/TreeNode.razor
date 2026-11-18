@@ -1,0 +1,39 @@
+<div class="tree-row">
+    <button type="button" class="tree-item @(CurrentPath == Node.Path ? "selected" : "")"
+            @onclick="SelectAsync">
+        @if (Node.IsDirectory)
+        {
+            <span>@(Node.IsExpanded ? "▾　📁" : "▸　📁")</span>
+        }
+        else
+        {
+            <span>▤</span>
+        }
+        <span>@Node.Name</span>
+    </button>
+    @if (!Node.IsDirectory)
+    {
+        <button type="button" class="tree-more" title="操作暂不可用" disabled>⋯</button>
+    }
+</div>
+@if (Node.IsDirectory && Node.IsExpanded)
+{
+    <div class="folder-children">
+        @foreach (var child in Node.Children)
+        {
+            <TreeNode @key="child.Path" Node="child" CurrentPath="CurrentPath"
+                      OnSelect="OnSelect" OnToggleDirectory="OnToggleDirectory" />
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public WorkspaceTreeNode Node { get; set; } = null!;
+    [Parameter] public string? CurrentPath { get; set; }
+    [Parameter] public EventCallback<WorkspaceTreeNode> OnSelect { get; set; }
+    [Parameter] public EventCallback<WorkspaceTreeNode> OnToggleDirectory { get; set; }
+
+    private Task SelectAsync() => Node.IsDirectory
+        ? OnToggleDirectory.InvokeAsync(Node)
+        : OnSelect.InvokeAsync(Node);
+}

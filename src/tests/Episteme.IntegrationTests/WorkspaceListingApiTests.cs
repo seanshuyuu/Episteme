@@ -470,7 +470,7 @@ public sealed class WorkspaceListingApiTests
             client.DefaultRequestHeaders.Remove("X-Test-Subject");
             client.DefaultRequestHeaders.Add("X-Test-Subject", reader.Id.ToString());
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"{url}/documents?path=notes%2Fa.txt")).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"{url}/documents/history?path=notes%2Fa.txt")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"{url}/documents/history?path=notes%2Fa.txt")).StatusCode);
             await db.WorkspaceMembers.Where(m => m.WorkspaceId == workspaceId && m.UserId == reader.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(m => m.Role, WorkspaceRole.Editor));
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"{url}/documents/history?path=notes%2Fa.txt")).StatusCode);
@@ -544,7 +544,9 @@ public sealed class WorkspaceListingApiTests
             client.DefaultRequestHeaders.Add("X-Test-Subject", reader.Id.ToString());
             Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"{url}/documents?path=note.md",
                 new { expectedHead = first, content = "denied" })).StatusCode);
-            Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"{url}/documents/version?path=note.md&commitId={first}")).StatusCode);
+            var readerVersion = await client.GetAsync($"{url}/documents/version?path=note.md&commitId={first}");
+            Assert.Equal(HttpStatusCode.OK, readerVersion.StatusCode);
+            Assert.Equal("first", (await readerVersion.Content.ReadFromJsonAsync<DocumentResponse>())!.Content);
             await db.WorkspaceMembers.Where(m => m.WorkspaceId == id && m.UserId == reader.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(m => m.Role, WorkspaceRole.Editor));
             client.DefaultRequestHeaders.Remove("X-Test-Scope");

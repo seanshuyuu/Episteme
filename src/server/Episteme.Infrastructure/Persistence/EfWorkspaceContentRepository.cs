@@ -52,7 +52,7 @@ public sealed class EfWorkspaceContentRepository(EpistemeDbContext db, GitWorksp
         Guid workspaceId, WorkspaceActor actor, string path, int offset, int limit, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var (workspace, failure) = await AuthorizeAsync(workspaceId, actor, true, cancellationToken);
+        var (workspace, failure) = await AuthorizeAsync(workspaceId, actor, false, cancellationToken);
         if (failure is not null)
             return new(null, null, false, failure);
         var result = await reader.HistoryAsync(workspace!.StorageKey, workspace.DefaultBranch, path, offset, limit, cancellationToken);
@@ -64,7 +64,7 @@ public sealed class EfWorkspaceContentRepository(EpistemeDbContext db, GitWorksp
         Guid workspaceId, WorkspaceActor actor, string path, string commitId, CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var (workspace, failure) = await AuthorizeAsync(workspaceId, actor, true, cancellationToken);
+        var (workspace, failure) = await AuthorizeAsync(workspaceId, actor, false, cancellationToken);
         if (failure is not null)
             return new(null, null, failure);
         var result = await reader.ReadVersionAsync(workspace!.StorageKey, workspace.DefaultBranch, path, commitId, cancellationToken);

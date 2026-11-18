@@ -1,0 +1,106 @@
+@page
+@model Microsoft.AspNetCore.Identity.UI.V5.Pages.Account.Internal.LoginModel
+@using Microsoft.Extensions.Hosting
+@inject IConfiguration Configuration
+@inject IWebHostEnvironment Environment
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@{
+    Layout = null;
+    var emailEnabled = Configuration.GetValue<bool>("Authentication:Email:Enabled");
+    var returnUrl = Model.ReturnUrl ?? Request.Query["returnUrl"].ToString();
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>登录 - Episteme</title>
+    <link rel="stylesheet" href="~/css/auth-login.css" asp-append-version="true" />
+</head>
+<body>
+    <main class="login-shell">
+        <div class="login-container">
+            <header class="brand">
+                <span class="brand-mark" aria-hidden="true">E</span>
+                <span>Episteme</span>
+            </header>
+
+            <div class="login-card">
+                <section class="intro" aria-labelledby="intro-title">
+                    <span class="intro-label">EPISTEME</span>
+                    <h1 id="intro-title">让知识，<br />有序生长。</h1>
+                    <p>在工作空间中组织文档，记录每一次思考与变化。</p>
+                    <div class="intro-art" aria-hidden="true">
+                        <div class="art-window">
+                            <div class="art-header"><i></i><i></i><i></i></div>
+                            <div class="art-body">
+                                <div class="art-sidebar"><b></b><span></span><span></span><span></span></div>
+                                <div class="art-content"><b></b><span></span><span></span><span></span><em></em></div>
+                            </div>
+                        </div>
+                        <div class="art-badge"><span>✓</span> 你的工作空间</div>
+                    </div>
+                </section>
+
+                <section class="login-panel" aria-labelledby="login-title">
+                    <div class="panel-heading">
+                        <span class="eyebrow">欢迎回来</span>
+                        <h2 id="login-title">登录 Episteme</h2>
+                        <p>使用你的账户继续访问工作空间。</p>
+                    </div>
+
+                    <form method="post" asp-route-returnUrl="@returnUrl" class="login-form">
+                        <div asp-validation-summary="ModelOnly" class="validation-summary" role="alert"></div>
+                        <div class="field">
+                            <label asp-for="Input.Email">邮箱地址</label>
+                            <input asp-for="Input.Email" autocomplete="username" placeholder="name@example.com" />
+                            <span asp-validation-for="Input.Email" class="field-error"></span>
+                        </div>
+                        <div class="field">
+                            <div class="field-heading">
+                                <label asp-for="Input.Password">密码</label>
+                                @if (emailEnabled)
+                                {
+                                    <a asp-page="./ForgotPassword">忘记密码？</a>
+                                }
+                            </div>
+                            <input asp-for="Input.Password" autocomplete="current-password" placeholder="输入密码" />
+                            <span asp-validation-for="Input.Password" class="field-error"></span>
+                        </div>
+                        <label class="remember">
+                            <input asp-for="Input.RememberMe" />
+                            <span>记住我</span>
+                        </label>
+                        <button id="login-submit" class="primary-button" type="submit">登录</button>
+                    </form>
+
+                    @if (Model.ExternalLogins?.Count > 0)
+                    {
+                        <div class="external-login">
+                            <div class="divider"><span>或使用其他方式</span></div>
+                            <form asp-page="./ExternalLogin" asp-route-returnUrl="@returnUrl" method="post">
+                                @foreach (var provider in Model.ExternalLogins)
+                                {
+                                    <button class="external-button" type="submit" name="provider" value="@provider.Name">@provider.DisplayName</button>
+                                }
+                            </form>
+                        </div>
+                    }
+
+                    @if (emailEnabled || Environment.IsDevelopment())
+                    {
+                        <div class="account-links">
+                            <span>还没有账户？ <a asp-page="./Register" asp-route-returnUrl="@returnUrl">注册账户</a></span>
+                            @if (emailEnabled)
+                            {
+                                <a asp-page="./ResendEmailConfirmation">重新发送确认邮件</a>
+                            }
+                        </div>
+                    }
+                </section>
+            </div>
+            <p class="footer">Episteme · 你的知识工作空间</p>
+        </div>
+    </main>
+</body>
+</html>

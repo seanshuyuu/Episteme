@@ -43,6 +43,9 @@ public sealed class IdentityEmailTests
             Assert.DoesNotContain("code=", confirmationPage, StringComparison.OrdinalIgnoreCase);
 
             var login = await browser.GetStringAsync("/Identity/Account/Login");
+            Assert.Contains("/Identity/Account/Register", login);
+            Assert.Contains("/Identity/Account/ForgotPassword", login);
+            Assert.Contains("/Identity/Account/ResendEmailConfirmation", login);
             using var denied = await browser.PostAsync("/Identity/Account/Login", Form(
                 login, ("Input.Email", email), ("Input.Password", password)));
             Assert.Equal(HttpStatusCode.OK, denied.StatusCode);

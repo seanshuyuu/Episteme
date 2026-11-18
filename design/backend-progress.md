@@ -17,7 +17,7 @@
 - 增加成员管理：`GET /api/v1/workspaces/{id}/members` 分页列出活跃成员；`PUT /api/v1/workspaces/{id}/members/{userId}` 添加、重新启用成员或调整为 Owner、Editor、Reader；`DELETE` 同一路径移除成员。操作要求 `workspaces.manage` scope、活跃账号以及空间 Owner 或系统管理员权限；设置角色的目标用户必须活跃。工作空间锁串行化成员变更，禁止移除或降级最后一名活跃 Owner 成员。Owner 转移可先授予新 Owner，再移除或降级原 Owner。
 - 成员变更在同一数据库事务写入审计事件，记录操作者、目标用户、目标角色及事件类型，不记录正文或 token。部署时须应用 `WorkspaceMemberAudit` 迁移；历史审计事件的目标字段为空。
 - 新增只读内容接口：`GET /api/v1/workspaces/{id}/directories?path=...` 和 `GET /api/v1/workspaces/{id}/documents?path=...`。须具备 `workspaces.read` scope、活跃账号和活跃成员关系（系统管理员仍需 scope）；在空间和用户锁内鉴权后读取默认分支的 Git 提交树，响应包含快照 commit ID，不读取未提交工作树内容。目录请求不传 path 表示根目录；路径规则与用户工作目录一致；不跟随 Git 符号链接。文档只支持无 NUL 的有效 UTF-8，最大 1 MiB；目录 Git 输出超过 1 MiB 返回 413，暂不支持分页。二进制、符号链接和其他非普通文件返回 422；缺失路径返回 404。
-- `GET /api/v1/workspaces/{id}/documents/history` 按路径查询默认分支的提交 ID，需 `workspaces.read` scope 和 Owner/Editor（或系统管理员），分页大小为 1–100，offset 上限 10000。历史不追踪重命名前的路径；不存在或没有历史的路径返回空列表。响应含查询时固定的 HEAD；当前使用 offset 分页，分页之间 HEAD 改变可能导致重复或遗漏。
+- `GET /api/v1/workspaces/{id}/documents/history` 按路径查询默认分支的提交 ID，需 `workspaces.read` scope 和活跃成员关系（或系统管理员），分页大小为 1–100，offset 上限 10000。历史不追踪重命名前的路径；不存在或没有历史的路径返回空列表。响应含查询时固定的 HEAD；当前使用 offset 分页，分页之间 HEAD 改变可能导致重复或遗漏。
 - `GET /api/v1/workspaces/{id}/documents/version` 可以读取默认分支可达的历史提交中文档，权限与历史查询一致；限制、路径和错误规则与当前文档读取相同。
 - 文档 `PUT` / `DELETE` 及 `POST /documents/restore` 要求 `workspaces.write` scope 和 Owner/Editor（或系统管理员），调用者必须提供完整的 `expectedHead`。写入与删除产生新提交；恢复只接受当前 HEAD 的祖先提交并产生新提交，不重写历史。空间行锁与 Git `update-ref` 比较旧 HEAD 防止并发覆盖；无效路径、越权、HEAD 冲突和不支持的目标分别返回错误。新文档的父目录必须存在，文本大小上限为 1 MiB。提交作者使用用户 ID 而非正文；未跟踪的 Git 工作树文件和索引不会被修改，API 始终读取 Git tree，不应将该工作树当作最新快照。
 - Git 提交和数据库事务不构成分布式事务：如果客户端取消或连接在提交后中断，结果可能不确定，应重新读取 HEAD 和内容再决定是否重试，不可假定失败意味着没有提交。Git 物理仓库须由服务独占，不能由其他进程直接修改。

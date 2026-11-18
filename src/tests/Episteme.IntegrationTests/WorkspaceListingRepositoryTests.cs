@@ -41,8 +41,15 @@ public sealed class WorkspaceListingRepositoryTests
             var page = await repository.ListForActiveUserAsync(user.Id, false, 0, 1, default);
             var next = await repository.ListForActiveUserAsync(user.Id, false, 1, 1, default);
             var empty = await repository.ListForActiveUserAsync(user.Id, false, 2, 1, default);
-            Assert.Equal(first.Id, Assert.Single(page!).Id);
-            Assert.Equal(second.Id, Assert.Single(next!).Id);
+            var firstItem = Assert.Single(page!);
+            var secondItem = Assert.Single(next!);
+            Assert.Equal(first.Id, firstItem.Id);
+            Assert.Equal(WorkspaceRole.Owner, firstItem.MemberRole);
+            Assert.Equal(user.UserName, firstItem.OwnerName);
+            Assert.Equal(WorkspaceStatus.Active, firstItem.Status);
+            Assert.NotEqual(default, firstItem.CreatedAt);
+            Assert.Equal(second.Id, secondItem.Id);
+            Assert.Equal(WorkspaceRole.Reader, secondItem.MemberRole);
             Assert.Empty(empty!);
 
             var administrator = await repository.ListForActiveUserAsync(user.Id, true, 0, 100, default);

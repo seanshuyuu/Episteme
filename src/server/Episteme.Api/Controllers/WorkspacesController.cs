@@ -375,7 +375,11 @@ public sealed class WorkspacesController(
         workspace.Type.ToString(),
         workspace.Description,
         workspace.DefaultBranch,
-        workspace.ConcurrencyStamp);
+        workspace.ConcurrencyStamp,
+        workspace.MemberRole?.ToString(),
+        workspace.OwnerName,
+        workspace.Status.ToString(),
+        workspace.CreatedAt);
 }
 
 /// <summary>Workspace metadata returned to authorized callers.</summary>
@@ -386,7 +390,11 @@ public sealed record WorkspaceResponse(
     string Type,
     string? Description,
     string DefaultBranch,
-    Guid ConcurrencyStamp);
+    Guid ConcurrencyStamp,
+    string? Role,
+    string? OwnerName,
+    string Status,
+    DateTimeOffset CreatedAt);
 
 /// <summary>A bounded page of workspaces visible to the authenticated caller.</summary>
 public sealed record WorkspaceListResponse(

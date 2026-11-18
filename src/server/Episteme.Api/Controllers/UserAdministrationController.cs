@@ -108,6 +108,43 @@ public sealed class UserAdministrationController(IUserAdministrationService serv
         return Ok(new ManagedUserListResponse(result.Items!.Select(ToResponse).ToArray(), offset, limit, result.HasMore));
     }
 
+    /// <summary>Returns current system totals and the three most recently created accounts.</summary>
+    [HttpGet("/api/v1/admin/overview")]
+    [ProducesResponseType<UserAdministrationOverviewResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    public async Task<IActionResult> Overview(CancellationToken cancellationToken)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
+            return Unauthorized();
+        var result = await service.GetOverviewAsync(actor!, cancellationToken);
+        if (result.Failure is not null)
+            return Failure(result.Failure.Value);
+        var overview = result.Overview!;
+        return Ok(new UserAdministrationOverviewResponse(
+            overview.TotalUsers, overview.ActiveUsers, overview.TotalWorkspaces,
+            overview.ProvisioningWorkspaces, overview.AdministratorCount,
+            overview.RecentUsers.Select(ToResponse).ToArray()));
+    }
+
+    /// <summary>Lists all workspaces owned by a user, including archived and provisioning spaces.</summary>
+    [HttpGet("{userId:guid}/workspaces")]
+    [ProducesResponseType<AdminOwnedWorkspaceListResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> OwnedWorkspaces(Guid userId, [FromQuery] int offset = 0,
+        [FromQuery] int limit = 25, CancellationToken cancellationToken = default)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
+            return Unauthorized();
+        var result = await service.ListOwnedWorkspacesAsync(actor!, userId, offset, limit, cancellationToken);
+        if (result.Failure is not null)
+            return Failure(result.Failure.Value);
+        return Ok(new AdminOwnedWorkspaceListResponse(result.Items!.Select(workspace =>
+            new AdminOwnedWorkspaceResponse(workspace.Id, workspace.Name, workspace.Type,
+                workspace.Status, workspace.CreatedAt)).ToArray(), offset, limit, result.HasMore));
+    }
+
     /// <summary>Enables or disables a user, subject to owner and last-administrator protections.</summary>
     [HttpPut("{userId:guid}/status")]
     [ProducesResponseType<ManagedUserResponse>(StatusCodes.Status200OK)]
@@ -144,7 +181,8 @@ public sealed class UserAdministrationController(IUserAdministrationService serv
     }
 
     private static ManagedUserResponse ToResponse(ManagedUser user) =>
-        new(user.Id, user.UserName, user.Email, user.Status.ToString(), user.CreatedAt, user.IsAdministrator);
+        new(user.Id, user.UserName, user.Email, user.Status.ToString(), user.CreatedAt,
+            user.IsAdministrator, user.OwnedWorkspaceCount);
 
     private ObjectResult TokenFailure(UserTokenFailure failure) => failure switch
     {
@@ -181,6 +219,14 @@ public sealed record ResetUserPasswordRequest(string Password)
 public sealed record SetAdministratorRequest(bool? IsAdministrator);
 /// <summary>Describes a managed user without credentials.</summary>
 public sealed record ManagedUserResponse(Guid Id, string? UserName, string? Email, string Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
 /// <summary>Contains one page of managed users.</summary>
 public sealed record ManagedUserListResponse(IReadOnlyList<ManagedUserResponse> Items, int Offset, int Limit, bool HasMore);
+/// <summary>System totals and the three newest user accounts for the admin dashboard.</summary>
+public sealed record UserAdministrationOverviewResponse(int TotalUsers, int ActiveUsers, int TotalWorkspaces,
+    int ProvisioningWorkspaces, int AdministratorCount, IReadOnlyList<ManagedUserResponse> RecentUsers);
+/// <summary>A workspace owned by a managed user.</summary>
+public sealed record AdminOwnedWorkspaceResponse(Guid Id, string Name, string Type, string Status, DateTimeOffset CreatedAt);
+/// <summary>A bounded page of workspaces owned by a managed user.</summary>
+public sealed record AdminOwnedWorkspaceListResponse(
+    IReadOnlyList<AdminOwnedWorkspaceResponse> Items, int Offset, int Limit, bool HasMore);

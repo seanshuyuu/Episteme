@@ -1,0 +1,437 @@
+@page "/admin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Administrator")]
+@implements IAsyncDisposable
+@using System.Security.Claims
+@inject IEpistemeApi Api
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ThemeService Theme
+
+<PageTitle>Episteme | 管理总览</PageTitle>
+
+<div class="admin-app">
+    <aside class="admin-sidebar" aria-label="管理员导航">
+        <div class="brand"><span class="brand-mark">E</span><span>Episteme</span></div>
+        <div class="nav-label">系统管理</div>
+        <nav class="nav">
+            <button class="@(Screen == "overview" ? "active" : "")" @onclick='() => Screen = "overview"'><span class="nav-icon">▦</span><span>管理总览</span></button>
+            <button class="@(Screen == "users" ? "active" : "")" @onclick='() => Screen = "users"'><span class="nav-icon">♙</span><span>用户管理</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+            <div class="profile"><span class="avatar">@AvatarText</span><span><strong>@DisplayName</strong><br /><small>系统管理员</small></span></div>
+        </div>
+    </aside>
+    <main>
+        <header>
+            <div class="crumb">系统管理 / @(Screen == "overview" ? "管理总览" : "用户管理")</div>
+            <div class="header-actions">
+                <a class="button" href="/">普通用户界面 ↗</a>
+                <button class="icon-button" aria-label="切换主题" title="切换主题" @onclick="ToggleThemeAsync">◐</button>
+                <span class="avatar" aria-label="当前管理员">@AvatarText</span>
+            </div>
+        </header>
+        <div class="content admin-content">
+            @if (IsLoading)
+            {
+                <div class="card">正在读取系统管理数据…</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+            {
+                <div class="error" role="alert">@ErrorMessage</div>
+            }
+            <section class="screen @(Screen == "overview" ? "active" : "")">
+                <div class="page-heading">
+                    <div><h1>管理总览</h1><p class="subtitle">系统用户与工作空间的管理入口。</p></div>
+                    <button class="button primary" @onclick="OpenCreateUser">＋ 创建用户</button>
+                </div>
+                @if (Overview is not null)
+                {
+                    <div class="grid metrics">
+                        <article class="card metric"><div><span class="muted">用户总数</span><strong>@Overview.TotalUsers</strong></div><span class="metric-mark">♙</span></article>
+                        <article class="card metric"><div><span class="muted">启用账户</span><strong>@Overview.ActiveUsers</strong></div><span class="metric-mark">✓</span></article>
+                        <article class="card metric"><div><span class="muted">工作空间</span><strong>@Overview.TotalWorkspaces</strong></div><span class="metric-mark">▦</span></article>
+                        <article class="card metric"><div><span class="muted">初始化中</span><strong>@Overview.ProvisioningWorkspaces</strong></div><span class="metric-mark">◷</span></article>
+                    </div>
+                    <div class="grid two-col">
+                        <article class="card">
+                            <div class="card-heading"><h2>最近创建的用户</h2><button class="text-link" @onclick='() => Screen = "users"'>用户管理 →</button></div>
+                            <div class="list">
+                                @foreach (var user in Overview.RecentUsers)
+                                {
+                                    <div class="list-row">
+                                        <div class="row-main"><span class="avatar">@Initial(user.UserName, user.Email)</span><div><strong>@(user.UserName ?? user.Email)</strong><small>@user.Email · @user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</small></div></div>
+                                        <span class="badge @(user.Status == "Active" ? "success" : "warning")">@user.Status</span>
+                                    </div>
+                                }
+                            </div>
+                        </article>
+                        <article class="card">
+                            <div class="card-heading"><h2>管理提醒</h2></div>
+                            <div class="list">
+                                <div class="list-row"><span><strong>待完成初始化</strong><br /><small class="muted">工作空间正在准备 Git 仓库</small></span><span class="badge warning">@Overview.ProvisioningWorkspaces</span></div>
+                                <div class="list-row"><span><strong>已停用账户</strong><br /><small class="muted">检查是否仍需保留访问</small></span><span class="badge">@(Overview.TotalUsers - Overview.ActiveUsers)</span></div>
+                                <div class="list-row"><span><strong>管理员账户</strong><br /><small class="muted">避免移除最后一个有效管理员</small></span><span class="badge owner">@Overview.AdministratorCount</span></div>
+                            </div>
+                        </article>
+                    </div>
+                }
+            </section>
+
+            <section class="screen @(Screen == "users" ? "active" : "")">
+                <div class="page-heading"><div><h1>用户管理</h1><p class="subtitle">查看账户、系统角色和用户所有的工作空间。</p></div><button class="button primary" @onclick="OpenCreateUser">＋ 创建用户</button></div>
+                <article class="card">
+                    <div class="card-heading">
+                        <h2>用户账户</h2>
+                        <div class="toolbar">
+                            <input class="search" placeholder="搜索邮箱或用户名" aria-label="搜索用户" @bind="UserSearch" @bind:event="oninput" />
+                            <select class="filter" aria-label="筛选状态" @bind="StatusFilter"><option value="">全部状态</option><option>Active</option><option>Disabled</option></select>
+                            <select class="filter" aria-label="筛选角色" @bind="RoleFilter"><option value="">全部角色</option><option>Administrator</option><option>User</option></select>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table><thead><tr><th>用户</th><th>状态</th><th>系统角色</th><th>名下工作空间</th><th>创建时间</th><th>操作</th></tr></thead>
+                            <tbody>
+                                @foreach (var user in FilteredUsers)
+                                {
+                                    <tr @key="user.Id">
+                                        <td><div class="row-main"><span class="avatar">@Initial(user.UserName, user.Email)</span><div><strong>@(user.UserName ?? user.Email)</strong><small>@user.Email</small></div></div></td>
+                                        <td><span class="badge @(user.Status == "Active" ? "success" : "warning")">@user.Status</span></td>
+                                        <td>@if (user.IsAdministrator) { <span class="badge owner">Administrator</span> } else { <span>User</span> }</td>
+                                        <td><button class="text-link" @onclick="() => OpenOwnedWorkspacesAsync(user)">@user.OwnedWorkspaceCount 个空间</button></td>
+                                        <td>@user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                                        <td><button class="button" @onclick="() => OpenAccountActions(user)">账户操作</button></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (Users.Count == 0)
+                    {
+                        <p class="empty-note">没有可显示的用户。</p>
+                    }
+                    else if (HasMoreUsers)
+                    {
+                        <div class="toolbar" style="justify-content:center;margin-top:12px">
+                            <button class="button" @onclick="LoadMoreUsersAsync">加载更多</button>
+                        </div>
+                    }
+                </article>
+                <div class="info">“名下工作空间”仅统计该用户为 Owner 的空间，包括已归档的空间。共享关系不代表所有权转移。</div>
+            </section>
+        </div>
+    </main>
+</div>
+
+@if (Dialog is "create" or "account" or "owned")
+{
+    <div class="dialog-backdrop">
+        <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="admin-dialog-title">
+            <div class="dialog-head">
+                <div>
+                    <h2 id="admin-dialog-title">@DialogTitle</h2>
+                    <p class="muted">@DialogSubtitle</p>
+                </div>
+                <button class="icon-button" @onclick="CloseDialog">×</button>
+            </div>
+            <div class="dialog-body">
+                @if (Dialog == "create")
+                {
+                    <label class="field"><strong>邮箱</strong><input type="email" required @bind="NewEmail" autocomplete="email" /></label>
+                    <label class="field"><strong>初始密码</strong><input type="password" required @bind="NewPassword" autocomplete="new-password" /></label>
+                    <label class="field"><strong>系统角色</strong><select @bind="NewIsAdministrator"><option value="false">User</option><option value="true">Administrator</option></select></label>
+                    <div class="info">密码操作要求 HTTPS；账户状态、密码策略和管理员保护由服务端校验。</div>
+                }
+                else if (Dialog == "account" && SelectedUser is not null)
+                {
+                    <div class="list-row"><strong>账户状态</strong><button class="button" @onclick="ToggleStatusAsync">@(SelectedUser.Status == "Active" ? "停用账户" : "启用账户")</button></div>
+                    <div class="list-row"><strong>系统角色</strong><button class="button" @onclick="ToggleAdministratorAsync">@(SelectedUser.IsAdministrator ? "移除管理员" : "设为管理员")</button></div>
+                    <p class="muted">服务端会保护最后一名有效管理员，并阻止停用仍拥有可访问空间的用户。</p>
+                }
+                else if (Dialog == "owned" && SelectedUser is not null)
+                {
+                    <div class="table-wrap">
+                        <table><thead><tr><th>空间名称</th><th>类型</th><th>状态</th><th>创建时间</th></tr></thead>
+                            <tbody>
+                                @foreach (var workspace in OwnedWorkspaces)
+                                {
+                                    <tr @key="workspace.Id">
+                                        <td>@workspace.Name</td><td>@workspace.Type</td>
+                                        <td><span class="badge workspace-status" data-status="@workspace.Status">@StatusLabel(workspace.Status)</span></td>
+                                        <td>@workspace.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (OwnedWorkspaces.Count == 0)
+                    {
+                        <p class="empty-note">该用户目前没有名下工作空间。</p>
+                    }
+                }
+                @if (!string.IsNullOrWhiteSpace(DialogError))
+                {
+                    <p class="error" role="alert">@DialogError</p>
+                }
+            </div>
+            <div class="dialog-foot">
+                <button class="button" @onclick="CloseDialog">关闭</button>
+                @if (Dialog == "create")
+                {
+                    <button class="button primary" @onclick="CreateUserAsync">创建账户</button>
+                }
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private readonly CancellationTokenSource _disposeToken = new();
+    private readonly List<ManagedUserResponse> Users = [];
+    private readonly List<AdminOwnedWorkspaceResponse> OwnedWorkspaces = [];
+    private UserAdministrationOverviewResponse? Overview;
+    private ManagedUserResponse? SelectedUser;
+    private ClaimsPrincipal CurrentUser = new();
+    private ThemePreferences ThemePreferences = ThemePreferences.Default;
+    private string Screen = "overview";
+    private string Dialog = "";
+    private string DialogTitle = "";
+    private string DialogSubtitle = "";
+    private string DialogError = "";
+    private string ErrorMessage = "";
+    private string UserSearch = "";
+    private string StatusFilter = "";
+    private string RoleFilter = "";
+    private string NewEmail = "";
+    private string NewPassword = "";
+    private bool NewIsAdministrator;
+    private bool IsLoading = true;
+    private bool HasMoreUsers;
+    private int UserOffset;
+
+    private string DisplayName => CurrentUser.Identity?.Name ?? CurrentUser.FindFirst("email")?.Value ?? "管理员";
+    private string AvatarText => Initial(DisplayName, null);
+    private IEnumerable<ManagedUserResponse> FilteredUsers => Users.Where(user =>
+        (string.IsNullOrWhiteSpace(UserSearch) ||
+         $"{user.UserName} {user.Email}".Contains(UserSearch, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrWhiteSpace(StatusFilter) || user.Status == StatusFilter) &&
+        (string.IsNullOrWhiteSpace(RoleFilter) ||
+         (RoleFilter == "Administrator" ? user.IsAdministrator : !user.IsAdministrator)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentUser = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User;
+        try
+        {
+            Overview = await Api.GetAdminOverviewAsync(_disposeToken.Token);
+            await LoadUsersAsync(reset: true);
+        }
+        catch (ApiException exception)
+        {
+            ErrorMessage = ApiError(exception);
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = "无法连接到 Episteme API。请检查 API 地址和服务状态。";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        ThemePreferences = await Theme.LoadAsync(_disposeToken.Token) ?? ThemePreferences.Default;
+        await Theme.SaveAsync(ThemePreferences, _disposeToken.Token);
+        StateHasChanged();
+    }
+
+    private async Task LoadUsersAsync(bool reset)
+    {
+        if (reset)
+        {
+            Users.Clear();
+            UserOffset = 0;
+        }
+        var response = await Api.ListUsersAsync(UserOffset, 100, _disposeToken.Token);
+        Users.AddRange(response.Items);
+        UserOffset += response.Limit;
+        HasMoreUsers = response.HasMore;
+    }
+
+    private async Task LoadMoreUsersAsync() => await RunApiAsync(() => LoadUsersAsync(reset: false));
+
+    private void OpenCreateUser()
+    {
+        Dialog = "create";
+        DialogTitle = "创建用户";
+        DialogSubtitle = "新账户由系统管理员创建。";
+        NewEmail = "";
+        NewPassword = "";
+        NewIsAdministrator = false;
+        DialogError = "";
+    }
+
+    private async Task CreateUserAsync()
+    {
+        await RunApiAsync(async () =>
+        {
+            var user = await Api.CreateUserAsync(new CreateUserRequest(NewEmail, NewPassword), _disposeToken.Token);
+            if (NewIsAdministrator)
+            {
+                try
+                {
+                    user = await Api.SetAdministratorAsync(user.Id,
+                        new SetAdministratorRequest(true), _disposeToken.Token);
+                }
+                catch (ApiException exception)
+                {
+                    ShowCreatedAccount(user,
+                        $"账户已创建，但管理员角色未授予（HTTP {(int)exception.StatusCode}）。可在下方账户操作中重试。");
+                    return;
+                }
+                catch (HttpRequestException)
+                {
+                    ShowCreatedAccount(user, "账户已创建，但管理员角色设置结果未确认。可在下方账户操作中重试。");
+                    return;
+                }
+            }
+            Dialog = "";
+            NewPassword = "";
+            await RefreshAdminDataAsync();
+        }, dialog: true);
+    }
+
+    private void ShowCreatedAccount(ManagedUserResponse user, string message)
+    {
+        NewPassword = "";
+        SelectedUser = user;
+        Dialog = "account";
+        DialogTitle = "账户已创建";
+        DialogSubtitle = $"{user.Email} · {user.Id}";
+        DialogError = message;
+    }
+
+    private void OpenAccountActions(ManagedUserResponse user)
+    {
+        SelectedUser = user;
+        Dialog = "account";
+        DialogTitle = "账户操作";
+        DialogSubtitle = $"{user.Email} · {user.Id}";
+        DialogError = "";
+    }
+
+    private async Task ToggleStatusAsync()
+    {
+        if (SelectedUser is null)
+            return;
+        var status = SelectedUser.Status == "Active" ? "Disabled" : "Active";
+        await RunApiAsync(async () =>
+        {
+            await Api.SetUserStatusAsync(SelectedUser.Id, new SetUserStatusRequest(status), _disposeToken.Token);
+            await RefreshAdminDataAsync();
+            SelectedUser = Users.FirstOrDefault(user => user.Id == SelectedUser.Id);
+            DialogError = "";
+        }, dialog: true);
+    }
+
+    private async Task ToggleAdministratorAsync()
+    {
+        if (SelectedUser is null)
+            return;
+        var id = SelectedUser.Id;
+        await RunApiAsync(async () =>
+        {
+            await Api.SetAdministratorAsync(id,
+                new SetAdministratorRequest(!SelectedUser.IsAdministrator), _disposeToken.Token);
+            await RefreshAdminDataAsync();
+            SelectedUser = Users.FirstOrDefault(user => user.Id == id);
+            DialogError = "";
+        }, dialog: true);
+    }
+
+    private async Task OpenOwnedWorkspacesAsync(ManagedUserResponse user)
+    {
+        SelectedUser = user;
+        Dialog = "owned";
+        DialogTitle = $"{user.UserName ?? user.Email} 的工作空间";
+        DialogSubtitle = $"{user.Email} · Owner · {user.OwnedWorkspaceCount} 个空间";
+        DialogError = "";
+        OwnedWorkspaces.Clear();
+        await RunApiAsync(async () =>
+        {
+            var offset = 0;
+            AdminOwnedWorkspaceListResponse response;
+            do
+            {
+                response = await Api.ListUserOwnedWorkspacesAsync(user.Id, offset, 100, _disposeToken.Token);
+                OwnedWorkspaces.AddRange(response.Items);
+                offset += response.Limit;
+            } while (response.HasMore);
+        }, dialog: true);
+    }
+
+    private async Task RefreshAdminDataAsync()
+    {
+        Overview = await Api.GetAdminOverviewAsync(_disposeToken.Token);
+        await LoadUsersAsync(reset: true);
+    }
+
+    private async Task ToggleThemeAsync()
+    {
+        ThemePreferences = ThemePreferences with { Mode = ThemePreferences.Mode == "dark" ? "light" : "dark" };
+        await Theme.SaveAsync(ThemePreferences, _disposeToken.Token);
+    }
+
+    private void CloseDialog() => Dialog = "";
+
+    private async Task RunApiAsync(Func<Task> action, bool dialog = false)
+    {
+        ErrorMessage = "";
+        if (dialog)
+            DialogError = "";
+        try
+        {
+            await action();
+        }
+        catch (ApiException exception)
+        {
+            var message = ApiError(exception);
+            if (dialog)
+                DialogError = message;
+            else
+                ErrorMessage = message;
+        }
+        catch (HttpRequestException)
+        {
+            const string message = "无法连接到 Episteme API。请检查 API 地址和服务状态。";
+            if (dialog)
+                DialogError = message;
+            else
+                ErrorMessage = message;
+        }
+    }
+
+    private static string Initial(string? name, string? email)
+    {
+        var text = string.IsNullOrWhiteSpace(name) ? email : name;
+        return string.IsNullOrWhiteSpace(text) ? "用" : text[..1];
+    }
+    private static string StatusLabel(string status) => status switch
+    {
+        "Active" => "正常 · Active",
+        "Provisioning" => "初始化中 · Provisioning",
+        "Archived" => "已归档 · Archived",
+        _ => $"未知状态 · {status}"
+    };
+    private static string ApiError(ApiException exception) =>
+        $"请求失败（HTTP {(int)exception.StatusCode} {exception.StatusCode}）。请检查权限、输入或并发版本后重试。";
+
+    public ValueTask DisposeAsync()
+    {
+        _disposeToken.Cancel();
+        _disposeToken.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

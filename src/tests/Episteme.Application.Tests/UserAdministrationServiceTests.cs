@@ -15,6 +15,9 @@ public sealed class UserAdministrationServiceTests
         var missingScope = new WorkspaceActor(user, new HashSet<string>(), true);
         var missingRole = new WorkspaceActor(user, new HashSet<string> { "users.manage" }, false);
         Assert.Equal(UserAdministrationFailure.Unauthorized, (await service.ListAsync(missingScope, 0, 25, default)).Failure);
+        Assert.Equal(UserAdministrationFailure.Unauthorized, (await service.GetOverviewAsync(missingRole, default)).Failure);
+        Assert.Equal(UserAdministrationFailure.Unauthorized,
+            (await service.ListOwnedWorkspacesAsync(missingRole, user, 0, 25, default)).Failure);
         Assert.Equal(UserAdministrationFailure.Unauthorized,
             (await service.SetStatusAsync(missingRole, user, UserAccountStatus.Disabled, default)).Failure);
         Assert.Equal(UserAdministrationFailure.Unauthorized,
@@ -35,6 +38,10 @@ public sealed class UserAdministrationServiceTests
         var actor = new WorkspaceActor(Guid.NewGuid(), new HashSet<string> { "users.manage" }, true);
         Assert.Equal(UserAdministrationFailure.InvalidInput, (await service.ListAsync(actor, 0, 101, default)).Failure);
         Assert.Equal(UserAdministrationFailure.InvalidInput, (await service.ListAsync(actor, 10001, 1, default)).Failure);
+        Assert.Equal(UserAdministrationFailure.InvalidInput,
+            (await service.ListOwnedWorkspacesAsync(actor, Guid.Empty, 0, 25, default)).Failure);
+        Assert.Equal(UserAdministrationFailure.InvalidInput,
+            (await service.ListOwnedWorkspacesAsync(actor, Guid.NewGuid(), 0, 101, default)).Failure);
         Assert.Equal(UserAdministrationFailure.InvalidInput,
             (await service.SetStatusAsync(actor, Guid.NewGuid(), (UserAccountStatus)999, default)).Failure);
         Assert.Equal(UserAdministrationFailure.InvalidInput,
@@ -72,6 +79,20 @@ public sealed class UserAdministrationServiceTests
         {
             Calls++;
             return Task.FromResult(new ManagedUserListResult([], false, null));
+        }
+
+        public Task<AdminOwnedWorkspaceListResult> ListOwnedWorkspacesAsync(
+            Guid actorId, Guid userId, int offset, int limit, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new AdminOwnedWorkspaceListResult([], false, null));
+        }
+
+        public Task<UserAdministrationOverviewResult> GetOverviewAsync(Guid actorId, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new UserAdministrationOverviewResult(
+                new UserAdministrationOverview(0, 0, 0, 0, 0, []), null));
         }
 
         public Task<ManagedUserResult> SetStatusAsync(Guid actorId, Guid userId, UserAccountStatus status, CancellationToken cancellationToken)
