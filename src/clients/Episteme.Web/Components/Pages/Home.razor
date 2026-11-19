@@ -3,6 +3,7 @@
 @implements IAsyncDisposable
 @using System.Security.Claims
 @using System.Text.Json
+@using System.IO.Compression
 @inject IEpistemeApi Api
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject ThemeService Theme
@@ -17,7 +18,7 @@
             <div class="header-actions">
                 @if (Workspaces.Count > 0)
                 {
-                    <select class="filter" aria-label="切换工作空间" value="@CurrentWorkspace?.Id" @onchange="OnWorkspaceChanged">
+                    <select class="filter" aria-label="切换工作空间" value="@CurrentWorkspace?.Id" disabled="@IsMoving" @onchange="OnWorkspaceChanged">
                         @foreach (var workspace in Workspaces)
                         {
                             <option value="@workspace.Id">@workspace.Name · @RoleLabel(workspace.Role)</option>
@@ -82,36 +83,131 @@
                             <p class="subtitle">@CurrentWorkspace.Type · @RoleLabel(CurrentWorkspace.Role) · @(CurrentWorkspace.Role == "Owner" ? "默认工作空间" : "与我共享")</p>
                         </div>
                     </div>
+                    @if (UploadTotal > 0)
+                    {
+                        <div class="upload-progress" role="status" aria-live="polite">
+                            <span>正在上传：@UploadCompleted / @UploadTotal 个文件 @UploadCurrentFile</span>
+                            <progress max="@UploadTotal" value="@UploadCompleted" aria-label="上传文件进度"></progress>
+                        </div>
+                    }
+                    @if (SelectedProject is null)
+                    {
+                        <div class="toolbar project-toolbar" style="margin-bottom:16px">
+                            <input class="search" placeholder="按项目名称或描述搜索" aria-label="搜索项目" @bind="ProjectSearch" @bind:event="oninput" />
+                            <button class="button primary" disabled="@(!CanWrite)" @onclick="OpenCreateProject">＋ 新建项目</button>
+                            <span class="muted">@Projects.Count 个项目</span>
+                        </div>
+                        <div class="grid project-grid">
+                            @foreach (var project in Projects.Where(project =>
+                                string.IsNullOrWhiteSpace(ProjectSearch) ||
+                                $"{project.Name} {project.Description}".Contains(ProjectSearch, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                <article class="card project-card">
+                                    <div class="card-heading">
+                                        <span class="type-icon">◇</span>
+                                        <span class="badge workspace-status" data-status="@project.Status">@ProjectStatusLabel(project.Status)</span>
+                                    </div>
+                                    <h3>@project.Name</h3>
+                                    <p class="subtitle">@(string.IsNullOrWhiteSpace(project.Description) ? "暂无项目描述" : project.Description)</p>
+                                    <div class="workspace-meta">
+                                        <span>文件：@project.FileCount</span>
+                                        <span>文件夹：@project.FolderCount</span>
+                                        <span>分支：@project.DefaultBranch</span>
+                                        <span>更新时间：@project.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                                    </div>
+                                    <footer>
+                                        <button class="button" @onclick="() => OpenProjectAsync(project)">打开项目</button>
+                                        <div class="workspace-action-list">
+                                            <button class="button" disabled="@(!CanWrite)" @onclick="() => OpenUpdateProject(project)">修改</button>
+                                            <button class="button" disabled="@(!CanWrite)" @onclick="() => ToggleProjectStatusAsync(project)">@(project.Status == "Working" ? "归档" : "恢复")</button>
+                                            <button class="button" disabled="@(!CanWrite)" @onclick="() => OpenDeleteProject(project)">删除</button>
+                                            <button class="button" disabled="@(!CanWrite)" @onclick="() => DemoteProjectAsync(project)">降级到工作空间</button>
+                                        </div>
+                                    </footer>
+                                </article>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                    <div class="toolbar" style="margin-bottom:12px">
+                        <button class="button" @onclick="CloseProject">← 项目列表</button>
+                        <span class="muted">项目：@SelectedProject.Name</span>
+                    </div>
                     <div class="workspace-layout @(IsTreeHidden ? "hide-tree" : "") @(IsHistoryHidden ? "hide-history" : "")">
-                        <article class="card tree">
+                        <article class="card tree" data-tree-workspace="@CurrentWorkspace.Id" data-tree-writable="@(CanWrite && !IsMoving && !IsTransferring ? "true" : "false")" aria-busy="@IsMoving">
                             <div class="card-heading">
                                 <div><h3>文档目录</h3><p class="muted">当前空间</p></div>
                                 <div class="tree-actions">
-                                    <button class="icon-button" title="新建文件夹" disabled="@(!CanWrite)" @onclick="() => OpenCreateEntry(true)">＋</button>
-                                    <button class="icon-button" title="新建文档" disabled="@(!CanWrite)" @onclick="() => OpenCreateEntry(false)">▤</button>
-                                    <button class="icon-button" title="上传文档：当前 API 尚未提供" disabled>⇧</button>
-                                    <button class="icon-button" title="下载 ZIP：当前 API 尚未提供" disabled>⇩</button>
+                                    <button class="icon-button" title="新建文件夹" disabled="@(!CanWrite || IsMoving)" @onclick="() => OpenCreateEntry(true)">▤</button>
+                                    <button class="icon-button" title="新建文档" disabled="@(!CanWrite || IsMoving)" @onclick="() => OpenCreateEntry(false)">＋</button>
+                                    <label class="icon-button upload-button" title="上传文档（每个文件不超过 1 MiB）">
+                                        <span aria-hidden="true">⇧</span>
+                                        <InputFile @key="UploadInputVersion" OnChange="UploadDocumentsAsync" multiple disabled="@(!CanWrite || IsTransferring || IsMoving)" aria-label="上传文档" />
+                                    </label>
+                                    <label class="icon-button upload-button" title="上传文件夹（不包含空文件夹）">
+                                        <span aria-hidden="true">📁</span>
+                                        <InputFile @key="UploadInputVersion" @ref="FolderUploadInput" OnChange="UploadFolderAsync" multiple webkitdirectory disabled="@(!CanWrite || IsTransferring || IsMoving)" aria-label="上传文件夹" />
+                                    </label>
+                                    <button class="icon-button" title="下载工作空间 ZIP" disabled="@IsTransferring" @onclick="DownloadWorkspaceAsync">⇩</button>
                                 </div>
                             </div>
                             <p class="muted">操作路径：@(SelectedFolderPath.Length == 0 ? "/（根目录）" : "/" + SelectedFolderPath)</p>
-                            <button type="button" class="tree-item @(SelectedTreePath is null ? "selected" : "")" @onclick="SelectRootFolder">⌂　工作空间根目录</button>
+                            <MudButton Variant="Variant.Text"
+                                       Color="@(SelectedTreePath is null ? Color.Primary : Color.Default)"
+                                       StartIcon="@Icons.Material.Filled.Home"
+                                       FullWidth="true"
+                                       Disabled="@IsMoving"
+                                       Class="episteme-tree-root"
+                                       OnClick="SelectRootFolder">工作空间根目录</MudButton>
                             @if (RootNodes.Count == 0)
                             {
                                 <p class="empty-note">此工作空间根目录为空。</p>
                             }
                             else
                             {
-                                @foreach (var node in RootNodes)
-                                {
-                                    <TreeNode @key="node.Path" Node="node" CurrentPath="SelectedTreePath"
-                                              OnSelect="OpenDocumentAsync" OnToggleDirectory="ToggleDirectoryAsync" />
-                                }
+                                <MudDropContainer T="WorkspaceTreeNode"
+                                                  Items="TreeDropItems"
+                                                  ItemDropped="OnMudTreeItemDropped"
+                                                  ItemDisabled="@(_ => !CanWrite || IsMoving || IsTransferring)"
+                                                  CanDrop="@CanMudDrop"
+                                                  ApplyDropClassesOnDragStarted="true"
+                                                  CanDropClass="mud-drop-valid"
+                                                  NoDropClass="mud-drop-invalid"
+                                                  DisabledClass="mud-drop-disabled"
+                                                  Class="episteme-mud-tree">
+                                    <MudDropZone T="WorkspaceTreeNode"
+                                                 Identifier=""
+                                                 ItemsSelector="@(item => ParentPath(item.Path) == "")"
+                                                 AllowReorder="false"
+                                                 Class="episteme-mud-dropzone">
+                                        <ItemRenderer Context="node">
+                                            <MudTreeDropNode Node="node"
+                                                             CurrentPath="SelectedTreePath"
+                                                             IsMoving="IsMoving"
+                                                             OnSelect="OpenDocumentAsync"
+                                                            OnToggleDirectory="ToggleDirectoryAsync"
+                                                            CanRename="CanWrite"
+                                                            CanDelete="CanWrite"
+                                                            OnRename="OpenRenameEntry"
+                                                            OnDelete="OpenDeleteEntry"
+                                                            OnPromote="OpenPromoteFolder"
+                                                            Selected="@(SelectedTreePaths.Contains(node.Path))"
+                                                            SelectedPaths="SelectedTreePaths"
+                                                            SelectionChanged="OnTreeSelectionChanged" />
+                                        </ItemRenderer>
+                                    </MudDropZone>
+                                </MudDropContainer>
                             }
-                            <p class="muted">目录与文档内容由工作空间 Git 仓库保存。</p>
+                            <p class="muted">拖动文件或文件夹到目标文件夹或根目录以移动。目录与文档内容由工作空间 Git 仓库保存。</p>
+                            @if (IsMoving)
+                            {
+                                <p class="muted" role="status">正在移动，请稍候…</p>
+                            }
                         </article>
                         <div class="panel-handle tree-handle">
                             <button class="panel-mini" title="显示/隐藏目录" aria-expanded="@(!IsTreeHidden)" @onclick="() => IsTreeHidden = !IsTreeHidden">@(IsTreeHidden ? "›" : "‹")</button>
-                            <div class="panel-grip">⋮</div>
+                            <div class="panel-grip" role="separator" aria-label="调整目录宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="600" aria-valuenow="270" tabindex="0" data-resize-panel="tree" title="拖动或使用方向键调整宽度">⋮</div>
                         </div>
                         <article class="card document">
                             <div class="document-top">
@@ -122,7 +218,12 @@
                                 </div>
                                 <div class="document-actions">
                                     <button class="button primary" disabled="@(!CanEditDocument)" @onclick="SaveDocumentAsync">保存更改</button>
+                                    @if (IsReadOnlyVersion && SelectedFile is not null)
+                                    {
+                                        <button class="button" @onclick="() => OpenDocumentAsync(SelectedFile!)">返回当前文档</button>
+                                    }
                                     <button class="button" disabled="@(SelectedFile is null)" @onclick="OpenHistoryAsync">查看此文档历史</button>
+                                    <button class="button" disabled="@(SelectedFile is null || IsTransferring)" @onclick="DownloadDocumentAsync">下载文件</button>
                                 </div>
                             </div>
                             <div class="info"><strong>空间所有者：@(CurrentWorkspace.OwnerName ?? "未提供")</strong> · 此文档归属于“@CurrentWorkspace.Name”空间，内容所有权归空间所有者。</div>
@@ -146,9 +247,11 @@
                                     }
                                     else
                                     {
-                                        <textarea class="document-editor" aria-label="文档内容" spellcheck="@(!IsCodeFile)"
-                                                  disabled="@IsReadOnlyVersion"
-                                                  @bind="EditedContent" @bind:event="oninput"></textarea>
+                                        <StandaloneCodeEditor @key="@SelectedFile.Path"
+                                                              @ref="_codeEditor"
+                                                              Id="@($"episteme-editor-{SelectedFile.Path.Replace('/', '-')}")"
+                                                              CssClass="episteme-code-editor"
+                                                              ConstructionOptions="EditorConstructionOptions" />
                                     }
                                     <p class="muted">保存使用已读取的 Git HEAD；发生并发修改时会明确返回冲突，不会静默覆盖。</p>
                                 </div>
@@ -157,18 +260,18 @@
                             {
                                 <div class="document-body">
                                     <div class="empty-note">@UnsupportedDocumentMessage</div>
-                                    <p class="muted">此版本的内容 API 仅支持不超过 1 MiB 的 UTF-8 文本文件。</p>
+                                    <p class="muted">在线预览和编辑仅支持不超过 1 MiB 的 UTF-8 文本文件；可下载原文件。</p>
                                 </div>
                             }
                         </article>
                         <div class="panel-handle history-handle">
                             <button class="panel-mini" title="显示/隐藏版本历史" aria-expanded="@(!IsHistoryHidden)" @onclick="() => IsHistoryHidden = !IsHistoryHidden">@(IsHistoryHidden ? "‹" : "›")</button>
-                            <div class="panel-grip">⋮</div>
+                            <div class="panel-grip" role="separator" aria-label="调整历史记录宽度" aria-orientation="vertical" aria-valuemin="200" aria-valuemax="600" aria-valuenow="290" tabindex="0" data-resize-panel="history" title="拖动或使用方向键调整宽度">⋮</div>
                         </div>
                         <aside class="card history-panel">
                             <div class="card-heading">
                                 <div><h3>文档版本历史</h3><p class="muted">@SelectedFile?.Name</p></div>
-                                <span class="badge success">HEAD</span>
+                                <span class="badge success">文档记录</span>
                             </div>
                             @if (History.Count == 0)
                             {
@@ -181,14 +284,17 @@
                                     <div class="history-item">
                                         <span class="history-dot"></span>
                                         <div class="history-meta">
-                                            <strong>@(commit == CurrentDocument?.CommitId ? "当前版本" : "Git 提交")</strong>
+                                            <strong>@(commit == History[0] ? "最新文档版本" : "历史版本")@(IsReadOnlyVersion && commit == CurrentDocument?.CommitId ? " · 正在查看" : "")</strong>
                                             <small>提交说明和操作者信息未由当前历史 API 提供</small>
                                             <code>@commit</code>
-                                            @if (commit != CurrentDocument?.CommitId)
+                                            @if (commit != History[0] || IsReadOnlyVersion)
                                             {
                                                 <div class="toolbar">
                                                     <button class="button" @onclick="() => ViewVersionAsync(commit)">查看版本</button>
-                                                    <button class="button" disabled="@(!CanWrite)" @onclick="() => RestoreVersionAsync(commit)">恢复</button>
+                                                    @if (commit != History[0])
+                                                    {
+                                                        <button class="button" disabled="@(!CanWrite)" @onclick="() => RestoreVersionAsync(commit)">恢复</button>
+                                                    }
                                                 </div>
                                             }
                                         </div>
@@ -199,6 +305,7 @@
                             <button class="text-link" disabled="@(SelectedFile is null)" @onclick="OpenHistoryAsync">打开完整历史 →</button>
                         </aside>
                     </div>
+                    }
                 </section>
 
                 <section class="screen @(Screen == "spaces" ? "active" : "")">
@@ -300,14 +407,14 @@
                         <button class="button" @onclick='() => ShowScreen("workspace")'>← 返回工作区</button>
                     </div>
                     <article class="card">
-                        <div class="card-heading"><h2>@SelectedFile?.Name</h2><span class="badge">当前 HEAD · @(CurrentDocument?.CommitId ?? "—")</span></div>
+                        <div class="card-heading"><h2>@SelectedFile?.Name</h2><span class="badge">已读取 HEAD · @(string.IsNullOrEmpty(CurrentHead) ? "—" : CurrentHead)</span></div>
                         <div class="table-wrap">
                             <table><thead><tr><th>版本</th><th>操作者 / 时间</th><th>提交 ID</th><th></th></tr></thead>
                                 <tbody>
                                     @foreach (var commit in History)
                                     {
-                                        <tr @key="commit"><td>@(commit == CurrentDocument?.CommitId ? "当前版本" : "Git 提交")</td><td>当前 API 未提供</td><td><code>@commit</code></td>
-                                            <td>@if (commit != CurrentDocument?.CommitId) { <button class="button" @onclick="() => ViewVersionAsync(commit)">查看 / 恢复</button> }</td></tr>
+                                        <tr @key="commit"><td>@(commit == History[0] ? "最新文档版本" : "历史版本")</td><td>当前 API 未提供</td><td><code>@commit</code></td>
+                                            <td><button class="button" @onclick="() => ViewVersionAsync(commit)">查看版本</button></td></tr>
                                     }
                                 </tbody>
                             </table>
@@ -436,6 +543,35 @@
                     }
                     <p class="muted">创建位置：/@SelectedFolderPath</p>
                 }
+                else if (DialogKind is "create-project" or "update-project")
+                {
+                    <label class="field"><strong>项目名称</strong><input @bind="ProjectName" maxlength="120" /></label>
+                    <label class="field"><strong>项目标识（slug）</strong><input @bind="ProjectSlug" maxlength="80" /></label>
+                    <label class="field"><strong>项目描述</strong><textarea @bind="ProjectDescription" maxlength="2000"></textarea></label>
+                }
+                else if (DialogKind == "delete-project")
+                {
+                    <p>确认删除项目“@DialogProject?.Name”？项目将标记为已废弃，不再出现在项目列表。</p>
+                }
+                else if (DialogKind == "promote-folder")
+                {
+                    <p>确认将文件夹“/@DialogTreeNode?.Path”升级为独立项目？</p>
+                    <p class="notice">系统会复制当前目录及文件到新项目仓库；源目录默认保留，以避免数据丢失。</p>
+                }
+                else if (DialogKind == "rename")
+                {
+                    <label class="field"><strong>新名称</strong><input @bind="WorkspaceName" maxlength="120" /></label>
+                    <p class="muted">原路径：/@DialogTreeNode?.Path</p>
+                    <p class="notice">重命名通过移动到新路径实现，保留 Git 历史并创建提交。</p>
+                }
+                else if (DialogKind == "delete")
+                {
+                    <p>确认删除“@DialogTreeNode?.Name”？此操作会创建 Git 提交。</p>
+                    @if (DialogTreeNode?.IsDirectory == true)
+                    {
+                        <p class="notice">文件夹删除将递归删除其中所有文件和子文件夹。</p>
+                    }
+                }
                 @if (!string.IsNullOrWhiteSpace(DialogError))
                 {
                     <p class="error" role="alert">@DialogError</p>
@@ -459,6 +595,30 @@
                 {
                     <button class="button primary" disabled="@(!CanWrite)" @onclick="CreateEntryAsync">创建</button>
                 }
+                else if (DialogKind == "rename")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="RenameEntryAsync">重命名</button>
+                }
+                else if (DialogKind == "delete")
+                {
+                    <button class="button primary" @onclick="DeleteEntryAsync">确认删除</button>
+                }
+                else if (DialogKind == "create-project")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="CreateProjectAsync">创建项目</button>
+                }
+                else if (DialogKind == "update-project")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="UpdateProjectAsync">保存项目</button>
+                }
+                else if (DialogKind == "delete-project")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="DeleteProjectAsync">确认删除</button>
+                }
+                else if (DialogKind == "promote-folder")
+                {
+                    <button class="button primary" disabled="@(!CanWrite)" @onclick="PromoteFolderAsync">升级为项目</button>
+                }
             </div>
         </section>
     </div>
@@ -481,12 +641,19 @@
     private readonly List<WorkspaceMemberResponse> Members = [];
     private readonly List<UserTokenResponse> Tokens = [];
     private readonly List<UserAuthorizationResponse> Authorizations = [];
+    private readonly List<ProjectResponse> Projects = [];
+    private readonly HashSet<string> SelectedTreePaths = [];
     private ClaimsPrincipal CurrentUser = new();
     private List<WorkspaceTreeNode> RootNodes = [];
     private WorkspaceResponse? CurrentWorkspace;
     private WorkspaceResponse? DialogWorkspace;
+    private ProjectResponse? DialogProject;
     private WorkspaceTreeNode? SelectedFile;
+    private ProjectResponse? SelectedProject;
+    private WorkspaceTreeNode? DialogTreeNode;
+    private InputFile? FolderUploadInput;
     private WorkspaceDocumentResponse? CurrentDocument;
+    private StandaloneCodeEditor? _codeEditor;
     private WorkspaceManifestResponse? ImportManifest;
     private ThemePreferences ThemePreferences = ThemePreferences.Default;
     private string Screen = "workspace";
@@ -504,6 +671,9 @@
     private string WorkspaceSlug = "";
     private string WorkspaceType = "Code";
     private string WorkspaceDescription = "";
+    private string ProjectName = "";
+    private string ProjectSlug = "";
+    private string ProjectDescription = "";
     private string ImportName = "";
     private string ImportSlug = "";
     private string MemberUserId = "";
@@ -523,6 +693,13 @@
     private bool IsReadOnlyVersion;
     private bool IsTreeHidden;
     private bool IsHistoryHidden;
+    private bool IsTransferring;
+    private string ProjectSearch = "";
+    private bool IsMoving;
+    private int UploadTotal;
+    private int UploadCompleted;
+    private string UploadCurrentFile = "";
+    private int UploadInputVersion;
     private string CurrentHead = "";
     private bool IsDisposed;
 
@@ -532,6 +709,7 @@
         ?? "用户";
     private string AvatarText => DisplayName.Length > 0 ? DisplayName[..1] : "用";
     private string CurrentEmail => CurrentUser.FindFirst("email")?.Value ?? DisplayName;
+    private Guid ActiveProjectId => SelectedProject?.Id ?? CurrentWorkspace?.Id ?? Guid.Empty;
     private string Breadcrumb => Screen switch
     {
         "spaces" => "工作区 / 全部空间",
@@ -540,8 +718,8 @@
         _ => $"默认工作区：{CurrentWorkspace?.Name ?? "工作区"}"
     };
     private bool CanWrite => CurrentWorkspace?.Role is not "Reader";
-    private bool CanEditDocument => CanWrite && CurrentDocument is not null && !ShowMarkdownPreview;
-    private string DocumentPathLabel => SelectedFile?.Path.Replace('/', ' ') ?? "未选择文档";
+    private bool CanEditDocument => CanWrite && CurrentDocument is not null && !IsReadOnlyVersion && !ShowMarkdownPreview && !IsMoving;
+    private string DocumentPathLabel => SelectedFile is null ? "未选择文档" : "/" + SelectedFile.Path;
     private string DocumentTitle => SelectedFile?.Name ?? "请选择文档";
     private string DocumentStatus => SelectedFile is null ? "" : CurrentDocument is null
         ? "暂不支持预览或编辑"
@@ -568,6 +746,7 @@
         .Where(node => !node.IsDirectory &&
             $"{node.Name} {node.Path}".Contains(SearchText, StringComparison.OrdinalIgnoreCase))
         .ToList();
+    private List<WorkspaceTreeNode> TreeDropItems => FlattenNodes(RootNodes).ToList();
 
     protected override async Task OnInitializedAsync()
     {
@@ -624,6 +803,8 @@
     private async Task LoadWorkspaceAsync(WorkspaceResponse workspace, CancellationToken cancellationToken)
     {
         CurrentWorkspace = workspace;
+        SelectedProject = null;
+        Projects.Clear();
         RootNodes.Clear();
         SelectedFile = null;
         CurrentDocument = null;
@@ -633,15 +814,73 @@
         History.Clear();
         SelectedFolderPath = "";
         SelectedTreePath = null;
-        var root = await Api.ListDirectoryAsync(workspace.Id, "", cancellationToken);
-        foreach (var entry in root.Entries)
-            RootNodes.Add(new WorkspaceTreeNode(entry.Name, entry.Name, entry.Kind));
+        SelectedTreePaths.Clear();
+        var projects = await Api.ListProjectsAsync(workspace.Id, 0, 100, cancellationToken);
+        Projects.AddRange(projects.Items);
+    }
+
+    private async Task AddTreeEntriesAsync(Guid workspaceId, string parent, WorkspaceDirectoryResponse listing,
+        List<WorkspaceTreeNode> nodes, CancellationToken cancellationToken)
+    {
+        foreach (var entry in listing.Entries
+            .OrderBy(entry => !entry.Kind.Equals("directory", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(entry => entry.Name, StringComparer.CurrentCultureIgnoreCase))
+        {
+            var path = parent.Length == 0 ? entry.Name : $"{parent}/{entry.Name}";
+            if (entry.Name == ".gitkeep" && entry.Kind.Equals("document", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var marker = await Api.DownloadDocumentAsync(workspaceId, path, cancellationToken);
+                    if (marker.CommitId == listing.CommitId && marker.Content.Length == 0)
+                        continue;
+                }
+                catch (ApiException exception) when (exception.StatusCode == System.Net.HttpStatusCode.RequestEntityTooLarge)
+                {
+                    // A nonempty user document is not a directory placeholder.
+                }
+            }
+            nodes.Add(new WorkspaceTreeNode(entry.Name, path, entry.Kind));
+        }
     }
 
     private async Task OnWorkspaceChanged(ChangeEventArgs args)
     {
         if (Guid.TryParse(args.Value?.ToString(), out var id) && Workspaces.FirstOrDefault(item => item.Id == id) is { } workspace)
             await RunApiAsync(async () => await LoadWorkspaceAsync(workspace, _disposeToken.Token));
+    }
+
+    private async Task OpenProjectAsync(ProjectResponse project)
+    {
+        if (CurrentWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            SelectedProject = project;
+            RootNodes.Clear();
+            SelectedFile = null;
+            CurrentDocument = null;
+            SelectedFolderPath = "";
+            SelectedTreePath = null;
+            SelectedTreePaths.Clear();
+            History.Clear();
+            var root = await Api.ListDirectoryAsync(project.Id, "", _disposeToken.Token);
+            await AddTreeEntriesAsync(project.Id, "", root, RootNodes, cancellationToken: _disposeToken.Token);
+            var readme = RootNodes.FirstOrDefault(node =>
+                !node.IsDirectory && node.Name.Equals("README.md", StringComparison.OrdinalIgnoreCase));
+            if (readme is not null)
+                await OpenDocumentAsync(readme);
+        });
+    }
+
+    private void CloseProject()
+    {
+        SelectedProject = null;
+        SelectedFile = null;
+        CurrentDocument = null;
+        RootNodes.Clear();
+        SelectedTreePaths.Clear();
+        History.Clear();
     }
 
     private async Task SelectWorkspaceAsync(WorkspaceResponse workspace)
@@ -661,10 +900,9 @@
         {
             await RunApiAsync(async () =>
             {
-                var response = await Api.ListDirectoryAsync(CurrentWorkspace!.Id, node.Path, _disposeToken.Token);
+                var response = await Api.ListDirectoryAsync(ActiveProjectId, node.Path, _disposeToken.Token);
                 node.Children.Clear();
-                foreach (var entry in response.Entries)
-                    node.Children.Add(new WorkspaceTreeNode(entry.Name, $"{node.Path}/{entry.Name}", entry.Kind));
+                await AddTreeEntriesAsync(ActiveProjectId, node.Path, response, node.Children, _disposeToken.Token);
                 node.IsLoaded = true;
                 node.IsExpanded = true;
             });
@@ -694,9 +932,9 @@
         }
         await RunApiAsync(async () =>
         {
-            CurrentDocument = await Api.ReadDocumentAsync(CurrentWorkspace!.Id, node.Path, _disposeToken.Token);
+            CurrentDocument = await Api.ReadDocumentAsync(ActiveProjectId, node.Path, _disposeToken.Token);
             EditedContent = CurrentDocument.Content;
-            var history = await Api.GetDocumentHistoryAsync(CurrentWorkspace.Id, node.Path, 0, 100, _disposeToken.Token);
+            var history = await Api.GetDocumentHistoryAsync(ActiveProjectId, node.Path, 0, 100, _disposeToken.Token);
             History.AddRange(history.Commits);
             CurrentHead = history.HeadCommitId;
         });
@@ -706,9 +944,11 @@
     {
         if (CurrentWorkspace is null || SelectedFile is null || CurrentDocument is null)
             return;
+        if (_codeEditor is not null)
+            EditedContent = await _codeEditor.GetValue();
         await RunApiAsync(async () =>
         {
-            var result = await Api.PutDocumentAsync(CurrentWorkspace.Id, SelectedFile.Path,
+            var result = await Api.PutDocumentAsync(ActiveProjectId, SelectedFile.Path,
                 new PutWorkspaceDocumentRequest(CurrentHead, EditedContent), _disposeToken.Token);
             CurrentDocument = new WorkspaceDocumentResponse(result.CommitId, EditedContent);
             CurrentHead = result.CommitId;
@@ -723,7 +963,7 @@
             return;
         await RunApiAsync(async () =>
         {
-            var result = await Api.GetDocumentHistoryAsync(CurrentWorkspace.Id, SelectedFile.Path, 0, 100, _disposeToken.Token);
+            var result = await Api.GetDocumentHistoryAsync(ActiveProjectId, SelectedFile.Path, 0, 100, _disposeToken.Token);
             History.Clear();
             History.AddRange(result.Commits);
             ShowScreen("history");
@@ -736,7 +976,7 @@
             return;
         await RunApiAsync(async () =>
         {
-            var version = await Api.ReadDocumentVersionAsync(CurrentWorkspace.Id, SelectedFile.Path, commit, _disposeToken.Token);
+            var version = await Api.ReadDocumentVersionAsync(ActiveProjectId, SelectedFile.Path, commit, _disposeToken.Token);
             CurrentDocument = version;
             EditedContent = version.Content;
             IsReadOnlyVersion = true;
@@ -751,7 +991,7 @@
             return;
         await RunApiAsync(async () =>
         {
-            var result = await Api.RestoreDocumentAsync(CurrentWorkspace.Id, SelectedFile.Path,
+            var result = await Api.RestoreDocumentAsync(ActiveProjectId, SelectedFile.Path,
                 new RestoreWorkspaceDocumentRequest(CurrentHead, commit), _disposeToken.Token);
             await OpenDocumentAsync(SelectedFile);
             ShowToast($"已恢复为新提交 {ShortCommit(result.CommitId)}。");
@@ -994,12 +1234,189 @@
         }, dialog: true);
     }
 
+    private void OpenCreateProject()
+    {
+        DialogKind = "create-project";
+        DialogTitle = "新建项目";
+        DialogSubtitle = $"工作空间：{CurrentWorkspace?.Name}";
+        ProjectName = "";
+        ProjectSlug = "";
+        ProjectDescription = "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private void OpenUpdateProject(ProjectResponse project)
+    {
+        DialogProject = project;
+        DialogKind = "update-project";
+        DialogTitle = "修改项目信息";
+        DialogSubtitle = project.Name;
+        ProjectName = project.Name;
+        ProjectSlug = project.Slug;
+        ProjectDescription = project.Description ?? "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private void OpenDeleteProject(ProjectResponse project)
+    {
+        DialogProject = project;
+        DialogKind = "delete-project";
+        DialogTitle = "删除项目";
+        DialogSubtitle = project.Name;
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task CreateProjectAsync()
+    {
+        if (CurrentWorkspace is null)
+            return;
+        if (string.IsNullOrWhiteSpace(ProjectName) || !IsValidSlug(ProjectSlug))
+        {
+            DialogError = "请输入项目名称和由小写字母、数字及单连字符组成的 slug。";
+            return;
+        }
+        await RunApiAsync(async () =>
+        {
+            var project = await Api.CreateProjectAsync(CurrentWorkspace.Id,
+                new CreateProjectRequest(ProjectName.Trim(), ProjectSlug.Trim(), ProjectDescription.Trim()),
+                _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast($"项目 {project.Name} 已创建。");
+        }, dialog: true);
+    }
+
+    private async Task UpdateProjectAsync()
+    {
+        if (CurrentWorkspace is null || DialogProject is null)
+            return;
+        if (string.IsNullOrWhiteSpace(ProjectName) || !IsValidSlug(ProjectSlug))
+        {
+            DialogError = "请输入项目名称和有效的 slug。";
+            return;
+        }
+        await RunApiAsync(async () =>
+        {
+            await Api.UpdateProjectAsync(CurrentWorkspace.Id, DialogProject.Id,
+                new UpdateProjectRequest(ProjectName.Trim(), ProjectSlug.Trim(),
+                    ProjectDescription.Trim(), DialogProject.ConcurrencyStamp),
+                _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("项目信息已更新。");
+        }, dialog: true);
+    }
+
+    private Task ToggleProjectStatusAsync(ProjectResponse project) =>
+        SetProjectStatusAsync(project, project.Status == "Working" ? "Archived" : "Working");
+
+    private async Task SetProjectStatusAsync(ProjectResponse project, string status)
+    {
+        if (CurrentWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            await Api.SetProjectStatusAsync(CurrentWorkspace.Id, project.Id,
+                new SetProjectStatusRequest(status, project.ConcurrencyStamp),
+                _disposeToken.Token);
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast(status == "Archived" ? "项目已归档。" : "项目已恢复。");
+        });
+    }
+
+    private async Task DeleteProjectAsync()
+    {
+        if (CurrentWorkspace is null || DialogProject is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            await Api.DeleteProjectAsync(CurrentWorkspace.Id, DialogProject.Id,
+                new DeleteProjectRequest(DialogProject.ConcurrencyStamp),
+                _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("项目已标记为废弃并移出列表。");
+        }, dialog: true);
+    }
+
+    private async Task DemoteProjectAsync(ProjectResponse project)
+    {
+        if (CurrentWorkspace is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            await Api.DemoteProjectAsync(CurrentWorkspace.Id, project.Id, _disposeToken.Token);
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("项目已降级到工作空间默认项目并归档。");
+        });
+    }
+
+    private void OpenPromoteFolder(WorkspaceTreeNode node)
+    {
+        DialogTreeNode = node;
+        DialogKind = "promote-folder";
+        DialogTitle = "升级为项目";
+        DialogSubtitle = node.Path;
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private async Task PromoteFolderAsync()
+    {
+        if (CurrentWorkspace is null || SelectedProject is null || DialogTreeNode is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            await Api.PromoteProjectFolderAsync(CurrentWorkspace.Id, SelectedProject.Id,
+                new PromoteFolderRequest(DialogTreeNode.Path), _disposeToken.Token);
+            IsDialogOpen = false;
+            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            ShowToast("文件夹已升级为新项目。源目录已保留。");
+        }, dialog: true);
+    }
+
+    private static bool IsValidSlug(string slug) =>
+        !string.IsNullOrWhiteSpace(slug) && slug.All(character =>
+            character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-');
+
+    private static string ProjectStatusLabel(string status) => status switch
+    {
+        "Working" => "工作中",
+        "Archived" => "已归档",
+        "Discarded" => "已废弃",
+        _ => status
+    };
+
     private void OpenCreateEntry(bool folder)
     {
         DialogKind = folder ? "create-folder" : "create-document";
         DialogTitle = folder ? "新建文件夹" : "新建文档";
         DialogSubtitle = $"创建位置：/{SelectedFolderPath}";
         WorkspaceName = "";
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private void OpenRenameEntry(WorkspaceTreeNode node)
+    {
+        DialogTreeNode = node;
+        DialogKind = "rename";
+        DialogTitle = node.IsDirectory ? "重命名文件夹" : "重命名文件";
+        DialogSubtitle = node.Name;
+        WorkspaceName = node.Name;
+        DialogError = "";
+        IsDialogOpen = true;
+    }
+
+    private void OpenDeleteEntry(WorkspaceTreeNode node)
+    {
+        DialogTreeNode = node;
+        DialogKind = "delete";
+        DialogTitle = node.IsDirectory ? "删除文件夹" : "删除文件";
+        DialogSubtitle = node.Path;
         DialogError = "";
         IsDialogOpen = true;
     }
@@ -1016,22 +1433,464 @@
         var name = WorkspaceName.Trim();
         await RunApiAsync(async () =>
         {
-            var expectedHead = await Api.ListDirectoryAsync(CurrentWorkspace.Id, SelectedFolderPath, _disposeToken.Token);
+            var expectedHead = await Api.ListDirectoryAsync(ActiveProjectId, SelectedFolderPath, _disposeToken.Token);
             var path = string.IsNullOrEmpty(SelectedFolderPath) ? name : $"{SelectedFolderPath}/{name}";
             if (DialogKind == "create-folder")
             {
-                await Api.CreateDirectoryAsync(CurrentWorkspace.Id, path,
+                await Api.CreateDirectoryAsync(ActiveProjectId, path,
                     new DeleteWorkspaceDocumentRequest(expectedHead.CommitId), _disposeToken.Token);
             }
             else
             {
                 path += NewDocumentExtension;
-                await Api.PutDocumentAsync(CurrentWorkspace.Id, path,
+                await Api.PutDocumentAsync(ActiveProjectId, path,
                     new PutWorkspaceDocumentRequest(expectedHead.CommitId, ""), _disposeToken.Token);
             }
             IsDialogOpen = false;
-            await LoadWorkspaceAsync(CurrentWorkspace, _disposeToken.Token);
+            await RefreshFolderAsync(SelectedFolderPath);
         }, dialog: true);
+    }
+
+    private async Task RenameEntryAsync()
+    {
+        if (CurrentWorkspace is null || DialogTreeNode is null)
+            return;
+        var name = WorkspaceName.Trim();
+        if (name.Length == 0)
+        {
+            DialogError = "请输入新名称。";
+            return;
+        }
+        if (name is "." or ".." || name.Contains('/') || name.Contains('\\'))
+        {
+            DialogError = "名称不能包含路径分隔符或特殊相对路径。";
+            return;
+        }
+        var oldPath = DialogTreeNode.Path;
+        if (name == DialogTreeNode.Name)
+        {
+            IsDialogOpen = false;
+            return;
+        }
+        var parent = ParentPath(oldPath);
+        var destination = parent.Length == 0 ? name : $"{parent}/{name}";
+        await RunApiAsync(async () =>
+        {
+            var listing = await Api.ListDirectoryAsync(ActiveProjectId, parent, _disposeToken.Token);
+            var request = new MoveWorkspacePathRequest(listing.CommitId, destination);
+            if (DialogTreeNode.IsDirectory)
+                await Api.MoveDirectoryAsync(ActiveProjectId, oldPath, request, _disposeToken.Token);
+            else
+                await Api.MoveDocumentAsync(ActiveProjectId, oldPath, request, _disposeToken.Token);
+            IsDialogOpen = false;
+            await RefreshFolderAsync(parent);
+            if (SelectedFile?.Path == oldPath)
+            {
+                SelectedFile = null;
+                CurrentDocument = null;
+                EditedContent = "";
+                IsReadOnlyVersion = false;
+            }
+            ShowToast($"已重命名为 {name}。");
+        }, dialog: true);
+    }
+
+    private async Task DeleteEntryAsync()
+    {
+        if (CurrentWorkspace is null || DialogTreeNode is null)
+            return;
+        await RunApiAsync(async () =>
+        {
+            var parent = ParentPath(DialogTreeNode.Path);
+            var listing = await Api.ListDirectoryAsync(ActiveProjectId, parent, _disposeToken.Token);
+            if (DialogTreeNode.IsDirectory)
+            {
+                await Api.DeleteDirectoryAsync(ActiveProjectId, DialogTreeNode.Path,
+                    new DeleteWorkspaceDirectoryRequest(listing.CommitId, true), _disposeToken.Token);
+            }
+            else
+            {
+                await Api.DeleteDocumentAsync(ActiveProjectId, DialogTreeNode.Path,
+                    new DeleteWorkspaceDocumentRequest(listing.CommitId), _disposeToken.Token);
+            }
+            IsDialogOpen = false;
+            await RefreshFolderAsync(parent);
+            if (SelectedFile?.Path == DialogTreeNode.Path)
+            {
+                SelectedFile = null;
+                CurrentDocument = null;
+                EditedContent = "";
+                IsReadOnlyVersion = false;
+            }
+            ShowToast($"已删除 {DialogTreeNode.Name}。");
+        }, dialog: true);
+    }
+
+    private async Task RefreshFolderAsync(string folder)
+    {
+        var projectId = SelectedProject?.Id ?? CurrentWorkspace!.Id;
+        var nodes = RootNodes;
+        RootNodes.Clear();
+        var root = await Api.ListDirectoryAsync(projectId, "", _disposeToken.Token);
+        await AddTreeEntriesAsync(projectId, "", root, RootNodes, _disposeToken.Token);
+        nodes = RootNodes;
+        foreach (var segment in folder.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var node = nodes.SingleOrDefault(item => item.IsDirectory && item.Name == segment)
+                ?? throw new InvalidOperationException("The selected directory no longer exists.");
+            var response = await Api.ListDirectoryAsync(ActiveProjectId, node.Path, _disposeToken.Token);
+            await AddTreeEntriesAsync(ActiveProjectId, node.Path, response, node.Children, _disposeToken.Token);
+            node.IsLoaded = true;
+            node.IsExpanded = true;
+            SelectedFolderPath = node.Path;
+            SelectedTreePath = node.Path;
+            nodes = node.Children;
+        }
+    }
+
+    private bool CanMudDrop(WorkspaceTreeNode source, string destinationFolder)
+    {
+        if (!CanWrite || IsMoving || IsTransferring)
+            return false;
+        if (ParentPath(source.Path) == destinationFolder)
+            return false;
+        if (source.IsDirectory && (destinationFolder == source.Path ||
+            destinationFolder.StartsWith(source.Path + "/", StringComparison.Ordinal)))
+            return false;
+        return true;
+    }
+
+    private async Task OnMudTreeItemDropped(MudItemDropInfo<WorkspaceTreeNode> drop)
+    {
+        if (CurrentWorkspace is null)
+            return;
+        var source = drop.Item;
+        if (source is null)
+            return;
+        var destinationFolder = drop.DropzoneIdentifier;
+        if (!CanMudDrop(source, destinationFolder))
+            return;
+        if (SelectedTreePaths.Contains(source.Path) && SelectedTreePaths.Count > 1)
+        {
+            await MoveSelectedTreeEntriesAsync(destinationFolder);
+            return;
+        }
+        await MoveTreeEntryAsync(ActiveProjectId, source, destinationFolder);
+    }
+
+    private Task OnTreeSelectionChanged((WorkspaceTreeNode Node, bool Selected) change)
+    {
+        if (change.Selected)
+            SelectedTreePaths.Add(change.Node.Path);
+        else
+            SelectedTreePaths.Remove(change.Node.Path);
+        return Task.CompletedTask;
+    }
+
+    private async Task MoveSelectedTreeEntriesAsync(string destinationFolder)
+    {
+        if (!CanWrite || IsMoving)
+            return;
+        var nodes = FlattenNodes(RootNodes)
+            .Where(node => SelectedTreePaths.Contains(node.Path))
+            .Where(node => !SelectedTreePaths.Any(path =>
+                path != node.Path &&
+                node.Path.StartsWith(path + "/", StringComparison.Ordinal)))
+            .OrderBy(node => node.Path.Count(character => character == '/'))
+            .ToList();
+        if (nodes.Count == 0)
+            return;
+        IsMoving = true;
+        try
+        {
+            var listing = await Api.ListDirectoryAsync(ActiveProjectId, destinationFolder, _disposeToken.Token);
+            var head = listing.CommitId;
+            foreach (var node in nodes)
+            {
+                var target = destinationFolder.Length == 0 ? node.Name : $"{destinationFolder}/{node.Name}";
+                var request = new MoveWorkspacePathRequest(head, target);
+                if (node.IsDirectory)
+                    await Api.MoveDirectoryAsync(ActiveProjectId, node.Path, request, _disposeToken.Token);
+                else
+                    await Api.MoveDocumentAsync(ActiveProjectId, node.Path, request, _disposeToken.Token);
+                var refreshed = await Api.ListDirectoryAsync(ActiveProjectId, destinationFolder, _disposeToken.Token);
+                head = refreshed.CommitId;
+            }
+            SelectedTreePaths.Clear();
+            await RefreshFolderAsync(destinationFolder);
+            ShowToast($"已批量移动 {nodes.Count} 个项目。");
+        }
+        catch (ApiException exception)
+        {
+            ErrorMessage = $"批量移动失败：{ApiError(exception)}";
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = "批量移动失败：无法连接到 Episteme API。";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ErrorMessage = $"批量移动失败：{exception.Message}";
+        }
+        finally
+        {
+            IsMoving = false;
+        }
+    }
+
+    private async Task MoveTreeEntryAsync(Guid workspaceId, WorkspaceTreeNode source, string destinationFolder)
+    {
+        ErrorMessage = "";
+        if (!CanWrite || IsMoving || IsTransferring)
+        {
+            ErrorMessage = "无法移动：工作空间或权限已变化，或其他操作正在进行。";
+            return;
+        }
+        if (CurrentDocument is not null && !IsReadOnlyVersion && EditedContent != CurrentDocument.Content)
+        {
+            ErrorMessage = "请先保存当前文档的未保存更改，再移动项目。";
+            return;
+        }
+        IsMoving = true;
+        var moved = false;
+        try
+        {
+            var listing = await Api.ListDirectoryAsync(workspaceId, destinationFolder, _disposeToken.Token);
+            var target = destinationFolder.Length == 0 ? source.Name : $"{destinationFolder}/{source.Name}";
+            var request = new MoveWorkspacePathRequest(listing.CommitId, target);
+            if (source.IsDirectory)
+                await Api.MoveDirectoryAsync(workspaceId, source.Path, request, _disposeToken.Token);
+            else
+                await Api.MoveDocumentAsync(workspaceId, source.Path, request, _disposeToken.Token);
+            moved = true;
+            await RefreshFolderAsync(destinationFolder);
+            ShowToast($"已移动到 /{destinationFolder}。");
+        }
+        catch (ApiException exception)
+        {
+            ErrorMessage = moved ? $"移动已完成，但刷新目录失败：{ApiError(exception)}" : $"移动失败：{ApiError(exception)}";
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = moved ? "移动已完成，但刷新目录失败：无法连接到 Episteme API。" : "移动请求未确认：无法连接到 Episteme API，请刷新目录检查结果。";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ErrorMessage = moved ? $"移动已完成，但刷新目录失败：{exception.Message}" : $"移动失败：{exception.Message}";
+        }
+        finally
+        {
+            IsMoving = false;
+        }
+    }
+
+    private Task UploadDocumentsAsync(InputFileChangeEventArgs args) => UploadAsync(args, false);
+
+    private Task UploadFolderAsync(InputFileChangeEventArgs args) => UploadAsync(args, true);
+
+    private async Task UploadAsync(InputFileChangeEventArgs args, bool isFolder)
+    {
+        if (CurrentWorkspace is null || !CanWrite || IsTransferring)
+            return;
+        IsTransferring = true;
+        var uploaded = 0;
+        var directoriesCreated = 0;
+        var folder = SelectedFolderPath;
+        var workspaceId = ActiveProjectId;
+        ErrorMessage = "";
+        try
+        {
+            var files = args.GetMultipleFiles(100);
+            UploadTotal = files.Count;
+            UploadCompleted = 0;
+            UploadCurrentFile = "";
+            await InvokeAsync(StateHasChanged);
+            var relativePaths = isFolder
+                ? await JS.InvokeAsync<string[]>("episteme.getRelativePaths", FolderUploadInput!.Element)
+                : files.Select(file => file.Name).ToArray();
+            if (relativePaths.Length != files.Count)
+                throw new InvalidOperationException("无法读取上传文件夹的相对路径。");
+            var listing = await Api.ListDirectoryAsync(workspaceId, folder, _disposeToken.Token);
+            var head = listing.CommitId;
+            for (var index = 0; index < files.Count; index++)
+            {
+                var file = files[index];
+                UploadCurrentFile = file.Name;
+                await InvokeAsync(StateHasChanged);
+                var segments = relativePaths[index].Split('/');
+                if (segments.Any(segment => segment.Length == 0 || segment is "." or "..") ||
+                    segments[^1] != file.Name)
+                    throw new InvalidOperationException("上传路径无效。");
+                var parent = folder;
+                foreach (var segment in segments[..^1])
+                {
+                    var directory = await Api.ListDirectoryAsync(workspaceId, parent, _disposeToken.Token);
+                    if (directory.CommitId != head)
+                        throw new InvalidOperationException("工作空间在上传期间发生变化，请重试。");
+                    var existing = directory.Entries.FirstOrDefault(entry => entry.Name == segment);
+                    var next = parent.Length == 0 ? segment : $"{parent}/{segment}";
+                    if (existing is null)
+                    {
+                        var created = await Api.CreateDirectoryAsync(workspaceId, next,
+                            new DeleteWorkspaceDocumentRequest(head), _disposeToken.Token);
+                        head = created.CommitId;
+                        directoriesCreated++;
+                    }
+                    else if (!existing.Kind.Equals("directory", StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"上传目录与现有项目冲突：{next}。");
+                    parent = next;
+                }
+                await using var input = file.OpenReadStream(1024 * 1024, _disposeToken.Token);
+                using var buffer = new MemoryStream();
+                await input.CopyToAsync(buffer, _disposeToken.Token);
+                var path = parent.Length == 0 ? file.Name : $"{parent}/{file.Name}";
+                var commit = await Api.UploadDocumentAsync(workspaceId, path,
+                    new PutWorkspaceBinaryDocumentRequest(head, buffer.ToArray()), _disposeToken.Token);
+                head = commit.CommitId;
+                uploaded++;
+                UploadCompleted = uploaded;
+                await InvokeAsync(StateHasChanged);
+            }
+            ShowToast($"已上传 {uploaded} 个文件。");
+        }
+        catch (ApiException exception)
+        {
+            ErrorMessage = $"已上传 {uploaded} 个文件，创建 {directoriesCreated} 个文件夹。{ApiError(exception)}";
+        }
+        catch (IOException)
+        {
+            ErrorMessage = $"已上传 {uploaded} 个文件，创建 {directoriesCreated} 个文件夹。读取文件失败；每个文件不能超过 1 MiB。";
+        }
+        catch (InvalidOperationException exception)
+        {
+            ErrorMessage = $"已上传 {uploaded} 个文件，创建 {directoriesCreated} 个文件夹。{exception.Message}";
+        }
+        catch (HttpRequestException)
+        {
+            ErrorMessage = $"已上传 {uploaded} 个文件，创建 {directoriesCreated} 个文件夹。无法连接到 Episteme API。";
+        }
+        catch (JSException)
+        {
+            ErrorMessage = $"已上传 {uploaded} 个文件，创建 {directoriesCreated} 个文件夹。无法读取上传文件夹的相对路径。";
+        }
+        finally
+        {
+            try
+            {
+                if ((uploaded > 0 || directoriesCreated > 0) && CurrentWorkspace?.Id == workspaceId)
+                    await RefreshFolderAsync(folder);
+            }
+            catch (ApiException exception)
+            {
+                ErrorMessage += $" 刷新目录失败：{ApiError(exception)}";
+            }
+            catch (HttpRequestException)
+            {
+                ErrorMessage += " 刷新目录失败：无法连接到 Episteme API。";
+            }
+            catch (InvalidOperationException exception)
+            {
+                ErrorMessage += $" 刷新目录失败：{exception.Message}";
+            }
+            finally
+            {
+                IsTransferring = false;
+                UploadTotal = 0;
+                UploadCurrentFile = "";
+                UploadInputVersion++;
+            }
+        }
+    }
+
+    private async Task DownloadDocumentAsync()
+    {
+        if (CurrentWorkspace is null || SelectedFile is null || IsTransferring)
+            return;
+        IsTransferring = true;
+        var workspaceId = ActiveProjectId;
+        var file = SelectedFile;
+        try
+        {
+            await RunApiAsync(async () =>
+            {
+                var document = await Api.DownloadDocumentAsync(workspaceId, file.Path, _disposeToken.Token);
+                await JS.InvokeVoidAsync("episteme.downloadBytes", file.Name, document.Content, "application/octet-stream");
+            });
+        }
+        catch (JSException)
+        {
+            ErrorMessage = "浏览器下载失败，请重试。";
+        }
+        finally
+        {
+            IsTransferring = false;
+        }
+    }
+
+    private async Task DownloadWorkspaceAsync()
+    {
+        if (CurrentWorkspace is null || IsTransferring)
+            return;
+        IsTransferring = true;
+        var workspaceId = ActiveProjectId;
+        var workspaceName = CurrentWorkspace.Name;
+        try
+        {
+            await RunApiAsync(async () =>
+            {
+                using var output = new MemoryStream();
+                var root = await Api.ListDirectoryAsync(workspaceId, "", _disposeToken.Token);
+                var entries = 0;
+                long totalBytes = 0;
+                using (var zip = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+                {
+                    async Task AddDirectoryAsync(string path, WorkspaceDirectoryResponse listing)
+                    {
+                        if (listing.CommitId != root.CommitId)
+                            throw new InvalidOperationException("工作空间在下载期间发生变化，请重试。");
+                        foreach (var entry in listing.Entries)
+                        {
+                            if (++entries > 1000)
+                                throw new InvalidOperationException("工作空间超过 ZIP 下载的 1000 项限制。");
+                            var child = path.Length == 0 ? entry.Name : $"{path}/{entry.Name}";
+                            if (entry.Kind.Equals("directory", StringComparison.OrdinalIgnoreCase))
+                            {
+                                zip.CreateEntry(child + "/");
+                                var directory = await Api.ListDirectoryAsync(workspaceId, child, _disposeToken.Token);
+                                await AddDirectoryAsync(child, directory);
+                            }
+                            else if (entry.Kind.Equals("document", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var document = await Api.DownloadDocumentAsync(workspaceId, child, _disposeToken.Token);
+                                if (document.CommitId != root.CommitId)
+                                    throw new InvalidOperationException("工作空间在下载期间发生变化，请重试。");
+                                totalBytes += document.Content.Length;
+                                if (totalBytes > 32 * 1024 * 1024)
+                                    throw new InvalidOperationException("工作空间超过 ZIP 下载的 32 MiB 限制。");
+                                using var stream = zip.CreateEntry(child).Open();
+                                await stream.WriteAsync(document.Content, _disposeToken.Token);
+                            }
+                            else
+                                throw new InvalidOperationException($"不支持下载项目：{child}（{entry.Kind}）。");
+                        }
+                    }
+                    await AddDirectoryAsync("", root);
+                }
+                await JS.InvokeVoidAsync("episteme.downloadBytes", $"{workspaceName}.zip", output.ToArray(), "application/zip");
+            });
+        }
+        catch (InvalidOperationException exception)
+        {
+            ErrorMessage = exception.Message;
+        }
+        catch (JSException)
+        {
+            ErrorMessage = "浏览器下载失败，请重试。";
+        }
+        finally
+        {
+            IsTransferring = false;
+        }
     }
 
     private void ToggleMarkdownPreview() => ShowMarkdownPreview = !ShowMarkdownPreview;
@@ -1149,11 +2008,34 @@
         Path.GetExtension(name).ToLowerInvariant() is ".cs" or ".js" or ".ts" or ".json" or ".xml" or ".yml" or ".yaml";
     private static string ShortCommit(string commit) => commit.Length > 7 ? commit[..7] : commit;
 
-    public ValueTask DisposeAsync()
+    private StandaloneEditorConstructionOptions EditorConstructionOptions(StandaloneCodeEditor editor) =>
+        new()
+        {
+            AutomaticLayout = true,
+            ReadOnly = IsReadOnlyVersion,
+            Language = MonacoLanguage,
+            Value = EditedContent,
+            Minimap = new EditorMinimapOptions { Enabled = false },
+            ScrollBeyondLastLine = false
+        };
+
+    private string MonacoLanguage => SelectedFile?.Name.Split('.').LastOrDefault()?.ToLowerInvariant() switch
+    {
+        "cs" => "csharp",
+        "js" => "javascript",
+        "ts" => "typescript",
+        "json" => "json",
+        "xml" => "xml",
+        "yml" or "yaml" => "yaml",
+        "md" => "markdown",
+        "txt" => "plaintext",
+        _ => "plaintext"
+    };
+
+    public async ValueTask DisposeAsync()
     {
         IsDisposed = true;
         _disposeToken.Cancel();
         _disposeToken.Dispose();
-        return ValueTask.CompletedTask;
     }
 }

@@ -81,6 +81,87 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
             return (null, WorkspaceAccessFailure.Unsupported);
         }
     }
+
+    public async Task<(int FileCount, int FolderCount)> GetStatsAsync(
+        string storageKey, string branch, CancellationToken cancellationToken)
+    {
+        var repository = RepositoryPath(storageKey, branch);
+        var head = await HeadAsync(repository, branch, cancellationToken);
+        var data = await RunAsync(repository, ["ls-tree", "-r", "-t", "-z", head], MaxOutputBytes, cancellationToken);
+        var entries = ParseEntries(data);
+        var fileCount = entries.Count(entry =>
+            entry.Mode is "100644" or "100755" &&
+            !entry.Name.EndsWith("/.gitkeep", StringComparison.OrdinalIgnoreCase) &&
+            !entry.Name.Equals(".gitkeep", StringComparison.OrdinalIgnoreCase));
+        var folderCount = entries
+            .Where(entry => entry.Mode == "040000")
+            .Select(entry => entry.Name)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        return (fileCount, folderCount);
+    }
+
+    public async Task<string?> CopyFolderAsync(
+        string sourceStorageKey,
+        string sourceBranch,
+        string sourceFolder,
+        string targetStorageKey,
+        string targetBranch,
+        string targetFolder,
+        Guid targetProjectId,
+        WorkspaceActor actor,
+        CancellationToken cancellationToken)
+    {
+        var sourceRepository = RepositoryPath(sourceStorageKey, sourceBranch);
+        var sourceHead = await HeadAsync(sourceRepository, sourceBranch, cancellationToken);
+        var raw = await RunAsync(sourceRepository,
+            ["ls-tree", "-r", "-t", "-z", sourceHead, "--", sourceFolder],
+            MaxOutputBytes, cancellationToken);
+        var entries = ParseEntries(raw);
+        var targetHead = await HeadAsync(RepositoryPath(targetStorageKey, targetBranch), targetBranch, cancellationToken);
+
+        foreach (var entry in entries.Where(entry => entry.Mode == "040000"))
+        {
+            var suffix = sourceFolder.Length == 0
+                ? entry.Name
+                : (entry.Name.Length > sourceFolder.Length
+                    ? entry.Name[(sourceFolder.Length + 1)..]
+                    : "");
+            if (suffix.Length == 0)
+                continue;
+            var targetPath = targetFolder.Length == 0 ? suffix : $"{targetFolder}/{suffix}";
+            var result = await WriteAsync(targetStorageKey, targetBranch,
+                new WorkspaceWriteCommand(targetProjectId, actor, targetPath, targetHead,
+                    WorkspaceWriteOperation.CreateDirectory), cancellationToken);
+            if (result.CommitId is null)
+                return null;
+            targetHead = result.CommitId;
+        }
+
+        foreach (var entry in entries.Where(entry =>
+                     entry.Mode is "100644" or "100755"))
+        {
+            if (entry.Name.EndsWith("/.gitkeep", StringComparison.OrdinalIgnoreCase) ||
+                entry.Name.Equals(".gitkeep", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var suffix = sourceFolder.Length == 0
+                ? entry.Name
+                : (entry.Name.Length > sourceFolder.Length
+                    ? entry.Name[(sourceFolder.Length + 1)..]
+                    : entry.Name);
+            var targetPath = targetFolder.Length == 0 ? suffix : $"{targetFolder}/{suffix}";
+            var content = await RunAsync(sourceRepository,
+                ["cat-file", "blob", entry.ObjectId], MaxOutputBytes, cancellationToken);
+            var result = await WriteAsync(targetStorageKey, targetBranch,
+                new WorkspaceWriteCommand(targetProjectId, actor, targetPath, targetHead,
+                    WorkspaceWriteOperation.PutBinary, BinaryContent: content),
+                cancellationToken);
+            if (result.CommitId is null)
+                return null;
+            targetHead = result.CommitId;
+        }
+        return targetHead;
+    }
     public async Task<WorkspaceDirectoryResult> ListAsync(
         string storageKey, string branch, string path, CancellationToken cancellationToken)
     {
@@ -125,6 +206,14 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         return await ReadAtAsync(repository, commit, path, cancellationToken);
     }
 
+    public async Task<WorkspaceBinaryDocumentResult> ReadBinaryAsync(
+        string storageKey, string branch, string path, CancellationToken cancellationToken)
+    {
+        var repository = RepositoryPath(storageKey, branch);
+        var commit = await HeadAsync(repository, branch, cancellationToken);
+        return await ReadBinaryAtAsync(repository, commit, path, cancellationToken);
+    }
+
     public async Task<WorkspaceDocumentResult> ReadVersionAsync(
         string storageKey, string branch, string path, string commit, CancellationToken cancellationToken)
     {
@@ -138,6 +227,25 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
     private static async Task<WorkspaceDocumentResult> ReadAtAsync(
         string repository, string commit, string path, CancellationToken cancellationToken)
     {
+        var result = await ReadBinaryAtAsync(repository, commit, path, cancellationToken);
+        if (result.Failure is not null)
+            return new(null, null, result.Failure);
+        try
+        {
+            var text = StrictUtf8.GetString(result.Content!);
+            if (text.Contains('\0'))
+                return new(null, null, WorkspaceContentFailure.Unsupported);
+            return new(commit, text, null);
+        }
+        catch (DecoderFallbackException)
+        {
+            return new(null, null, WorkspaceContentFailure.Unsupported);
+        }
+    }
+
+    private static async Task<WorkspaceBinaryDocumentResult> ReadBinaryAtAsync(
+        string repository, string commit, string path, CancellationToken cancellationToken)
+    {
         var entry = await FindAsync(repository, commit, path, cancellationToken);
         if (entry is null)
             return new(null, null, WorkspaceContentFailure.NotFound);
@@ -149,17 +257,7 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         if (size > MaxOutputBytes)
             return new(null, null, WorkspaceContentFailure.TooLarge);
         var content = await RunAsync(repository, ["cat-file", "blob", entry.ObjectId], MaxOutputBytes, cancellationToken);
-        try
-        {
-            var text = StrictUtf8.GetString(content);
-            if (text.Contains('\0'))
-                return new(null, null, WorkspaceContentFailure.Unsupported);
-            return new(commit, text, null);
-        }
-        catch (DecoderFallbackException)
-        {
-            return new(null, null, WorkspaceContentFailure.Unsupported);
-        }
+        return new(commit, content, null);
     }
 
     public async Task<WorkspaceHistoryResult> HistoryAsync(
@@ -201,7 +299,7 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         var current = await FindAsync(repository, head, command.Path, cancellationToken);
         var isDirectory = command.Operation is WorkspaceWriteOperation.CreateDirectory or
             WorkspaceWriteOperation.DeleteDirectory or WorkspaceWriteOperation.MoveDirectory;
-        if (command.Operation == WorkspaceWriteOperation.CreateDirectory && current is not null)
+        if (command.Operation is WorkspaceWriteOperation.CreateDirectory or WorkspaceWriteOperation.PutBinary && current is not null)
             return new(null, WorkspaceContentFailure.Conflict);
         if (command.Operation is WorkspaceWriteOperation.Delete or WorkspaceWriteOperation.DeleteDirectory or
             WorkspaceWriteOperation.MoveDocument or WorkspaceWriteOperation.MoveDirectory && current is null)
@@ -298,7 +396,8 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
                 if (blob is null)
                 {
                     var output = await RunAsync(repository, ["hash-object", "-w", "--stdin"], 128,
-                        cancellationToken, input: command.Operation == WorkspaceWriteOperation.CreateDirectory ? "" : command.Content);
+                        cancellationToken, input: command.Operation == WorkspaceWriteOperation.CreateDirectory ? "" : command.Content,
+                        binaryInput: command.BinaryContent);
                     blob = StrictUtf8.GetString(output).Trim();
                     if (!IsObjectId(blob))
                         throw new InvalidOperationException("Git returned an invalid object ID.");
@@ -408,16 +507,16 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         value.Length is 40 or 64 && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private static async Task<byte[]> RunAsync(string repository, string[] arguments, int limit,
-        CancellationToken cancellationToken, string? index = null, string? input = null, string? author = null)
+        CancellationToken cancellationToken, string? index = null, string? input = null, string? author = null, byte[]? binaryInput = null)
     {
-        var result = await RunResultAsync(repository, arguments, limit, cancellationToken, index, input, author);
+        var result = await RunResultAsync(repository, arguments, limit, cancellationToken, index, input, author, binaryInput);
         if (result.ExitCode != 0)
             throw new InvalidOperationException("Git workspace operation failed.");
         return result.Output;
     }
 
     private static async Task<(int ExitCode, byte[] Output)> RunResultAsync(string repository, string[] arguments, int limit,
-        CancellationToken cancellationToken, string? index = null, string? input = null, string? author = null)
+        CancellationToken cancellationToken, string? index = null, string? input = null, string? author = null, byte[]? binaryInput = null)
     {
         await using var output = new BoundedStream(limit);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -445,6 +544,8 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
                 .WithValidation(CommandResultValidation.None);
             if (input is not null)
                 command = command.WithStandardInputPipe(PipeSource.FromString(input, StrictUtf8));
+            else if (binaryInput is not null)
+                command = command.WithStandardInputPipe(PipeSource.FromBytes(binaryInput));
             var result = await command.ExecuteAsync(timeout.Token);
             return (result.ExitCode, output.ToArray());
         }

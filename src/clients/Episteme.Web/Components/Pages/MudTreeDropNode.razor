@@ -1,0 +1,101 @@
+<div class="episteme-mud-tree-row">
+    <MudCheckBox T="bool"
+                 Value="@Selected"
+                 ValueChanged="SelectionChangedAsync"
+                 Dense="true"
+                 Disabled="@IsMoving"
+                 aria-label="选择项目或文件" />
+    <MudDragHandle T="WorkspaceTreeNode">
+        <MudIconButton Icon="@Icons.Material.Filled.DragIndicator"
+                       Size="Size.Small"
+                       Disabled="@IsMoving"
+                       aria-label="拖动移动" />
+    </MudDragHandle>
+    @if (Node.IsDirectory)
+    {
+        <MudIconButton Icon="@(Node.IsExpanded ? Icons.Material.Filled.ExpandMore : Icons.Material.Filled.ChevronRight)"
+                       Size="Size.Small"
+                       Disabled="@IsMoving"
+                       aria-label="展开或折叠"
+                       OnClick="ToggleAsync" />
+    }
+    else
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.InsertDriveFile"
+                       Size="Size.Small"
+                       Disabled="true"
+                       aria-label="文件" />
+    }
+    <MudText Class="episteme-mud-tree-name" title="@Node.Name"
+             @onclick="SelectAsync">@Node.Name</MudText>
+    <MudMenu Icon="@Icons.Material.Filled.MoreVert"
+             Size="Size.Small"
+             Disabled="@IsMoving"
+             aria-label="项目操作">
+        <MudMenuItem Disabled="@(!CanRename)" OnClick="RenameAsync">重命名</MudMenuItem>
+        @if (Node.IsDirectory)
+        {
+            <MudMenuItem Disabled="@(!CanRename)" OnClick="PromoteAsync">升级为项目</MudMenuItem>
+        }
+        <MudMenuItem Disabled="@(!CanDelete)" OnClick="DeleteAsync">删除</MudMenuItem>
+    </MudMenu>
+</div>
+@if (Node.IsDirectory)
+{
+    <MudCollapse Expanded="@Node.IsExpanded">
+        <MudDropZone T="WorkspaceTreeNode"
+                     Identifier="@Node.Path"
+                     ItemsSelector="@(item => ParentPath(item.Path) == Node.Path)"
+                     AllowReorder="false"
+                     Class="episteme-mud-dropzone episteme-mud-folder-zone">
+            <ItemRenderer Context="child">
+                <MudTreeDropNode Node="child"
+                                 CurrentPath="CurrentPath"
+                                 IsMoving="IsMoving"
+                                 OnSelect="OnSelect"
+                                 OnToggleDirectory="OnToggleDirectory"
+                                 CanRename="CanRename"
+                                 CanDelete="CanDelete"
+                                 OnRename="OnRename"
+                                 OnDelete="OnDelete"
+                                 OnPromote="OnPromote"
+                                 Selected="@(SelectedPaths?.Contains(child.Path) == true)"
+                                 SelectedPaths="SelectedPaths"
+                                 SelectionChanged="SelectionChanged" />
+            </ItemRenderer>
+        </MudDropZone>
+    </MudCollapse>
+}
+
+@code {
+    [Parameter, EditorRequired] public WorkspaceTreeNode Node { get; set; } = null!;
+    [Parameter] public string? CurrentPath { get; set; }
+    [Parameter] public bool IsMoving { get; set; }
+    [Parameter] public bool Selected { get; set; }
+    [Parameter] public ISet<string>? SelectedPaths { get; set; }
+    [Parameter] public EventCallback<(WorkspaceTreeNode Node, bool Selected)> SelectionChanged { get; set; }
+    [Parameter] public bool CanRename { get; set; }
+    [Parameter] public bool CanDelete { get; set; }
+    [Parameter, EditorRequired] public EventCallback<WorkspaceTreeNode> OnSelect { get; set; }
+    [Parameter, EditorRequired] public EventCallback<WorkspaceTreeNode> OnToggleDirectory { get; set; }
+    [Parameter] public EventCallback<WorkspaceTreeNode> OnRename { get; set; }
+    [Parameter] public EventCallback<WorkspaceTreeNode> OnDelete { get; set; }
+    [Parameter] public EventCallback<WorkspaceTreeNode> OnPromote { get; set; }
+
+    private Task SelectAsync() => Node.IsDirectory
+        ? OnToggleDirectory.InvokeAsync(Node)
+        : OnSelect.InvokeAsync(Node);
+
+    private Task ToggleAsync() => OnToggleDirectory.InvokeAsync(Node);
+    private Task SelectionChangedAsync(bool selected) =>
+        SelectionChanged.InvokeAsync((Node, selected));
+    private Task RenameAsync() => OnRename.InvokeAsync(Node);
+    private Task DeleteAsync() => OnDelete.InvokeAsync(Node);
+    private Task PromoteAsync() => OnPromote.InvokeAsync(Node);
+
+    private static string ParentPath(string path)
+    {
+        var index = path.LastIndexOf('/');
+        return index < 0 ? "" : path[..index];
+    }
+}

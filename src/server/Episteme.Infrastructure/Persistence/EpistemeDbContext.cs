@@ -11,6 +11,7 @@ public sealed class EpistemeDbContext(DbContextOptions<EpistemeDbContext> option
     : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>(options)
 {
     public DbSet<Workspace> Workspaces => Set<Workspace>();
+    public DbSet<Project> Projects => Set<Project>();
     public DbSet<WorkspaceMember> WorkspaceMembers => Set<WorkspaceMember>();
     public DbSet<UserWorkspaceSettings> UserWorkspaceSettings => Set<UserWorkspaceSettings>();
     public DbSet<WorkspaceAuditEvent> WorkspaceAuditEvents => Set<WorkspaceAuditEvent>();
@@ -46,6 +47,29 @@ public sealed class EpistemeDbContext(DbContextOptions<EpistemeDbContext> option
             entity.HasOne<ApplicationUser>()
                 .WithMany()
                 .HasForeignKey(workspace => workspace.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Project>(entity =>
+        {
+            entity.ToTable("Projects");
+            entity.HasKey(project => project.Id);
+            entity.Property(project => project.Name).HasMaxLength(120).IsRequired();
+            entity.Property(project => project.Slug).HasMaxLength(80).IsRequired();
+            entity.HasIndex(project => new { project.WorkspaceId, project.Slug }).IsUnique();
+            entity.Property(project => project.Description).HasMaxLength(2000);
+            entity.Property(project => project.StorageKey).HasMaxLength(32).IsRequired();
+            entity.HasIndex(project => project.StorageKey).IsUnique();
+            entity.Property(project => project.DefaultBranch).HasMaxLength(255).IsRequired();
+            entity.Property(project => project.Status).HasConversion<string>().HasMaxLength(32);
+            entity.Property(project => project.ConcurrencyStamp).IsConcurrencyToken();
+            entity.HasOne<Workspace>()
+                .WithMany()
+                .HasForeignKey(project => project.WorkspaceId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(project => project.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

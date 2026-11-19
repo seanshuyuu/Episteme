@@ -79,6 +79,14 @@ public interface IEpistemeApi
     Task<WorkspaceCommitResponse> PutDocumentAsync(Guid workspaceId, string path,
         [Body] PutWorkspaceDocumentRequest request, CancellationToken cancellationToken = default);
 
+    [Put("/api/v1/workspaces/{workspaceId}/documents/binary")]
+    Task<WorkspaceCommitResponse> UploadDocumentAsync(Guid workspaceId, string path,
+        [Body] PutWorkspaceBinaryDocumentRequest request, CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/workspaces/{workspaceId}/documents/binary")]
+    Task<WorkspaceBinaryDocumentResponse> DownloadDocumentAsync(Guid workspaceId, string path,
+        CancellationToken cancellationToken = default);
+
     [Delete("/api/v1/workspaces/{workspaceId}/documents")]
     Task<WorkspaceCommitResponse> DeleteDocumentAsync(Guid workspaceId, string path,
         [Body] DeleteWorkspaceDocumentRequest request, CancellationToken cancellationToken = default);
@@ -127,6 +135,34 @@ public interface IEpistemeApi
     Task<WorkspaceListResponse> ListWorkspacesAsync(
         int offset = 0,
         int limit = 25,
+        CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/workspaces/{workspaceId}/projects")]
+    Task<ProjectListResponse> ListProjectsAsync(Guid workspaceId, int offset = 0, int limit = 100,
+        CancellationToken cancellationToken = default);
+
+    [Post("/api/v1/workspaces/{workspaceId}/projects")]
+    Task<ProjectResponse> CreateProjectAsync(Guid workspaceId, [Body] CreateProjectRequest request,
+        CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/workspaces/{workspaceId}/projects/{projectId}")]
+    Task<ProjectResponse> UpdateProjectAsync(Guid workspaceId, Guid projectId,
+        [Body] UpdateProjectRequest request, CancellationToken cancellationToken = default);
+
+    [Post("/api/v1/workspaces/{workspaceId}/projects/{projectId}/status")]
+    Task<ProjectResponse> SetProjectStatusAsync(Guid workspaceId, Guid projectId,
+        [Body] SetProjectStatusRequest request, CancellationToken cancellationToken = default);
+
+    [Delete("/api/v1/workspaces/{workspaceId}/projects/{projectId}")]
+    Task DeleteProjectAsync(Guid workspaceId, Guid projectId,
+        [Body] DeleteProjectRequest request, CancellationToken cancellationToken = default);
+
+    [Post("/api/v1/workspaces/{workspaceId}/projects/{projectId}/promote-folder")]
+    Task<ProjectResponse> PromoteProjectFolderAsync(Guid workspaceId, Guid projectId,
+        [Body] PromoteFolderRequest request, CancellationToken cancellationToken = default);
+
+    [Post("/api/v1/workspaces/{workspaceId}/projects/{projectId}/demote")]
+    Task<ProjectResponse> DemoteProjectAsync(Guid workspaceId, Guid projectId,
         CancellationToken cancellationToken = default);
 
     [Get("/api/v1/workspaces/{workspaceId}")]
@@ -180,13 +216,34 @@ public sealed record ImportWorkspaceManifestRequest(string Slug, WorkspaceManife
 public sealed record UpdateWorkspaceRequest(string Name, string Type, string? Description, Guid ExpectedVersion);
 public sealed record CreateWorkspaceRequest(string Name, string Slug, string Type, string? Description);
 public sealed record ArchiveWorkspaceRequest(Guid ExpectedVersion);
+public sealed record ProjectResponse(
+    Guid Id,
+    Guid WorkspaceId,
+    string Name,
+    string Slug,
+    string? Description,
+    string Status,
+    string DefaultBranch,
+    Guid ConcurrencyStamp,
+    int FileCount,
+    int FolderCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+public sealed record ProjectListResponse(IReadOnlyList<ProjectResponse> Items, int Offset, int Limit, bool HasMore);
+public sealed record CreateProjectRequest(string Name, string Slug, string? Description);
+public sealed record UpdateProjectRequest(string Name, string Slug, string? Description, Guid ExpectedVersion);
+public sealed record SetProjectStatusRequest(string Status, Guid ExpectedVersion);
+public sealed record DeleteProjectRequest(Guid ExpectedVersion);
+public sealed record PromoteFolderRequest(string FolderPath);
 public sealed record SetWorkspaceMemberRequest(string Role);
 public sealed record WorkspaceMemberResponse(Guid UserId, string Role, DateTimeOffset JoinedAt);
 public sealed record WorkspaceMemberListResponse(IReadOnlyList<WorkspaceMemberResponse> Items, int Offset, int Limit, bool HasMore);
 public sealed record WorkspaceContentEntryResponse(string Name, string Kind);
 public sealed record WorkspaceDirectoryResponse(string CommitId, IReadOnlyList<WorkspaceContentEntryResponse> Entries);
 public sealed record WorkspaceDocumentResponse(string CommitId, string Content);
+public sealed record WorkspaceBinaryDocumentResponse(string CommitId, byte[] Content);
 public sealed record PutWorkspaceDocumentRequest(string ExpectedHead, string Content);
+public sealed record PutWorkspaceBinaryDocumentRequest(string ExpectedHead, byte[] Content);
 public sealed record DeleteWorkspaceDocumentRequest(string ExpectedHead);
 public sealed record DeleteWorkspaceDirectoryRequest(string ExpectedHead, bool Recursive);
 public sealed record MoveWorkspacePathRequest(string ExpectedHead, string DestinationPath);

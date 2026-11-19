@@ -3,7 +3,7 @@
 ## 1. 架构目标
 
 - 后端提供版本化 Web API 与 MCP 工具入口，统一复用应用用例和权限检查。
-- 用户、授权和工作空间元数据存 PostgreSQL；每个工作空间有隔离的 Git 仓库，避免正文重复写入数据库。
+- 用户、授权、工作空间与项目元数据存 PostgreSQL；每个项目有隔离的 Git 仓库，避免正文重复写入数据库。
 - 所有业务代码位于 `src/`；方案文档位于 `design/`。
 - 优先使用成熟组件及 .NET/ASP.NET 内建能力，不自建 OAuth/token、Git 历史或 MCP 协议实现。
 
@@ -20,7 +20,7 @@
 | Git 历史 | 系统 Git CLI + `CliWrap` | 每工作空间独立仓库；使用参数化进程调用而非 shell 拼接，显式检查退出码、超时和仓库路径。运维环境需安装受支持的 Git。 |
 | API 文档 | ASP.NET Core OpenAPI | 从 API 契约生成规范；Blazor 客户端以此作为 API 调用契约。 |
 | 日志 | `Microsoft.Extensions.Logging` | 结构化日志抽象；日志禁止输出文档正文、token、密码和敏感配置。 |
-| 前端 | Blazor + MudBlazor（推荐） | 面向工作空间管理、文档浏览/编辑和账户管理的交互式 Web UI；MudBlazor 提供成熟的表单、导航、表格、对话框和主题基础。主题扩展与用户偏好由应用统一管理。 |
+| 前端 | Blazor + MudBlazor + BlazorMonaco | 工作空间项目卡片、文件目录、拖放移动、多选、文档浏览/编辑和账户管理交互；MudBlazor 提供导航、表格、菜单、对话框和主题基础，Monaco 提供代码编辑能力。 |
 
 > OpenIddict 面向需要标准 OAuth/OIDC token 生命周期的服务端方案。若产品最终确定只需单一第一方 API 且不需要标准 OAuth/OIDC/MCP 授权流，应重新评估认证方案，而不是额外叠加一套 token 实现。
 
@@ -89,6 +89,7 @@ API 和 MCP 分开部署/配置，但可共享 Application、Domain、Infrastruc
 ## 5. 存储与安全边界
 
 - 部署配置指定一个服务专用、非公开可访问的 `WorkspaceStorageRoot`；仓库物理目录使用不可变的服务端生成 `StorageKey`，禁止直接将用户传入路径拼接为物理路径。
+ - 工作空间和项目是两层实体：工作空间负责共享成员与管理边界，项目负责独立 Git 仓库、项目元数据和状态。项目物理仓库也使用不可变的 `StorageKey`。
 - 用户“工作目录”是工作空间根目录下的逻辑相对目录；如确需用户指定本机绝对目录，应另行定义本地 Agent/桌面端的运行边界，不能默认开放服务端任意文件系统读写。
 - 所有 API/MCP 文件操作要求 workspace ID + 规范化相对路径，且先鉴权再访问磁盘；拒绝符号链接逃逸、路径穿越、`.git` 访问、仓库锁文件和超出限制的请求。
 - OAuth access token 设置短有效期；使用 refresh token 轮换/撤销策略和最低必要 scope。密钥只来自安全部署配置，不导出到工作空间清单或日志。

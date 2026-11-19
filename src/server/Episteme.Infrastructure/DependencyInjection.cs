@@ -46,6 +46,8 @@ public static class DependencyInjection
         services.AddScoped<IWorkspaceManifestRepository, EfWorkspaceContentRepository>();
         services.AddScoped<GitWorkspaceReader>();
         services.AddScoped<IWorkspaceCreationRepository, EfWorkspaceCreationRepository>();
+        services.AddScoped<IProjectRepository, EfProjectRepository>();
+        services.AddScoped<IProjectService, ProjectService>();
         services.AddScoped<IWorkspaceRepositoryProvisioner, GitWorkspaceProvisioner>();
         services.AddScoped<IUserWorkspaceSettingsRepository, EfUserWorkspaceSettingsRepository>();
         services.AddScoped<IUserTokenRepository, EfUserTokenRepository>();

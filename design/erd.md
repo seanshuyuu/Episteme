@@ -53,6 +53,21 @@ erDiagram
         datetime JoinedAt
     }
 
+    PROJECT {
+        uuid Id PK
+        uuid WorkspaceId FK
+        uuid CreatedByUserId FK
+        string Name
+        string Slug
+        string Description
+        string Status
+        string StorageKey UK
+        string DefaultBranch
+        uuid ConcurrencyStamp
+        datetime CreatedAt
+        datetime UpdatedAt
+    }
+
     AUDIT_EVENT {
         uuid Id PK
         uuid ActorUserId FK
@@ -89,6 +104,8 @@ erDiagram
     APPLICATION_USER ||--o{ WORKSPACE : creates
     APPLICATION_USER ||--o{ WORKSPACE_MEMBER : joins
     WORKSPACE ||--o{ WORKSPACE_MEMBER : grants_access
+    WORKSPACE ||--o{ PROJECT : contains
+    APPLICATION_USER ||--o{ PROJECT : creates
     APPLICATION_USER o|--o{ WORKSPACE_MEMBER : adds_member
     APPLICATION_USER o|--o{ AUDIT_EVENT : performs
     WORKSPACE o|--o{ AUDIT_EVENT : relates_to
@@ -110,13 +127,15 @@ erDiagram
 
 ```mermaid
 flowchart LR
-    Workspace["Workspace row<br/>Id + StorageKey"]
+    Workspace["Workspace row<br/>Id"]
+    Project["Project row<br/>Id + StorageKey"]
     Root["部署配置的存储根目录"]
-    Repo["{StorageKey}/.git"]
+    Repo["{Project.StorageKey}/.git"]
     Tree["Git tree<br/>目录 / 文件路径"]
     Blob["Git blob<br/>文档正文"]
     Commit["Git commit<br/>版本 / 操作者摘要"]
-    Workspace -->|StorageKey| Root
+    Workspace -->|contains| Project
+    Project -->|StorageKey| Root
     Root --> Repo
     Repo --> Tree
     Tree --> Blob
