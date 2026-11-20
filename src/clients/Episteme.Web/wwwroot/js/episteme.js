@@ -18,6 +18,9 @@ window.episteme = {
     getRelativePaths(input) {
         return Array.from(input.files, file => file.webkitRelativePath);
     },
+    closeDetails(details) {
+        details?.removeAttribute("open");
+    },
     downloadText(filename, content, contentType) {
         const blob = new Blob([content], { type: contentType });
         const link = document.createElement("a");

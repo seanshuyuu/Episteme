@@ -40,7 +40,7 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
             assignment => assignment.UserId == userId && assignment.RoleId == role.Id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new(new ManagedUser(target.Id, target.UserName, target.Email, target.Status, target.CreatedAt,
-            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken)), null);
+            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken), target.DisplayName), null);
     }
 
     public async Task<UserTokenListResult> ListTokensAsync(Guid actorId, Guid userId, int offset, int limit, CancellationToken cancellationToken)
@@ -85,7 +85,8 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
                  where assignment.UserId == user.Id && role.NormalizedName == "ADMINISTRATOR"
                  select assignment.UserId).Any(),
                 db.WorkspaceMembers.Count(member => member.UserId == user.Id &&
-                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner)))
+                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner),
+                user.DisplayName))
             .SingleOrDefaultAsync(cancellationToken);
         return user is null ? new(null, UserAdministrationFailure.NotFound) : new(user, null);
     }
@@ -122,7 +123,7 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
         db.AccountAuditEvents.Add(new AccountAuditEvent(actorId, user.Id, "user.created"));
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return new(new ManagedUser(user.Id, user.UserName, user.Email, user.Status, user.CreatedAt, false), null);
+        return new(new ManagedUser(user.Id, user.UserName, user.Email, user.Status, user.CreatedAt, false, 0, user.DisplayName), null);
     }
 
     public async Task<ManagedUserListResult> ListAsync(Guid actorId, int offset, int limit, CancellationToken cancellationToken)
@@ -136,7 +137,8 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
                  where assignment.UserId == user.Id && role.NormalizedName == "ADMINISTRATOR"
                  select assignment.UserId).Any(),
                 db.WorkspaceMembers.Count(member => member.UserId == user.Id &&
-                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner)))
+                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner),
+                user.DisplayName))
             .ToListAsync(cancellationToken);
         return new(users.Take(limit).ToArray(), users.Count > limit, null);
     }
@@ -190,7 +192,8 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
                  where assignment.UserId == user.Id && role.NormalizedName == "ADMINISTRATOR"
                  select assignment.UserId).Any(),
                 db.WorkspaceMembers.Count(member => member.UserId == user.Id &&
-                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner)))
+                    member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner),
+                user.DisplayName))
             .ToArrayAsync(cancellationToken);
 
         return new(new UserAdministrationOverview(totalUsers, activeUsers, totalWorkspaces,
@@ -242,7 +245,7 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
         }
         await transaction.CommitAsync(cancellationToken);
         return new(new ManagedUser(target.Id, target.UserName, target.Email, target.Status, target.CreatedAt,
-            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken)), null);
+            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken), target.DisplayName), null);
     }
 
     public async Task<ManagedUserResult> SetAdministratorAsync(
@@ -281,7 +284,7 @@ public sealed class EfUserAdministrationRepository(EpistemeDbContext db, UserMan
         }
         await transaction.CommitAsync(cancellationToken);
         return new(new ManagedUser(target.Id, target.UserName, target.Email, target.Status, target.CreatedAt,
-            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken)), null);
+            isAdministrator, await OwnedWorkspaceCountAsync(userId, cancellationToken), target.DisplayName), null);
     }
 
     private Task<int> OwnedWorkspaceCountAsync(Guid userId, CancellationToken cancellationToken) =>

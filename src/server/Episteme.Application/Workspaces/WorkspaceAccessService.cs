@@ -24,7 +24,8 @@ public sealed record WorkspaceAccessSnapshot(
     Workspace Workspace,
     bool IsMembershipActive,
     WorkspaceRole? Role,
-    bool IsUserActive);
+    bool IsUserActive,
+    bool McpReadAllowed = false);
 
 public sealed record WorkspaceSummary(
     Guid Id,
@@ -45,7 +46,8 @@ public sealed record WorkspaceAccessRequest(
     Guid ActorUserId,
     IReadOnlySet<string> Scopes,
     bool IsSystemAdministrator,
-    WorkspacePermission Permission);
+    WorkspacePermission Permission,
+    bool IsMcp = false);
 
 public sealed record WorkspaceAccessResult(
     WorkspaceSummary? Workspace,
@@ -63,6 +65,10 @@ public interface IWorkspaceAccessRepository
         Guid workspaceId,
         Guid userId,
         CancellationToken cancellationToken);
+
+    Task<WorkspaceAccessSnapshot?> GetMcpAccessSnapshotAsync(
+        Guid workspaceId, Guid userId, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("MCP workspace access is not supported by this repository.");
 }
 
 /// <summary>
@@ -84,16 +90,18 @@ public sealed class WorkspaceAccessService(IWorkspaceAccessRepository repository
         if (!request.Scopes.Contains(requiredScope))
             return WorkspaceAccessResult.Denied(WorkspaceAccessFailure.MissingScope);
 
-        var snapshot = await repository.GetAccessSnapshotAsync(
-            request.WorkspaceId,
-            request.ActorUserId,
-            cancellationToken);
+        var snapshot = request.IsMcp
+            ? await repository.GetMcpAccessSnapshotAsync(request.WorkspaceId, request.ActorUserId, cancellationToken)
+            : await repository.GetAccessSnapshotAsync(request.WorkspaceId, request.ActorUserId, cancellationToken);
         if (snapshot is null || snapshot.Workspace.Status != WorkspaceStatus.Active)
             return WorkspaceAccessResult.Denied(WorkspaceAccessFailure.NotFound);
         if (!snapshot.IsUserActive)
             return WorkspaceAccessResult.Denied(WorkspaceAccessFailure.UserInactive);
 
-        if (!request.IsSystemAdministrator)
+        if (request.IsMcp && (request.Permission != WorkspacePermission.Read || !snapshot.McpReadAllowed))
+            return WorkspaceAccessResult.Denied(WorkspaceAccessFailure.MembershipRequired);
+
+        if (!request.IsSystemAdministrator || request.IsMcp)
         {
             if (!snapshot.IsMembershipActive || snapshot.Role is null)
                 return WorkspaceAccessResult.Denied(WorkspaceAccessFailure.MembershipRequired);

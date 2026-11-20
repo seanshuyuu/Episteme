@@ -92,7 +92,44 @@ public sealed class WorkspaceContentController(IWorkspaceContentService content)
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
     public Task<IActionResult> PutDocument(Guid workspaceId, [FromQuery] string path,
         PutWorkspaceDocumentRequest request, CancellationToken cancellationToken) =>
-        Write(workspaceId, path, request.ExpectedHead, WorkspaceWriteOperation.Put, request.Content, null, cancellationToken);
+        Write(workspaceId, path, request.ExpectedHead, WorkspaceWriteOperation.Put, request.Content, null, cancellationToken, comment: request.Comment);
+
+    /// <summary>Uploads a new binary document, limited to 1 MiB, without overwriting an existing path.</summary>
+    [HttpPut("documents/binary")]
+    [ProducesResponseType<WorkspaceCommitResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UploadDocument(Guid workspaceId, [FromQuery] string path,
+        PutWorkspaceBinaryDocumentRequest request, CancellationToken cancellationToken)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
+            return Unauthorized();
+        var result = await content.WriteAsync(new WorkspaceWriteCommand(
+            workspaceId, actor!, path, request.ExpectedHead, WorkspaceWriteOperation.PutBinary,
+            BinaryContent: request.Content), cancellationToken);
+        return result.Failure is not null ? Failure(result.Failure) : Ok(new WorkspaceCommitResponse(result.CommitId!));
+    }
+
+    /// <summary>Reads the original bytes of a document, limited to 1 MiB.</summary>
+    [HttpGet("documents/binary")]
+    [ProducesResponseType<WorkspaceBinaryDocumentResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status413PayloadTooLarge)]
+    [ProducesResponseType<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> DownloadDocument(Guid workspaceId, [FromQuery] string path, CancellationToken cancellationToken)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
+            return Unauthorized();
+        var result = await content.ReadBinaryAsync(workspaceId, actor!, path, cancellationToken);
+        return result.Failure is not null ? Failure(result.Failure) :
+            Ok(new WorkspaceBinaryDocumentResponse(result.CommitId!, result.Content!));
+    }
 
     /// <summary>Deletes a document in a new commit on the expected branch head.</summary>
     [HttpDelete("documents")]
@@ -120,12 +157,13 @@ public sealed class WorkspaceContentController(IWorkspaceContentService content)
 
     private async Task<IActionResult> Write(Guid workspaceId, string path, string expectedHead,
         WorkspaceWriteOperation operation, string? body, string? sourceCommit, CancellationToken cancellationToken,
-        string? destination = null, bool recursive = false)
+        string? destination = null, bool recursive = false, string? comment = null)
     {
         if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
             return Unauthorized();
         var result = await content.WriteAsync(new WorkspaceWriteCommand(
-            workspaceId, actor!, path, expectedHead, operation, body, sourceCommit, destination, recursive), cancellationToken);
+            workspaceId, actor!, path, expectedHead, operation, body, sourceCommit, destination, recursive,
+            Comment: comment), cancellationToken);
         return result.Failure is not null ? Failure(result.Failure) : Ok(new WorkspaceCommitResponse(result.CommitId!));
     }
 
@@ -143,7 +181,10 @@ public sealed class WorkspaceContentController(IWorkspaceContentService content)
         var result = await content.HistoryAsync(workspaceId, actor!, path, offset, limit, cancellationToken);
         if (result.Failure is not null)
             return Failure(result.Failure);
-        return Ok(new WorkspaceDocumentHistoryResponse(result.HeadCommitId!, result.Commits!, offset, limit, result.HasMore));
+        return Ok(new WorkspaceDocumentHistoryResponse(result.HeadCommitId!,
+            result.Commits!.Select(entry =>
+                new WorkspaceHistoryEntryResponse(entry.CommitId, entry.Message, entry.AuthorName, entry.CreatedAt)).ToArray(),
+            offset, limit, result.HasMore));
     }
 
     /// <summary>Lists a directory in the workspace's current committed tree.</summary>
@@ -205,13 +246,19 @@ public sealed record WorkspaceDirectoryResponse(string CommitId, IReadOnlyList<W
 
 /// <summary>A UTF-8 document snapshot at a Git commit.</summary>
 public sealed record WorkspaceDocumentResponse(string CommitId, string Content);
+/// <summary>Original document bytes and the Git commit they were read from.</summary>
+public sealed record WorkspaceBinaryDocumentResponse(string CommitId, byte[] Content);
 
 /// <summary>Commit IDs that changed a document path, relative to a pinned branch head.</summary>
 public sealed record WorkspaceDocumentHistoryResponse(
-    string HeadCommitId, IReadOnlyList<string> Commits, int Offset, int Limit, bool HasMore);
+    string HeadCommitId, IReadOnlyList<WorkspaceHistoryEntryResponse> Commits, int Offset, int Limit, bool HasMore);
+public sealed record WorkspaceHistoryEntryResponse(
+    string CommitId, string Message, string AuthorName, DateTimeOffset CreatedAt);
 
 /// <summary>UTF-8 document content and the branch head observed before writing.</summary>
-public sealed record PutWorkspaceDocumentRequest(string ExpectedHead, string Content);
+public sealed record PutWorkspaceDocumentRequest(string ExpectedHead, string Content, string? Comment = null);
+/// <summary>Original document bytes and the branch head observed before uploading.</summary>
+public sealed record PutWorkspaceBinaryDocumentRequest(string ExpectedHead, byte[] Content);
 /// <summary>The branch head observed before deleting a document.</summary>
 public sealed record DeleteWorkspaceDocumentRequest(string ExpectedHead);
 /// <summary>The source commit and branch head observed before restoring a document.</summary>

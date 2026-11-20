@@ -1,0 +1,121 @@
+@inject IEpistemeApi Api
+@inject McpTokenClient TokenClient
+@inject IJSRuntime JS
+@inject IConfiguration Configuration
+
+<div>
+            <div class="page-heading"><div><h2>MCP 设置</h2><p class="subtitle">个人权限与空间授权同时生效；默认不允许访问。</p></div></div>
+            <div class="info">MCP 地址：@(Configuration["Authentication:McpAudience"] ?? "未配置")。远程访问须使用安全的 HTTPS 入口。</div>
+            @if (!string.IsNullOrEmpty(Error))
+            {
+                <div class="error" role="alert">@Error</div>
+            }
+            @if (Loading)
+            {
+                <div class="card">正在读取 MCP 设置…</div>
+            }
+            else if (Personal is not null)
+            {
+                <article class="card">
+                    <h2>个人设置</h2>
+                    <label><input type="checkbox" @bind="Enabled" /> 允许本账号使用 MCP</label><br />
+                    <label><input type="checkbox" @bind="AllowCreate" /> 允许通过 MCP 创建空间</label>
+                    <div class="toolbar"><button class="button primary" disabled="@Busy" @onclick="SavePersonalAsync">保存个人设置</button></div>
+                </article>
+                <article class="card">
+                    <h2>访问令牌</h2>
+                    <p class="muted">生成的 MCP Token 有效期为 30 天，只在本次显示；请及时复制并妥善保管。</p>
+                    <button class="button primary" disabled="@(Busy || !Enabled)" @onclick="CreateTokenAsync">生成 MCP Token</button>
+                    @if (NewToken is not null)
+                    {
+                        <div role="status">
+                            <p>关闭后无法再次查看此 Token。</p>
+                            <textarea readonly rows="4" style="width:100%" aria-label="新生成的 MCP Token">@NewToken</textarea>
+                            <button class="button" @onclick="CopyTokenAsync">复制 Token</button>
+                            <button class="button" @onclick="() => NewToken = null">关闭</button>
+                            @if (Copied) { <span>已复制</span> }
+                        </div>
+                    }
+                    <p class="muted">以下列出当前账号的全部访问及刷新令牌，不仅包含 MCP Token；撤销会影响对应的登录或应用。</p>
+                    @foreach (var token in Tokens)
+                    {
+                        <div class="list-row">
+                            <span>@token.Type · @token.Status · @(token.ClientId ?? "未知客户端") ·
+                                @(token.CreatedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "未知时间") ·
+                                到期 @(token.ExpiresAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "未知")</span>
+                            <button class="button" disabled="@(Busy || token.Status == "revoked")" @onclick="() => RevokeTokenAsync(token.Id)">撤销</button>
+                        </div>
+                    }
+                    @if (HasMoreTokens)
+                    {
+                        <button class="button" disabled="@Busy" @onclick="LoadMoreTokensAsync">加载更多</button>
+                    }
+                </article>
+            }
+</div>
+
+@code {
+    private McpPersonalSettingsResponse? Personal;
+    private readonly List<UserTokenResponse> Tokens = [];
+    private bool Loading = true, Busy, Enabled, AllowCreate, HasMoreTokens, Copied;
+    private string Error = "";
+    private string? NewToken;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RunAsync(async () =>
+        {
+            Personal = await Api.GetMcpPersonalSettingsAsync();
+            Enabled = Personal.Enabled;
+            AllowCreate = Personal.AllowCreateWorkspace;
+            await RefreshTokensCoreAsync();
+        });
+        Loading = false;
+    }
+
+    private Task SavePersonalAsync() => RunAsync(async () =>
+    {
+        Personal = await Api.SetMcpPersonalSettingsAsync(new(Enabled, AllowCreate));
+    });
+    private Task CreateTokenAsync() => RunAsync(async () =>
+    {
+        NewToken = null;
+        Copied = false;
+        NewToken = await TokenClient.CreateAsync();
+        await RefreshTokensCoreAsync();
+    });
+    private async Task CopyTokenAsync()
+    {
+        if (NewToken is null) return;
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", NewToken); Copied = true; }
+        catch (JSException) { Error = "无法访问剪贴板，请手动选择并复制 Token。"; }
+    }
+    private Task RevokeTokenAsync(string tokenId) => RunAsync(async () =>
+    {
+        await Api.RevokeUserTokenAsync(tokenId);
+        await RefreshTokensCoreAsync();
+    });
+    private Task LoadMoreTokensAsync() => RunAsync(async () =>
+    {
+        var page = await Api.ListUserTokensAsync(Tokens.Count, 25);
+        Tokens.AddRange(page.Items);
+        HasMoreTokens = page.HasMore;
+    });
+    private async Task RefreshTokensCoreAsync()
+    {
+        var page = await Api.ListUserTokensAsync(0, 25);
+        Tokens.Clear();
+        Tokens.AddRange(page.Items);
+        HasMoreTokens = page.HasMore;
+    }
+    private async Task RunAsync(Func<Task> action)
+    {
+        Busy = true;
+        Error = "";
+        try { await action(); }
+        catch (ApiException ex) { Error = $"MCP 设置操作失败（HTTP {(int)ex.StatusCode}）。"; }
+        catch (HttpRequestException ex) { Error = $"MCP 请求失败：{ex.Message}"; }
+        catch (InvalidOperationException ex) { Error = ex.Message; }
+        finally { Busy = false; }
+    }
+}

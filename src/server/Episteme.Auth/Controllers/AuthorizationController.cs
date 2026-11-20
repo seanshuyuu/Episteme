@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Episteme.Domain.Identity;
 using Episteme.Infrastructure.Identity;
+using Episteme.Infrastructure.Persistence;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
@@ -8,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using OpenIddict.Abstractions;
 using OpenIddict.Server.AspNetCore;
+using OpenIddict.Validation.AspNetCore;
 using static OpenIddict.Abstractions.OpenIddictConstants;
 
 namespace Episteme.Auth.Controllers;
@@ -16,8 +19,12 @@ public sealed class AuthorizationController(
     UserManager<ApplicationUser> users,
     SignInManager<ApplicationUser> signInManager,
     IOpenIddictApplicationManager applications,
-    IOpenIddictAuthorizationManager authorizations) : Controller
+    IOpenIddictAuthorizationManager authorizations,
+    EpistemeDbContext db,
+    IConfiguration configuration) : Controller
 {
+    private const string TokenExchangeGrant = "urn:ietf:params:oauth:grant-type:token-exchange";
+    private const string AccessTokenType = "urn:ietf:params:oauth:token-type:access_token";
     [HttpGet("~/connect/authorize")]
     public async Task<IActionResult> AuthorizeRequest()
     {
@@ -89,6 +96,8 @@ public sealed class AuthorizationController(
     {
         var request = HttpContext.GetOpenIddictServerRequest()
             ?? throw new InvalidOperationException("Missing token request.");
+        if (request.GrantType == TokenExchangeGrant)
+            return await ExchangeMcpTokenAsync(request);
         if (!request.IsAuthorizationCodeGrantType() && !request.IsRefreshTokenGrantType())
             return OAuthError(Errors.UnsupportedGrantType, "The grant type is not supported.");
         var result = await HttpContext.AuthenticateAsync(OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
@@ -103,10 +112,50 @@ public sealed class AuthorizationController(
         var identity = new ClaimsIdentity(result.Principal!.Claims,
             TokenValidationParameters.DefaultAuthenticationType, Claims.Name, Claims.Role);
         identity.SetClaim(Claims.Subject, user.Id.ToString())
-            .SetClaim(Claims.Name, user.UserName)
+            .SetClaim(Claims.Name, user.DisplayName ?? user.UserName)
             .SetClaim(IdentityClaims.TokenGeneration, user.TokenGeneration.ToString("D"))
             .SetClaim(IdentityClaims.SecurityStampHash, stampHash)
-            .SetClaims(Claims.Role, [.. await users.GetRolesAsync(user)]);
+            .SetClaims(Claims.Role, [.. await users.GetRolesAsync(user)])
+            .SetClaim(Claims.Email, user.Email)
+            .SetClaim(Claims.PreferredUsername, user.DisplayName);
+        identity.SetDestinations(DestinationsForClaim);
+        return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
+    }
+
+    private async Task<IActionResult> ExchangeMcpTokenAsync(OpenIddictRequest request)
+    {
+        var subjectToken = (string?)request.GetParameter("subject_token");
+        var subjectTokenType = (string?)request.GetParameter("subject_token_type");
+        var audience = configuration["Authentication:McpAudience"];
+        if (request.ClientId != configuration["Authentication:Client:Id"] ||
+            string.IsNullOrEmpty(subjectToken) || subjectToken.Length > 16384 ||
+            subjectTokenType != AccessTokenType ||
+            request.GetResources().Length != 1 || request.GetResources()[0] != audience ||
+            Request.Headers.ContainsKey("Authorization"))
+            return OAuthError(Errors.InvalidRequest, "Invalid token exchange request.");
+
+        Request.Headers.Authorization = $"Bearer {subjectToken}";
+        var result = await HttpContext.AuthenticateAsync(OpenIddictValidationAspNetCoreDefaults.AuthenticationScheme);
+        Request.Headers.Remove("Authorization");
+        var principal = result.Principal;
+        if (!result.Succeeded || principal is null || !principal.HasScope("tokens.manage"))
+            return OAuthError(Errors.InvalidGrant, "The subject token is invalid or cannot manage tokens.");
+        var user = await users.FindByIdAsync(principal.GetClaim(Claims.Subject) ?? "");
+        var stampHash = user is null ? null : IdentityClaims.HashSecurityStamp(user.SecurityStamp);
+        if (user is null || user.Status != UserAccountStatus.Active || !await signInManager.CanSignInAsync(user) ||
+            stampHash is null || principal.GetClaim(IdentityClaims.SecurityStampHash) != stampHash ||
+            principal.GetClaim(IdentityClaims.TokenGeneration) != user.TokenGeneration.ToString("D") ||
+            !await db.McpUserSettings.AsNoTracking().AnyAsync(setting => setting.UserId == user.Id && setting.Enabled))
+            return OAuthError(Errors.InvalidGrant, "The user is no longer allowed to use MCP.");
+
+        var scopes = new[] { "workspaces.read", "workspaces.write", "workspaces.manage" }
+            .Where(principal.HasScope).ToArray();
+        if (scopes.Length == 0)
+            return OAuthError(Errors.InvalidGrant, "The subject token has no workspace permissions.");
+        var identity = await CreateIdentityAsync(user);
+        identity.SetScopes(scopes);
+        identity.SetResources(audience!);
+        identity.SetAccessTokenLifetime(TimeSpan.FromDays(30));
         identity.SetDestinations(DestinationsForClaim);
         return SignIn(new ClaimsPrincipal(identity), OpenIddictServerAspNetCoreDefaults.AuthenticationScheme);
     }
@@ -117,10 +166,14 @@ public sealed class AuthorizationController(
         var stampHash = IdentityClaims.HashSecurityStamp(user.SecurityStamp)
             ?? throw new InvalidOperationException("User security stamp is missing.");
         identity.SetClaim(Claims.Subject, user.Id.ToString())
-            .SetClaim(Claims.Name, user.UserName)
+            .SetClaim(Claims.Name, user.DisplayName ?? user.UserName)
             .SetClaim(IdentityClaims.TokenGeneration, user.TokenGeneration.ToString("D"))
             .SetClaim(IdentityClaims.SecurityStampHash, stampHash)
             .SetClaims(Claims.Role, [.. await users.GetRolesAsync(user)]);
+        if (!string.IsNullOrEmpty(user.Email))
+            identity.SetClaim(Claims.Email, user.Email);
+        if (!string.IsNullOrEmpty(user.DisplayName))
+            identity.SetClaim(Claims.PreferredUsername, user.DisplayName);
         return identity;
     }
 
@@ -132,6 +185,14 @@ public sealed class AuthorizationController(
             return claim.Subject!.HasScope(Scopes.Profile)
                 ? [Destinations.AccessToken, Destinations.IdentityToken]
                 : [Destinations.AccessToken];
+        if (claim.Type == Claims.Email)
+            return claim.Subject!.HasScope(Scopes.Email)
+                ? [Destinations.AccessToken, Destinations.IdentityToken]
+                : [];
+        if (claim.Type == Claims.PreferredUsername)
+            return claim.Subject!.HasScope(Scopes.Profile)
+                ? [Destinations.AccessToken, Destinations.IdentityToken]
+                : [];
         if (claim.Type == Claims.Role)
             return [Destinations.AccessToken];
         if (claim.Type is IdentityClaims.TokenGeneration or IdentityClaims.SecurityStampHash)

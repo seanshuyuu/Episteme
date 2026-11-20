@@ -3,5 +3,6 @@
     <ProjectReference Include="../Episteme.Infrastructure/Episteme.Infrastructure.csproj" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.UI" />
     <PackageReference Include="OpenIddict.Server.AspNetCore" />
+    <PackageReference Include="OpenIddict.Validation.ServerIntegration" />
   </ItemGroup>
 </Project>

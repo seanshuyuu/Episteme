@@ -434,10 +434,10 @@ public sealed class WorkspaceListingApiTests
             var history = await client.GetFromJsonAsync<HistoryResponse>($"{url}/documents/history?path=notes%2Fa.txt&limit=1");
             Assert.NotNull(history);
             Assert.Equal(rootResult.CommitId, history.HeadCommitId);
-            Assert.Equal(rootResult.CommitId, Assert.Single(history.Commits));
+            Assert.Equal(rootResult.CommitId, Assert.Single(history.Commits).CommitId);
             Assert.True(history.HasMore);
             var previous = await client.GetFromJsonAsync<HistoryResponse>($"{url}/documents/history?path=notes%2Fa.txt&limit=1&offset=1");
-            Assert.NotEqual(rootResult.CommitId, Assert.Single(previous!.Commits));
+            Assert.NotEqual(rootResult.CommitId, Assert.Single(previous!.Commits).CommitId);
             Assert.False(previous.HasMore);
             Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{url}/documents/history?path=notes%2Fa.txt&limit=101")).StatusCode);
             Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{url}/documents?path=..%2Fsecret")).StatusCode);
@@ -450,6 +450,10 @@ public sealed class WorkspaceListingApiTests
                 new { expectedHead = rootResult.CommitId, content = "denied" })).StatusCode);
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"{url}/documents?path=escape%2Fpasswd")).StatusCode);
             Assert.Equal(HttpStatusCode.UnprocessableEntity, (await client.GetAsync($"{url}/documents?path=binary")).StatusCode);
+            Assert.Equal(new byte[] { 0xff },
+                (await client.GetFromJsonAsync<BinaryDocumentResponse>($"{url}/documents/binary?path=binary"))!.Content);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, (await client.GetAsync($"{url}/documents/binary?path=escape")).StatusCode);
+            Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await client.GetAsync($"{url}/documents/binary?path=large.bin")).StatusCode);
             Assert.Equal(HttpStatusCode.UnprocessableEntity, (await client.GetAsync($"{url}/documents?path=notes")).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"{url}/documents?path=boundary.txt")).StatusCode);
             Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await client.GetAsync($"{url}/documents?path=large.bin")).StatusCode);
@@ -496,7 +500,9 @@ public sealed class WorkspaceListingApiTests
     private sealed record DirectoryResponse(string CommitId, List<ContentEntry> Entries);
     private sealed record ContentEntry(string Name, string Kind);
     private sealed record DocumentResponse(string CommitId, string Content);
-    private sealed record HistoryResponse(string HeadCommitId, IReadOnlyList<string> Commits, bool HasMore);
+    private sealed record BinaryDocumentResponse(string CommitId, byte[] Content);
+    private sealed record HistoryResponse(string HeadCommitId, IReadOnlyList<HistoryEntry> Commits, bool HasMore);
+    private sealed record HistoryEntry(string CommitId);
     [PostgresFact]
     public async Task Document_writes_are_authorized_versioned_and_restorable()
     {
@@ -588,7 +594,7 @@ public sealed class WorkspaceListingApiTests
             Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"{url}/documents/version?path=note.md&commitId={new string('a', 40)}")).StatusCode);
             var history = await client.GetFromJsonAsync<HistoryResponse>($"{url}/documents/history?path=note.md");
             Assert.Equal(5, history!.Commits.Count);
-            Assert.Equal(restored, history.Commits[0]);
+            Assert.Equal(restored, history.Commits[0].CommitId);
             var mkdir = await client.PutAsJsonAsync($"{url}/directories?path=folder", new { expectedHead = restored });
             Assert.Equal(HttpStatusCode.OK, mkdir.StatusCode);
             var dirHead = (await mkdir.Content.ReadFromJsonAsync<CommitResponse>())!.CommitId;
@@ -621,6 +627,27 @@ public sealed class WorkspaceListingApiTests
             using var emptyDelete = new HttpRequestMessage(HttpMethod.Delete, $"{url}/directories?path=empty")
             { Content = JsonContent.Create(new { expectedHead = emptyHead, recursive = false }) };
             Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(emptyDelete)).StatusCode);
+            var binaryHead = (await client.GetFromJsonAsync<DirectoryResponse>($"{url}/directories"))!.CommitId;
+            byte[] binary = [0, 0xff, 0x80, 0x41];
+            var uploaded = await client.PutAsJsonAsync($"{url}/documents/binary?path=raw.bin",
+                new { expectedHead = binaryHead, content = binary });
+            Assert.Equal(HttpStatusCode.OK, uploaded.StatusCode);
+            var uploadedHead = (await uploaded.Content.ReadFromJsonAsync<CommitResponse>())!.CommitId;
+            var downloaded = await client.GetFromJsonAsync<BinaryDocumentResponse>($"{url}/documents/binary?path=raw.bin");
+            Assert.Equal(uploadedHead, downloaded!.CommitId);
+            Assert.Equal(binary, downloaded.Content);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"{url}/documents/binary?path=raw.bin",
+                new { expectedHead = uploadedHead, content = new byte[] { 1 } })).StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PutAsJsonAsync($"{url}/documents/binary?path=other.bin",
+                new { expectedHead = binaryHead, content = binary })).StatusCode);
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync($"{url}/documents/binary?path=..%2Fsecret")).StatusCode);
+            client.DefaultRequestHeaders.Remove("X-Test-Subject");
+            client.DefaultRequestHeaders.Add("X-Test-Subject", reader.Id.ToString());
+            Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"{url}/documents/binary?path=raw.bin")).StatusCode);
+            await db.WorkspaceMembers.Where(m => m.WorkspaceId == id && m.UserId == reader.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(m => m.Role, WorkspaceRole.Reader));
+            Assert.Equal(HttpStatusCode.Forbidden, (await client.PutAsJsonAsync($"{url}/documents/binary?path=denied.bin",
+                new { expectedHead = uploadedHead, content = binary })).StatusCode);
         }
         finally
         {

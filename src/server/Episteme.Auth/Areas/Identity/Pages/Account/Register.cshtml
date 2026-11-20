@@ -1,0 +1,53 @@
+@page
+@model Microsoft.AspNetCore.Identity.UI.V5.Pages.Account.Internal.RegisterModel
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@{
+    Layout = null;
+    var returnUrl = Model.ReturnUrl ?? Request.Query["returnUrl"].ToString();
+}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>注册 - Episteme</title>
+    <link rel="stylesheet" href="~/css/auth-login.css" asp-append-version="true" />
+</head>
+<body>
+    <main class="login-shell">
+        <div class="login-container">
+            <header class="brand"><span class="brand-mark" aria-hidden="true">E</span><span>Episteme</span></header>
+            <div class="login-card">
+                @await Html.PartialAsync("/Areas/Identity/Pages/Account/_AuthIntro.cshtml")
+                <section class="login-panel" aria-labelledby="register-title">
+                    <div class="panel-heading">
+                        <span class="eyebrow">开始使用</span>
+                        <h2 id="register-title">注册 Episteme</h2>
+                        <p>创建账户，开始整理你的知识。</p>
+                    </div>
+                    <form method="post" asp-route-returnUrl="@returnUrl" class="login-form">
+                        <div asp-validation-summary="All" class="validation-summary" role="alert"></div>
+                        <div class="field">
+                            <label asp-for="Input.Email">邮箱地址</label>
+                            <input asp-for="Input.Email" autocomplete="username" placeholder="name@example.com" />
+                        </div>
+                        <div class="field">
+                            <label asp-for="Input.Password">密码</label>
+                            <input asp-for="Input.Password" autocomplete="new-password" placeholder="设置密码" />
+                        </div>
+                        <div class="field">
+                            <label asp-for="Input.ConfirmPassword">确认密码</label>
+                            <input asp-for="Input.ConfirmPassword" autocomplete="new-password" placeholder="再次输入密码" />
+                        </div>
+                        <button class="primary-button" type="submit">注册账户</button>
+                    </form>
+                    <div class="account-links">
+                        <span>已有账户？ <a asp-page="./Login" asp-route-returnUrl="@returnUrl">登录</a></span>
+                    </div>
+                </section>
+            </div>
+            <p class="footer">Episteme · 你的知识工作空间</p>
+        </div>
+    </main>
+</body>
+</html>

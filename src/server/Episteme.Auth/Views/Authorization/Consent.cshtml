@@ -1,23 +1,66 @@
 @using Microsoft.Extensions.Primitives
+@{
+    var scopes = (ViewData["Scope"] as string ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+}
 <!DOCTYPE html>
-<html lang="en">
-<head><meta charset="utf-8" /><title>Authorize application</title></head>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>授权应用 - Episteme</title>
+    <link rel="stylesheet" href="/css/auth-login.css" />
+</head>
 <body>
-<h1>Authorize application</h1>
-<p>Allow <strong>@ViewData["ClientName"]</strong> to access the requested scopes?</p>
-<p>@ViewData["Scope"]</p>
-<p>Resource: @ViewData["Resource"]</p>
-<form method="post" action="/connect/authorize">
-    @Html.AntiForgeryToken()
-    @foreach (KeyValuePair<string, StringValues> parameter in Context.Request.Query)
-    {
-        @foreach (var value in parameter.Value)
-        {
-            <input type="hidden" name="@parameter.Key" value="@value" />
-        }
-    }
-    <button type="submit" name="decision" value="accept">Allow</button>
-    <button type="submit" name="decision" value="deny">Deny</button>
-</form>
+    <main class="login-shell">
+        <div class="login-container">
+            <header class="brand"><span class="brand-mark" aria-hidden="true">E</span><span>Episteme</span></header>
+            <div class="login-card">
+                @await Html.PartialAsync("/Areas/Identity/Pages/Account/_AuthIntro.cshtml")
+                <section class="login-panel" aria-labelledby="consent-title">
+                    <div class="panel-heading">
+                        <span class="eyebrow">账户授权</span>
+                        <h2 id="consent-title">授权应用访问</h2>
+                        <p><strong>@ViewData["ClientName"]</strong> 请求以下权限：</p>
+                    </div>
+                    <ul class="consent-scopes">
+                        @foreach (var scope in scopes)
+                        {
+                            <li>
+                                @(scope switch
+                                {
+                                    "openid" => "验证账户身份",
+                                    "profile" => "读取基本账户信息",
+                                    "email" => "读取邮箱信息",
+                                    "roles" => "读取账户角色",
+                                    "offline_access" => "保持访问权限并刷新令牌",
+                                    "workspaces.read" => "读取工作空间和文档",
+                                    "workspaces.write" => "修改工作空间和文档",
+                                    "workspaces.manage" => "管理工作空间",
+                                    "tokens.manage" => "管理访问令牌",
+                                    "users.manage" => "管理用户账户",
+                                    _ => scope
+                                })
+                                <small>@scope</small>
+                            </li>
+                        }
+                    </ul>
+                    <p class="consent-resource">访问资源：<span>@ViewData["Resource"]</span></p>
+                    <form class="consent-actions" method="post" action="/connect/authorize">
+                        @Html.AntiForgeryToken()
+                        @foreach (KeyValuePair<string, StringValues> parameter in Context.Request.Query)
+                        {
+                            @foreach (var value in parameter.Value)
+                            {
+                                <input type="hidden" name="@parameter.Key" value="@value" />
+                            }
+                        }
+                        <button class="primary-button" type="submit" name="decision" value="accept">允许访问</button>
+                        <button class="external-button" type="submit" name="decision" value="deny">拒绝</button>
+                    </form>
+                </section>
+            </div>
+            <p class="footer">Episteme · 你的知识工作空间</p>
+        </div>
+    </main>
 </body>
 </html>

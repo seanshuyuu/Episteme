@@ -17,19 +17,24 @@ public sealed record WorkspaceContentEntry(string Name, string Kind);
 public sealed record WorkspaceDirectoryResult(
     string? CommitId, IReadOnlyList<WorkspaceContentEntry>? Entries, WorkspaceContentFailure? Failure);
 public sealed record WorkspaceDocumentResult(string? CommitId, string? Content, WorkspaceContentFailure? Failure);
+public sealed record WorkspaceBinaryDocumentResult(string? CommitId, byte[]? Content, WorkspaceContentFailure? Failure);
+public sealed record WorkspaceHistoryEntry(
+    string CommitId, string Message, string AuthorName, DateTimeOffset CreatedAt);
 public sealed record WorkspaceHistoryResult(
-    string? HeadCommitId, IReadOnlyList<string>? Commits, bool HasMore, WorkspaceContentFailure? Failure);
+    string? HeadCommitId, IReadOnlyList<WorkspaceHistoryEntry>? Commits, bool HasMore, WorkspaceContentFailure? Failure);
 public sealed record WorkspaceWriteResult(string? CommitId, WorkspaceContentFailure? Failure);
-public enum WorkspaceWriteOperation { Put, Delete, Restore, MoveDocument, CreateDirectory, DeleteDirectory, MoveDirectory }
+public enum WorkspaceWriteOperation { Put, Delete, Restore, MoveDocument, CreateDirectory, DeleteDirectory, MoveDirectory, PutBinary }
 public sealed record WorkspaceWriteCommand(
     Guid WorkspaceId, WorkspaceActor Actor, string Path, string ExpectedHead,
     WorkspaceWriteOperation Operation, string? Content = null, string? SourceCommit = null,
-    string? DestinationPath = null, bool Recursive = false);
+    string? DestinationPath = null, bool Recursive = false, byte[]? BinaryContent = null,
+    string? Comment = null);
 
 public interface IWorkspaceContentRepository
 {
     Task<WorkspaceDirectoryResult> ListAsync(Guid workspaceId, WorkspaceActor actor, string path, CancellationToken cancellationToken);
     Task<WorkspaceDocumentResult> ReadAsync(Guid workspaceId, WorkspaceActor actor, string path, CancellationToken cancellationToken);
+    Task<WorkspaceBinaryDocumentResult> ReadBinaryAsync(Guid workspaceId, WorkspaceActor actor, string path, CancellationToken cancellationToken);
     Task<WorkspaceDocumentResult> ReadVersionAsync(Guid workspaceId, WorkspaceActor actor, string path, string commitId, CancellationToken cancellationToken);
     Task<WorkspaceHistoryResult> HistoryAsync(Guid workspaceId, WorkspaceActor actor, string path, int offset, int limit, CancellationToken cancellationToken);
     Task<WorkspaceWriteResult> WriteAsync(WorkspaceWriteCommand command, CancellationToken cancellationToken);
@@ -56,6 +61,15 @@ public sealed class WorkspaceContentService(IWorkspaceContentRepository reposito
         if (workspaceId == Guid.Empty || string.IsNullOrEmpty(path) || !UserWorkspaceSettings.IsValidDirectory(path))
             return Task.FromResult(new WorkspaceDocumentResult(null, null, WorkspaceContentFailure.InvalidInput));
         return repository.ReadAsync(workspaceId, actor, path, cancellationToken);
+    }
+
+    public Task<WorkspaceBinaryDocumentResult> ReadBinaryAsync(Guid workspaceId, WorkspaceActor actor, string path, CancellationToken cancellationToken)
+    {
+        if (!Authorized(actor))
+            return Task.FromResult(new WorkspaceBinaryDocumentResult(null, null, WorkspaceContentFailure.Unauthorized));
+        if (workspaceId == Guid.Empty || string.IsNullOrEmpty(path) || !UserWorkspaceSettings.IsValidDirectory(path))
+            return Task.FromResult(new WorkspaceBinaryDocumentResult(null, null, WorkspaceContentFailure.InvalidInput));
+        return repository.ReadBinaryAsync(workspaceId, actor, path, cancellationToken);
     }
 
     public Task<WorkspaceDocumentResult> ReadVersionAsync(
@@ -94,7 +108,10 @@ public sealed class WorkspaceContentService(IWorkspaceContentRepository reposito
             (command.Operation == WorkspaceWriteOperation.CreateDirectory &&
                 !UserWorkspaceSettings.IsValidDirectory(command.Path + "/.gitkeep")) ||
             (command.Operation == WorkspaceWriteOperation.Put && (command.Content is null || command.Content.Contains('\0'))) ||
-            (command.Operation == WorkspaceWriteOperation.Restore && !IsObjectId(command.SourceCommit)))
+            (command.Operation == WorkspaceWriteOperation.PutBinary && command.BinaryContent is null) ||
+            (command.Operation == WorkspaceWriteOperation.Restore && !IsObjectId(command.SourceCommit)) ||
+            (command.Comment?.Length > 2000) ||
+            (command.Comment?.Contains('\0') == true))
             return Task.FromResult(new WorkspaceWriteResult(null, WorkspaceContentFailure.InvalidInput));
         if (command.Operation == WorkspaceWriteOperation.Put)
         {
@@ -108,6 +125,8 @@ public sealed class WorkspaceContentService(IWorkspaceContentRepository reposito
                 return Task.FromResult(new WorkspaceWriteResult(null, WorkspaceContentFailure.InvalidInput));
             }
         }
+        if (command.Operation == WorkspaceWriteOperation.PutBinary && command.BinaryContent!.Length > 1024 * 1024)
+            return Task.FromResult(new WorkspaceWriteResult(null, WorkspaceContentFailure.TooLarge));
         return repository.WriteAsync(command, cancellationToken);
     }
 

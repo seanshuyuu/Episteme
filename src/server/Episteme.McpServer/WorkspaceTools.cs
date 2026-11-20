@@ -24,7 +24,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ListAsync(new(actor!.UserId, actor.Scopes, actor.IsSystemAdministrator, offset, limit), cancellationToken);
+        var result = await service.ListAsync(new(actor!.UserId, actor.Scopes, actor.IsSystemAdministrator, offset, limit, IsMcp: true), cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -35,7 +35,7 @@ public sealed class WorkspaceTools
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
         var result = await service.AuthorizeAsync(new(workspaceId, actor!.UserId, actor.Scopes,
-            actor.IsSystemAdministrator, WorkspacePermission.Read), cancellationToken);
+            actor.IsSystemAdministrator, WorkspacePermission.Read, IsMcp: true), cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Workspace);
     }
 
@@ -46,7 +46,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.CreateAsync(new(actor!, name, slug, type, description), cancellationToken);
+        var result = await service.CreateAsync(new(actor! with { IsMcp = true }, name, slug, type, description), cancellationToken);
         return CreationResult(result);
     }
 
@@ -57,7 +57,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ListPendingAsync(actor!, offset, limit, cancellationToken);
+        var result = await service.ListPendingAsync(actor! with { IsMcp = true }, offset, limit, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -67,7 +67,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        return CreationResult(await service.RetryAsync(workspaceId, actor!, cancellationToken));
+        return CreationResult(await service.RetryAsync(workspaceId, actor! with { IsMcp = true }, cancellationToken));
     }
 
     [McpServerTool(Name = "update_workspace"), Description("Update workspace metadata using its expected concurrency version.")]
@@ -77,7 +77,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.UpdateAsync(new(workspaceId, actor!, expectedVersion, name, type, description), cancellationToken);
+        var result = await service.UpdateAsync(new(workspaceId, actor! with { IsMcp = true }, expectedVersion, name, type, description), cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Workspace);
     }
 
@@ -88,7 +88,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ArchiveAsync(workspaceId, actor!, expectedVersion, cancellationToken);
+        var result = await service.ArchiveAsync(workspaceId, actor! with { IsMcp = true }, expectedVersion, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(new { archived = true });
     }
 
@@ -98,7 +98,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ListAsync(workspaceId, actor!, offset, limit, cancellationToken);
+        var result = await service.ListAsync(workspaceId, actor! with { IsMcp = true }, offset, limit, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -108,7 +108,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.SetAsync(workspaceId, memberId, role, actor!, cancellationToken);
+        var result = await service.SetAsync(workspaceId, memberId, role, actor! with { IsMcp = true }, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Member);
     }
 
@@ -118,8 +118,48 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.RemoveAsync(workspaceId, memberId, actor!, cancellationToken);
+        var result = await service.RemoveAsync(workspaceId, memberId, actor! with { IsMcp = true }, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(new { removed = true });
+    }
+
+    [McpServerTool(Name = "list_projects"), Description("List projects in a workspace.")]
+    public static async Task<CallToolResult> ListProjects(Guid workspaceId, ClaimsPrincipal principal,
+        IMcpProjectService service, int offset = 0, int limit = 25, CancellationToken cancellationToken = default)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
+            return Error("Unauthenticated");
+        var result = await service.ListAsync(workspaceId, actor! with { IsMcp = true }, offset, limit, cancellationToken);
+        return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
+    }
+
+    [McpServerTool(Name = "create_project"), Description("Create a project in a workspace.")]
+    public static async Task<CallToolResult> CreateProject(Guid workspaceId, string name, string slug,
+        ClaimsPrincipal principal, IMcpProjectService service, string? description = null, CancellationToken cancellationToken = default)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
+            return Error("Unauthenticated");
+        var result = await service.CreateAsync(new(workspaceId, actor! with { IsMcp = true }, name, slug, description), cancellationToken);
+        return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Project);
+    }
+
+    [McpServerTool(Name = "update_project"), Description("Update a project using its expected concurrency version.")]
+    public static async Task<CallToolResult> UpdateProject(Guid projectId, Guid expectedVersion, string name, string slug,
+        ClaimsPrincipal principal, IMcpProjectService service, string? description = null, CancellationToken cancellationToken = default)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
+            return Error("Unauthenticated");
+        var result = await service.UpdateAsync(new(projectId, actor! with { IsMcp = true }, expectedVersion, name, slug, description), cancellationToken);
+        return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Project);
+    }
+
+    [McpServerTool(Name = "delete_project"), Description("Discard a project using its expected concurrency version.")]
+    public static async Task<CallToolResult> DeleteProject(Guid projectId, Guid expectedVersion,
+        ClaimsPrincipal principal, IMcpProjectService service, CancellationToken cancellationToken)
+    {
+        if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
+            return Error("Unauthenticated");
+        var result = await service.DeleteAsync(projectId, actor! with { IsMcp = true }, expectedVersion, cancellationToken);
+        return result.Failure is { } failure ? Error(failure.ToString()) : Success(new { deleted = true });
     }
 
     [McpServerTool(Name = "get_workspace_settings"), Description("Get the authenticated user's logical default working directory.")]
@@ -128,7 +168,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.GetAsync(actor!.UserId, actor.Scopes, cancellationToken);
+        var result = await service.GetMcpAsync(actor!.UserId, actor.Scopes, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -138,7 +178,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.SetAsync(actor!.UserId, actor.Scopes, directory, cancellationToken);
+        var result = await service.SetMcpAsync(actor!.UserId, actor.Scopes, directory, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -148,7 +188,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ListAsync(workspaceId, actor!, path, cancellationToken);
+        var result = await service.ListAsync(workspaceId, actor! with { IsMcp = true }, path, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -158,7 +198,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ReadAsync(workspaceId, actor!, path, cancellationToken);
+        var result = await service.ReadAsync(workspaceId, actor! with { IsMcp = true }, path, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -168,7 +208,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ReadVersionAsync(workspaceId, actor!, path, commitId, cancellationToken);
+        var result = await service.ReadVersionAsync(workspaceId, actor! with { IsMcp = true }, path, commitId, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -179,7 +219,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.HistoryAsync(workspaceId, actor!, path, offset, limit, cancellationToken);
+        var result = await service.HistoryAsync(workspaceId, actor! with { IsMcp = true }, path, offset, limit, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }
 
@@ -224,7 +264,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.ExportAsync(workspaceId, actor!, cancellationToken, formatVersion);
+        var result = await service.ExportAsync(workspaceId, actor! with { IsMcp = true }, cancellationToken, formatVersion);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result.Manifest);
     }
 
@@ -235,7 +275,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.SetConfigurationAsync(workspaceId, actor!, expectedVersion, configuration, cancellationToken);
+        var result = await service.SetConfigurationAsync(workspaceId, actor! with { IsMcp = true }, expectedVersion, configuration, cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString())
             : Success(new { configuration, concurrencyStamp = result.Workspace!.ConcurrencyStamp });
     }
@@ -246,7 +286,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        return CreationResult(await service.ImportAsync(actor!, slug, manifest, cancellationToken));
+        return CreationResult(await service.ImportAsync(actor! with { IsMcp = true }, slug, manifest, cancellationToken));
     }
 
     private static async Task<CallToolResult> Write(Guid workspaceId, string path, string expectedHead,
@@ -256,7 +296,7 @@ public sealed class WorkspaceTools
     {
         if (!WorkspaceActorClaims.TryGetActor(principal, out var actor))
             return Error("Unauthenticated");
-        var result = await service.WriteAsync(new(workspaceId, actor!, path, expectedHead, operation,
+        var result = await service.WriteAsync(new(workspaceId, actor! with { IsMcp = true }, path, expectedHead, operation,
             content, sourceCommit, destinationPath, recursive), cancellationToken);
         return result.Failure is { } failure ? Error(failure.ToString()) : Success(result);
     }

@@ -27,9 +27,12 @@ builder.Services.AddRazorComponents().AddInteractiveServerComponents();
 builder.Services.AddMudServices();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
+builder.Services.AddHttpClient("mcp-token").ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    { AllowAutoRedirect = false });
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAuthorization();
 builder.Services.AddScoped<SessionTokenProvider>();
+builder.Services.AddScoped<McpTokenClient>();
 builder.Services.AddScoped<ThemeService>();
 builder.Services.AddScoped<WebCookieAuthenticationEvents>();
 builder.Services.AddScoped(provider => new HttpClient(new ApiTokenHandler(provider.GetRequiredService<SessionTokenProvider>())

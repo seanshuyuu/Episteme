@@ -33,11 +33,14 @@ public sealed class McpProgram
             (!builder.Environment.IsDevelopment() &&
                 (authorityUri.Scheme != Uri.UriSchemeHttps || resourceUri.Scheme != Uri.UriSchemeHttps)))
             throw new InvalidOperationException("Authentication:Authority must be an absolute issuer URL and Authentication:Audience must be the absolute /mcp URL; HTTPS is required in production.");
-        var requireTokenEntry = builder.Configuration.GetValue<bool>("Authentication:RequireTokenEntryValidation");
+        var requireTokenEntry = builder.Configuration.GetValue("Authentication:RequireTokenEntryValidation", true);
+        if (!requireTokenEntry && !builder.Environment.IsDevelopment())
+            throw new InvalidOperationException("MCP token entry validation is required outside development.");
         if (requireTokenEntry)
         {
-            if (authorityUri.Scheme != Uri.UriSchemeHttps || resourceUri.Scheme != Uri.UriSchemeHttps)
-                throw new InvalidOperationException("Token entry validation requires an HTTPS authority and audience.");
+            if (!builder.Environment.IsDevelopment() &&
+                (authorityUri.Scheme != Uri.UriSchemeHttps || resourceUri.Scheme != Uri.UriSchemeHttps))
+                throw new InvalidOperationException("Token entry validation requires an HTTPS authority and audience outside development.");
             builder.Services.AddEpistemeTokenEntryValidation(authority!, resource!);
         }
         var authentication = builder.Services.AddAuthentication(options =>

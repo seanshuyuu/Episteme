@@ -1,0 +1,184 @@
+@inject IEpistemeApi Api
+
+<div class="card settings-section">
+    <div class="settings-section-head">
+        <h3>MCP 访问</h3>
+        <p class="muted">空间开关、本人权限和成员授权同时生效；默认不允许访问。此处修改需点击对话框底部的「保存设置」才会提交。</p>
+    </div>
+
+    <div class="setting-row">
+        <div><strong>空间 MCP 开关</strong><p class="muted">关闭后所有 MCP 请求都无法访问此空间。</p></div>
+        <div class="setting-control">
+            @if (Draft.IsOwner)
+            {
+                <label class="switch-option @(Draft.McpEnabled ? "checked" : "")">
+                    <input type="checkbox" checked="@Draft.McpEnabled" disabled="@Disabled"
+                           @onchange="SetMcpEnabled" />
+                    <span><strong>@(Draft.McpEnabled ? "允许 MCP 访问" : "禁止 MCP 访问")</strong><small class="muted">仅空间所有者可修改。</small></span>
+                </label>
+            }
+            else
+            {
+                <span class="badge @(Draft.McpEnabled ? "success" : "")">@(Draft.McpEnabled ? "已启用" : "已关闭")</span>
+                <small class="muted">仅空间所有者可修改。</small>
+            }
+        </div>
+    </div>
+
+    <div class="setting-row">
+        <div><strong>我的 MCP 权限</strong><p class="muted">勾选本人允许 MCP 执行的操作。共享成员还受角色上限与所有者授权约束，灰色项不可选。</p></div>
+        <div class="setting-control">
+            @foreach (var group in PermissionGroups)
+            {
+                <div class="permission-group">
+                    <h4>@group.Title</h4>
+                    <div class="permission-grid">
+                        @foreach (var option in group.Items)
+                        {
+                            <label class="permission-option @(Draft.PersonalPermissions.Contains(option.Name) ? "checked" : "")">
+                                <input type="checkbox" checked="@Draft.PersonalPermissions.Contains(option.Name)"
+                                       disabled="@(!Draft.CanSelectPersonal(option.Name) || Disabled)"
+                                       @onchange="args => SetPermission(Draft.PersonalPermissions, option.Name, args)" />
+                                <span><strong>@option.Label</strong><small class="muted">@option.Hint</small></span>
+                            </label>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (Draft.IsOwner)
+    {
+        <div class="setting-row">
+            <div><strong>共享成员授权</strong><p class="muted">设置单个成员可使用的 MCP 操作上限；成员本人仍需勾选自己的权限。可依次修改多名成员，最后一起保存。</p></div>
+            <div class="setting-control">
+                @if (!string.IsNullOrWhiteSpace(Draft.McpMembersError))
+                {
+                    <p class="error" role="alert">@Draft.McpMembersError</p>
+                }
+                else
+                {
+                    <label class="field">
+                        <span>选择成员</span>
+                        <select value="@Draft.SelectedMember" @onchange="SelectMemberAsync" disabled="@Disabled" aria-label="选择共享成员">
+                            <option value="">选择成员</option>
+                            @foreach (var member in Draft.Members.Where(member => member.Role != "Owner"))
+                            {
+                                <option value="@member.UserId">@member.UserId · @RoleLabel(member.Role)</option>
+                            }
+                        </select>
+                    </label>
+                    @if (!string.IsNullOrWhiteSpace(MemberError))
+                    {
+                        <p class="error" role="alert">@MemberError</p>
+                    }
+                    else if (MemberLoading)
+                    {
+                        <p class="muted">正在读取成员授权…</p>
+                    }
+                    else if (Draft.SelectedMemberId is { } memberId && Draft.GrantLoaded(memberId))
+                    {
+                        @foreach (var group in PermissionGroups)
+                        {
+                            <div class="permission-group">
+                                <h4>@group.Title</h4>
+                                <div class="permission-grid">
+                                    @foreach (var option in group.Items)
+                                    {
+                                        <label class="permission-option @(Draft.GrantDraft(memberId).Contains(option.Name) ? "checked" : "")">
+                                            <input type="checkbox" checked="@Draft.GrantDraft(memberId).Contains(option.Name)"
+                                                   disabled="@(!Draft.CanGrantFor(memberId, option.Name) || Disabled)"
+                                                   @onchange="args => SetPermission(Draft.GrantDraft(memberId), option.Name, args)" />
+                                            <span><strong>@option.Label</strong><small class="muted">@option.Hint</small></span>
+                                        </label>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                    else if (Draft.SelectedMemberId is not null)
+                    {
+                        <p class="muted">选择成员后可编辑其授权。</p>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public WorkspaceSettingsDraft Draft { get; set; } = default!;
+    [Parameter, EditorRequired] public Guid WorkspaceId { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    private sealed record PermissionOption(string Name, string Label, string Hint);
+    private sealed record PermissionGroup(string Title, PermissionOption[] Items);
+
+    private static readonly PermissionGroup[] PermissionGroups =
+    [
+        new("空间", [
+            new("ReadWorkspace", "查看空间", "读取空间元数据"),
+            new("UpdateWorkspace", "修改空间", "更新名称与描述"),
+            new("ArchiveWorkspace", "归档空间", "归档整个空间")
+        ]),
+        new("项目", [
+            new("ReadProject", "查看项目", "读取项目列表"),
+            new("CreateProject", "创建项目", "新建项目"),
+            new("UpdateProject", "修改项目", "更新项目信息"),
+            new("DeleteProject", "删除项目", "废弃项目")
+        ]),
+        new("文档", [
+            new("ReadDocument", "查看文档", "读取文档内容"),
+            new("CreateDocument", "创建文档", "新建文档"),
+            new("UpdateDocument", "修改文档", "编辑并提交"),
+            new("DeleteDocument", "删除文档", "删除文档")
+        ])
+    ];
+
+    private bool MemberLoading;
+    private string MemberError = "";
+
+    private void SetMcpEnabled(ChangeEventArgs args) => Draft.McpEnabled = args.Value is true;
+
+    private async Task SelectMemberAsync(ChangeEventArgs args)
+    {
+        Draft.SelectedMember = args.Value?.ToString() ?? "";
+        MemberError = "";
+        if (Draft.SelectedMemberId is not { } memberId || Draft.GrantLoaded(memberId))
+            return;
+        MemberLoading = true;
+        try
+        {
+            var grant = await Api.GetMcpMemberGrantAsync(WorkspaceId, memberId);
+            Draft.SetGrantOriginal(memberId, grant.Permissions);
+        }
+        catch (ApiException exception)
+        {
+            MemberError = $"读取成员授权失败（HTTP {(int)exception.StatusCode}）。";
+            Draft.SelectedMember = "";
+        }
+        catch (HttpRequestException)
+        {
+            MemberError = "无法连接到 Episteme API，请稍后重试。";
+            Draft.SelectedMember = "";
+        }
+        finally
+        {
+            MemberLoading = false;
+        }
+    }
+
+    private static void SetPermission(HashSet<string> set, string name, ChangeEventArgs args)
+    {
+        if (args.Value is true) set.Add(name); else set.Remove(name);
+    }
+
+    private static string RoleLabel(string? role) => role switch
+    {
+        "Owner" => "Owner",
+        "Editor" => "读写 · Editor",
+        "Reader" => "只读 · Reader",
+        _ => "权限未提供"
+    };
+}

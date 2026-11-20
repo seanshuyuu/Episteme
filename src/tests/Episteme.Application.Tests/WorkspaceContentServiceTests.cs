@@ -18,6 +18,8 @@ public sealed class WorkspaceContentServiceTests
         Assert.Equal(WorkspaceContentFailure.InvalidInput,
             (await service.ReadAsync(Guid.NewGuid(), actor, path, default)).Failure);
         Assert.Equal(WorkspaceContentFailure.InvalidInput,
+            (await service.ReadBinaryAsync(Guid.NewGuid(), actor, path, default)).Failure);
+        Assert.Equal(WorkspaceContentFailure.InvalidInput,
             (await service.ListAsync(Guid.NewGuid(), actor, path, default)).Failure);
         Assert.Equal(WorkspaceContentFailure.InvalidInput,
             (await service.HistoryAsync(Guid.NewGuid(), actor, path, 0, 25, default)).Failure);
@@ -34,6 +36,8 @@ public sealed class WorkspaceContentServiceTests
             (await service.ListAsync(Guid.NewGuid(), actor, "", default)).Failure);
         Assert.Equal(WorkspaceContentFailure.Unauthorized,
             (await service.ReadAsync(Guid.NewGuid(), actor, "a", default)).Failure);
+        Assert.Equal(WorkspaceContentFailure.Unauthorized,
+            (await service.ReadBinaryAsync(Guid.NewGuid(), actor, "a", default)).Failure);
         Assert.Equal(WorkspaceContentFailure.Unauthorized,
             (await service.HistoryAsync(Guid.NewGuid(), actor, "a", 0, 25, default)).Failure);
         Assert.Equal(0, repository.Calls);
@@ -67,6 +71,21 @@ public sealed class WorkspaceContentServiceTests
         Assert.Equal(1, repository.Calls);
     }
 
+    [Fact]
+    public async Task Binary_upload_enforces_scope_and_size_limit()
+    {
+        var repository = new FakeRepository();
+        var service = new WorkspaceContentService(repository);
+        var actor = new WorkspaceActor(Guid.NewGuid(), new HashSet<string> { "workspaces.write" }, false);
+        var command = new WorkspaceWriteCommand(Guid.NewGuid(), actor, "file.bin", new string('a', 40),
+            WorkspaceWriteOperation.PutBinary, BinaryContent: new byte[1024 * 1024 + 1]);
+        Assert.Equal(WorkspaceContentFailure.TooLarge, (await service.WriteAsync(command, default)).Failure);
+        Assert.Equal(WorkspaceContentFailure.InvalidInput, (await service.WriteAsync(command with { BinaryContent = null }, default)).Failure);
+        Assert.Equal(0, repository.Calls);
+        Assert.Null((await service.WriteAsync(command with { BinaryContent = new byte[1024 * 1024] }, default)).Failure);
+        Assert.Equal(1, repository.Calls);
+    }
+
     private sealed class FakeRepository : IWorkspaceContentRepository
     {
         public int Calls { get; private set; }
@@ -80,6 +99,12 @@ public sealed class WorkspaceContentServiceTests
         {
             Calls++;
             return Task.FromResult(new WorkspaceDocumentResult("commit", "", null));
+        }
+
+        public Task<WorkspaceBinaryDocumentResult> ReadBinaryAsync(Guid workspaceId, WorkspaceActor actor, string path, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(new WorkspaceBinaryDocumentResult("commit", [], null));
         }
 
         public Task<WorkspaceDocumentResult> ReadVersionAsync(Guid workspaceId, WorkspaceActor actor, string path, string commitId, CancellationToken cancellationToken)

@@ -10,17 +10,17 @@ public sealed class EfWorkspaceManagementRepository(EpistemeDbContext dbContext)
     public Task<WorkspaceManagementResult> UpdateAsync(UpdateWorkspaceCommand command, CancellationToken cancellationToken) =>
         ChangeAsync(command.WorkspaceId, command.Actor, command.ExpectedVersion,
             workspace => workspace.UpdateDetails(command.Name, command.Type, command.Description),
-            "workspace.updated", cancellationToken);
+            "workspace.updated", McpPermission.UpdateWorkspace, cancellationToken);
 
     public Task<WorkspaceManagementResult> ArchiveAsync(
         Guid workspaceId, WorkspaceActor actor, Guid expectedVersion, CancellationToken cancellationToken) =>
         ChangeAsync(workspaceId, actor, expectedVersion, workspace => workspace.Archive(),
-            "workspace.archived", cancellationToken);
+            "workspace.archived", McpPermission.ArchiveWorkspace, cancellationToken);
 
     public Task<WorkspaceManagementResult> SetConfigurationAsync(
         Guid workspaceId, WorkspaceActor actor, Guid expectedVersion, WorkspaceConfiguration configuration, CancellationToken cancellationToken) =>
         ChangeAsync(workspaceId, actor, expectedVersion, workspace => workspace.SetConfiguration(configuration),
-            "workspace.configuration.updated", cancellationToken);
+            "workspace.configuration.updated", McpPermission.UpdateWorkspace, cancellationToken);
 
     private async Task<WorkspaceManagementResult> ChangeAsync(
         Guid workspaceId,
@@ -28,6 +28,7 @@ public sealed class EfWorkspaceManagementRepository(EpistemeDbContext dbContext)
         Guid expectedVersion,
         Action<Workspace> change,
         string eventType,
+        McpPermission mcpPermission,
         CancellationToken cancellationToken)
     {
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
@@ -46,7 +47,7 @@ public sealed class EfWorkspaceManagementRepository(EpistemeDbContext dbContext)
         if (user is null || user.Status != UserAccountStatus.Active)
             return new(null, WorkspaceManagementFailure.Unauthorized);
 
-        if (!actor.IsSystemAdministrator)
+        if (!actor.IsSystemAdministrator || actor.IsMcp)
         {
             var isOwner = await dbContext.WorkspaceMembers.AnyAsync(member =>
                 member.WorkspaceId == workspaceId && member.UserId == actor.UserId &&
@@ -55,6 +56,10 @@ public sealed class EfWorkspaceManagementRepository(EpistemeDbContext dbContext)
             if (!isOwner)
                 return new(null, WorkspaceManagementFailure.Unauthorized);
         }
+
+        if (actor.IsMcp && ((await EfMcpAuthorization.WorkspacePermissionsAsync(
+                dbContext, workspaceId, actor.UserId, cancellationToken)) & mcpPermission) != mcpPermission)
+            return new(null, WorkspaceManagementFailure.Unauthorized);
 
         if (workspace.ConcurrencyStamp != expectedVersion)
             return new(null, WorkspaceManagementFailure.Conflict);

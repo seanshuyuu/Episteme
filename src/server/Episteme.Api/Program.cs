@@ -20,7 +20,9 @@ builder.Services.AddScoped<IWorkspaceManifestService, WorkspaceManifestService>(
 builder.Services.AddScoped<IUserWorkspaceSettingsService, UserWorkspaceSettingsService>();
 builder.Services.AddScoped<IUserTokenService, UserTokenService>();
 builder.Services.AddScoped<IUserAuthorizationService, UserAuthorizationService>();
-builder.Services.AddScoped<IUserAdministrationService, UserAdministrationService>();
+        builder.Services.AddScoped<IUserAdministrationService, UserAdministrationService>();
+        builder.Services.AddScoped<IUserProfileService, UserProfileService>();
+        builder.Services.AddScoped<IMcpSettingsService, McpSettingsService>();
 
 var requireTokenEntry = builder.Configuration.GetValue<bool>("Authentication:RequireTokenEntryValidation");
 if (requireTokenEntry)

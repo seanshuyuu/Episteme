@@ -63,6 +63,46 @@ Authorization: Bearer {{accessToken}}
 DELETE {{Episteme.Api_HostAddress}}/api/v1/me/tokens/{{tokenId}}
 Authorization: Bearer {{accessToken}}
 
+### MCP settings are persisted but are not yet enforced by the MCP server
+GET {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/personal
+Authorization: Bearer {{accessToken}}
+
+###
+PUT {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/personal
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "enabled": false, "allowCreateWorkspace": false }
+
+###
+GET {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/workspaces/{{workspaceId}}
+Authorization: Bearer {{accessToken}}
+
+###
+PUT {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/workspaces/{{workspaceId}}/personal
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "permissions": ["ReadWorkspace", "ReadDocument"] }
+
+###
+PUT {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/workspaces/{{workspaceId}}/enabled
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "enabled": false }
+
+###
+GET {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/workspaces/{{workspaceId}}/members/{{memberId}}
+Authorization: Bearer {{accessToken}}
+
+###
+PUT {{Episteme.Api_HostAddress}}/api/v1/mcp/settings/workspaces/{{workspaceId}}/members/{{memberId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "permissions": ["ReadWorkspace", "ReadDocument"] }
+
 ### List the caller's OAuth authorizations
 GET {{Episteme.Api_HostAddress}}/api/v1/me/authorizations?offset=0&limit=25
 Authorization: Bearer {{accessToken}}
@@ -191,6 +231,17 @@ Authorization: Bearer {{accessToken}}
 
 ### Read a committed UTF-8 document
 GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents?path=notes%2Fexample.md
+Authorization: Bearer {{accessToken}}
+
+### Upload a new binary document (content is base64, maximum 1 MiB decoded)
+PUT {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/binary?path=example.bin
+Content-Type: application/json
+Authorization: Bearer {{accessToken}}
+
+{ "expectedHead": "{{headCommit}}", "content": "AP+AQQ==" }
+
+### Download original bytes and observed commit as JSON with base64 content
+GET {{Episteme.Api_HostAddress}}/api/v1/workspaces/{{workspaceId}}/documents/binary?path=example.bin
 Authorization: Bearer {{accessToken}}
 
 ### Invalid traversal is rejected

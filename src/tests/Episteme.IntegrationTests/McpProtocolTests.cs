@@ -5,7 +5,9 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Episteme.Application.Workspaces;
 using Episteme.Domain.Workspaces;
+using Episteme.Infrastructure.Git;
 using Episteme.Infrastructure.Identity;
 using Episteme.Infrastructure.Persistence;
 using Episteme.McpServer;
@@ -15,12 +17,88 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Episteme.IntegrationTests;
 
 public sealed class McpProtocolTests
 {
+    [PostgresFact]
+    public async Task Content_tool_enforces_live_policy_for_project_id()
+    {
+        var connection = Environment.GetEnvironmentVariable("EPISTEME_TEST_POSTGRES")!;
+        var root = Path.Combine(Path.GetTempPath(), $"episteme-mcp-policy-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+            new Dictionary<string, string?> { ["WorkspaceStorageRoot"] = root }).Build();
+        var options = new DbContextOptionsBuilder<EpistemeDbContext>().UseNpgsql(connection).UseOpenIddict().Options;
+        await using var db = new EpistemeDbContext(options);
+        var owner = new ApplicationUser { Id = Guid.NewGuid(), UserName = $"mcp-policy-{Guid.NewGuid():N}" };
+        var workspace = Workspace.Create(owner.Id, "MCP", $"mcp-policy-{Guid.NewGuid():N}", WorkspaceType.Code);
+        var project = Project.Create(workspace.Id, owner.Id, "Project", "project", null);
+        db.Users.Add(owner);
+        db.Workspaces.Add(workspace);
+        db.Projects.Add(project);
+        db.WorkspaceMembers.Add(WorkspaceMember.CreateOwner(workspace.Id, owner.Id));
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        using var key = RSA.Create(2048);
+        try
+        {
+            await new GitWorkspaceProvisioner(configuration).InitializeAsync(project.StorageKey, project.DefaultBranch, default);
+            await using var factory = new McpFactory(connection, root, new RsaSecurityKey(key));
+            using var client = factory.CreateClient(new WebApplicationFactoryClientOptions
+                { BaseAddress = new Uri("https://mcp.example") });
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/event-stream");
+            client.DefaultRequestHeaders.Add("MCP-Protocol-Version", "2025-03-26");
+            var token = new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken(
+                "https://issuer.example", "https://mcp.example/mcp",
+                [new Claim("sub", owner.Id.ToString()), new Claim("scope", "workspaces.read")],
+                expires: DateTime.UtcNow.AddMinutes(5),
+                signingCredentials: new SigningCredentials(new RsaSecurityKey(key), SecurityAlgorithms.RsaSha256)));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            async Task<JsonElement> ListAsync()
+            {
+                using var response = await client.PostAsJsonAsync("/mcp", new
+                {
+                    jsonrpc = "2.0", id = 1, method = "tools/call",
+                    @params = new { name = "list_directory", arguments = new { workspaceId = project.Id, path = "" } }
+                });
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                var body = await response.Content.ReadAsStringAsync();
+                if (response.Content.Headers.ContentType?.MediaType == "text/event-stream")
+                    body = string.Join("\n", body.Split('\n')
+                        .Where(line => line.StartsWith("data:", StringComparison.Ordinal))
+                        .Select(line => line[5..].TrimStart()));
+                return JsonDocument.Parse(body).RootElement.GetProperty("result").Clone();
+            }
+
+            Assert.True((await ListAsync()).GetProperty("isError").GetBoolean());
+            var settings = new EfMcpSettingsRepository(db);
+            var actor = new WorkspaceActor(owner.Id, new HashSet<string> { "tokens.manage" }, false);
+            Assert.Null((await settings.SetPersonalAsync(actor, new(true, false), default)).Failure);
+            Assert.Null((await settings.SetWorkspaceEnabledAsync(actor, workspace.Id, true, default)).Failure);
+            Assert.Null((await settings.SetWorkspaceAsync(actor, workspace.Id, McpPermission.ReadDocument, default)).Failure);
+            Assert.False((await ListAsync()).TryGetProperty("isError", out var error) && error.GetBoolean());
+            Assert.Null((await settings.SetWorkspaceEnabledAsync(actor, workspace.Id, false, default)).Failure);
+            Assert.True((await ListAsync()).GetProperty("isError").GetBoolean());
+        }
+        finally
+        {
+            await db.AccountAuditEvents.Where(a => a.TargetUserId == owner.Id).ExecuteDeleteAsync();
+            await db.WorkspaceAuditEvents.Where(a => a.WorkspaceId == workspace.Id).ExecuteDeleteAsync();
+            await db.McpWorkspaceUserSettings.Where(s => s.WorkspaceId == workspace.Id).ExecuteDeleteAsync();
+            await db.McpWorkspaceSettings.Where(s => s.WorkspaceId == workspace.Id).ExecuteDeleteAsync();
+            await db.McpUserSettings.Where(s => s.UserId == owner.Id).ExecuteDeleteAsync();
+            await db.WorkspaceMembers.Where(m => m.WorkspaceId == workspace.Id).ExecuteDeleteAsync();
+            await db.Projects.Where(p => p.Id == project.Id).ExecuteDeleteAsync();
+            await db.Workspaces.Where(w => w.Id == workspace.Id).ExecuteDeleteAsync();
+            await db.Users.Where(u => u.Id == owner.Id).ExecuteDeleteAsync();
+            Directory.Delete(root, true);
+        }
+    }
+
     [PostgresFact]
     public async Task Streamable_http_authenticates_each_request_and_applies_workspace_permissions()
     {
@@ -100,11 +178,56 @@ public sealed class McpProtocolTests
                 Assert.DoesNotContain("principal", tools.GetRawText(), StringComparison.OrdinalIgnoreCase);
             }
 
+            var deniedCreation = await CallAsync("create_workspace",
+                new { name = "MCP", slug = $"mcp-denied-{Guid.NewGuid():N}", type = "Code" });
+            Assert.True(deniedCreation.GetProperty("isError").GetBoolean());
+            Assert.True((await CallAsync("get_workspace_settings", new { })).GetProperty("isError").GetBoolean());
+            Assert.True((await CallAsync("set_workspace_settings", new { directory = "notes" })).GetProperty("isError").GetBoolean());
+            var settings = new EfMcpSettingsRepository(db);
+            var ownerActor = new WorkspaceActor(owner.Id, new HashSet<string> { "tokens.manage" }, false);
+            var outsiderActor = new WorkspaceActor(outsider.Id, new HashSet<string> { "tokens.manage" }, false);
+            Assert.Null((await settings.SetPersonalAsync(ownerActor, new(true, true), default)).Failure);
             var created = await CallAsync("create_workspace",
                 new { name = "MCP", slug = $"mcp-{Guid.NewGuid():N}", type = "Code" });
             Assert.False(created.TryGetProperty("isError", out var createError) && createError.GetBoolean());
             var createdData = JsonDocument.Parse(created.GetProperty("content")[0].GetProperty("text").GetString()!);
             workspaceId = createdData.RootElement.GetProperty("id").GetGuid();
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?> { ["WorkspaceStorageRoot"] = root }).Build();
+            var project = Project.Create(workspaceId.Value, owner.Id, "Main", "main", null);
+            db.Projects.Add(project);
+            await db.SaveChangesAsync();
+            await new GitWorkspaceProvisioner(configuration).InitializeAsync(project.StorageKey, project.DefaultBranch, default);
+            Assert.Null((await settings.SetWorkspaceEnabledAsync(ownerActor, workspaceId.Value, true, default)).Failure);
+            Assert.Null((await settings.SetWorkspaceAsync(ownerActor, workspaceId.Value,
+                McpPermission.ReadWorkspace | McpPermission.UpdateWorkspace |
+                McpPermission.ReadDocument | McpPermission.CreateDocument | McpPermission.UpdateDocument, default)).Failure);
+            Assert.True((await CallAsync("list_projects", new { workspaceId })).GetProperty("isError").GetBoolean());
+            Assert.True((await CallAsync("create_project", new { workspaceId, name = "Other", slug = "other" })).GetProperty("isError").GetBoolean());
+            Assert.Null((await settings.SetWorkspaceAsync(ownerActor, workspaceId.Value,
+                McpPermission.ReadWorkspace | McpPermission.UpdateWorkspace | McpPermission.ReadProject |
+                McpPermission.CreateProject | McpPermission.UpdateProject | McpPermission.DeleteProject |
+                McpPermission.ReadDocument | McpPermission.CreateDocument | McpPermission.UpdateDocument, default)).Failure);
+            var projectList = await CallAsync("list_projects", new { workspaceId });
+            Assert.False(projectList.TryGetProperty("isError", out var listError) && listError.GetBoolean());
+            var projectCreated = await CallAsync("create_project", new { workspaceId, name = "Other", slug = "other" });
+            Assert.False(projectCreated.TryGetProperty("isError", out var projectError) && projectError.GetBoolean());
+            using var projectJson = JsonDocument.Parse(projectCreated.GetProperty("content")[0].GetProperty("text").GetString()!);
+            var newProjectId = projectJson.RootElement.GetProperty("id").GetGuid();
+            var projectVersion = projectJson.RootElement.GetProperty("concurrencyStamp").GetGuid();
+            var projectUpdated = await CallAsync("update_project", new { projectId = newProjectId, expectedVersion = projectVersion, name = "Renamed", slug = "other" });
+            Assert.False(projectUpdated.TryGetProperty("isError", out var updateError) && updateError.GetBoolean());
+            using var updatedProjectJson = JsonDocument.Parse(projectUpdated.GetProperty("content")[0].GetProperty("text").GetString()!);
+            var newProjectVersion = updatedProjectJson.RootElement.GetProperty("concurrencyStamp").GetGuid();
+            Assert.Null((await settings.SetWorkspaceAsync(ownerActor, workspaceId.Value,
+                McpPermission.ReadWorkspace | McpPermission.UpdateWorkspace |
+                McpPermission.ReadDocument | McpPermission.CreateDocument | McpPermission.UpdateDocument, default)).Failure);
+            Assert.True((await CallAsync("delete_project", new { projectId = newProjectId, expectedVersion = newProjectVersion })).GetProperty("isError").GetBoolean());
+            Assert.Null((await settings.SetWorkspaceAsync(ownerActor, workspaceId.Value,
+                McpPermission.ReadWorkspace | McpPermission.UpdateWorkspace | McpPermission.DeleteProject |
+                McpPermission.ReadDocument | McpPermission.CreateDocument | McpPermission.UpdateDocument, default)).Failure);
+            var projectDeleted = await CallAsync("delete_project", new { projectId = newProjectId, expectedVersion = newProjectVersion });
+            Assert.False(projectDeleted.TryGetProperty("isError", out var deleteError) && deleteError.GetBoolean());
             var version = createdData.RootElement.GetProperty("concurrencyStamp").GetGuid();
             var setConfig = await CallAsync("set_workspace_configuration",
                 new { workspaceId, expectedVersion = version, configuration = new { schemaVersion = 1, language = "csharp" } });
@@ -128,6 +251,16 @@ public sealed class McpProtocolTests
             Assert.False(imported.TryGetProperty("isError", out var importError) && importError.GetBoolean());
             using var importedData = JsonDocument.Parse(imported.GetProperty("content")[0].GetProperty("text").GetString()!);
             importedWorkspaceId = importedData.RootElement.GetProperty("id").GetGuid();
+            var importedProject = Project.Create(importedWorkspaceId.Value, owner.Id, "Main", "main", null);
+            db.Projects.Add(importedProject);
+            await db.SaveChangesAsync();
+            await new GitWorkspaceProvisioner(configuration).InitializeAsync(importedProject.StorageKey,
+                importedProject.DefaultBranch, default, ["notes/drafts"]);
+            var deniedSkeleton = await CallAsync("export_workspace_config", new { workspaceId = importedWorkspaceId, formatVersion = 3 });
+            Assert.True(deniedSkeleton.GetProperty("isError").GetBoolean());
+            Assert.Null((await settings.SetWorkspaceEnabledAsync(ownerActor, importedWorkspaceId.Value, true, default)).Failure);
+            Assert.Null((await settings.SetWorkspaceAsync(ownerActor, importedWorkspaceId.Value,
+                McpPermission.ReadWorkspace | McpPermission.ReadProject | McpPermission.ReadDocument, default)).Failure);
             var exportedSkeleton = await CallAsync("export_workspace_config", new { workspaceId = importedWorkspaceId, formatVersion = 3 });
             Assert.False(exportedSkeleton.TryGetProperty("isError", out var skeletonError) && skeletonError.GetBoolean());
             using var skeletonJson = JsonDocument.Parse(exportedSkeleton.GetProperty("content")[0].GetProperty("text").GetString()!);
@@ -164,9 +297,15 @@ public sealed class McpProtocolTests
             UseToken(outsider.Id, "workspaces.read");
             var deniedRead = await CallAsync("read_document", new { workspaceId, path = "note.md" });
             Assert.True(deniedRead.GetProperty("isError").GetBoolean());
+            var deniedExport = await CallAsync("export_workspace_config", new { workspaceId, formatVersion = 2 });
+            Assert.True(deniedExport.GetProperty("isError").GetBoolean());
             UseToken(owner.Id, "workspaces.manage workspaces.read");
             var setMember = await CallAsync("set_workspace_member", new { workspaceId, memberId = outsider.Id, role = "Reader" });
             Assert.False(setMember.TryGetProperty("isError", out var memberError) && memberError.GetBoolean());
+            Assert.Null((await settings.SetPersonalAsync(outsiderActor, new(true, false), default)).Failure);
+            Assert.Null((await settings.SetMemberGrantAsync(ownerActor, workspaceId.Value, outsider.Id,
+                McpPermission.ReadDocument, default)).Failure);
+            Assert.Null((await settings.SetWorkspaceAsync(outsiderActor, workspaceId.Value, McpPermission.ReadDocument, default)).Failure);
             var setting = await CallAsync("set_workspace_settings", new { directory = "notes" });
             Assert.False(setting.TryGetProperty("isError", out var settingError) && settingError.GetBoolean());
             var getSetting = await CallAsync("get_workspace_settings", new { });
@@ -182,16 +321,23 @@ public sealed class McpProtocolTests
             if (importedWorkspaceId is not null)
             {
                 await db.WorkspaceAuditEvents.Where(e => e.WorkspaceId == importedWorkspaceId).ExecuteDeleteAsync();
+                await db.McpWorkspaceUserSettings.Where(s => s.WorkspaceId == importedWorkspaceId).ExecuteDeleteAsync();
+                await db.McpWorkspaceSettings.Where(s => s.WorkspaceId == importedWorkspaceId).ExecuteDeleteAsync();
                 await db.WorkspaceMembers.Where(m => m.WorkspaceId == importedWorkspaceId).ExecuteDeleteAsync();
+                await db.Projects.Where(p => p.WorkspaceId == importedWorkspaceId).ExecuteDeleteAsync();
                 await db.Workspaces.Where(w => w.Id == importedWorkspaceId).ExecuteDeleteAsync();
             }
             if (workspaceId is not null)
             {
                 await db.WorkspaceAuditEvents.Where(e => e.WorkspaceId == workspaceId).ExecuteDeleteAsync();
+                await db.McpWorkspaceUserSettings.Where(s => s.WorkspaceId == workspaceId).ExecuteDeleteAsync();
+                await db.McpWorkspaceSettings.Where(s => s.WorkspaceId == workspaceId).ExecuteDeleteAsync();
                 await db.WorkspaceMembers.Where(m => m.WorkspaceId == workspaceId).ExecuteDeleteAsync();
+                await db.Projects.Where(p => p.WorkspaceId == workspaceId).ExecuteDeleteAsync();
                 await db.Workspaces.Where(w => w.Id == workspaceId).ExecuteDeleteAsync();
             }
             await db.AccountAuditEvents.Where(a => a.TargetUserId == owner.Id || a.TargetUserId == outsider.Id).ExecuteDeleteAsync();
+            await db.McpUserSettings.Where(s => s.UserId == owner.Id || s.UserId == outsider.Id).ExecuteDeleteAsync();
             await db.UserWorkspaceSettings.Where(s => s.UserId == owner.Id || s.UserId == outsider.Id).ExecuteDeleteAsync();
             await db.Users.Where(u => u.Id == owner.Id || u.Id == outsider.Id).ExecuteDeleteAsync();
             Directory.Delete(root, true);
@@ -207,6 +353,7 @@ public sealed class McpProtocolTests
             builder.UseSetting("WorkspaceStorageRoot", root);
             builder.UseSetting("Authentication:Authority", "https://issuer.example");
             builder.UseSetting("Authentication:Audience", "https://mcp.example/mcp");
+            builder.UseSetting("Authentication:RequireTokenEntryValidation", "false");
             builder.ConfigureTestServices(services =>
                 services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
                 {

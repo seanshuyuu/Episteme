@@ -53,7 +53,8 @@ public sealed class EfProjectRepository(
             return new(null, ProjectFailure.InvalidInput);
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = db.Database.CurrentTransaction is null
+            ? await db.Database.BeginTransactionAsync(cancellationToken) : null;
         db.Projects.Add(project);
         try
         {
@@ -74,11 +75,13 @@ public sealed class EfProjectRepository(
         {
             db.Projects.Remove(project);
             await db.SaveChangesAsync(cancellationToken);
-            await transaction.RollbackAsync(cancellationToken);
+            if (transaction is not null)
+                await transaction.RollbackAsync(cancellationToken);
             return new(null, ProjectFailure.ProvisioningFailed);
         }
 
-        await transaction.CommitAsync(cancellationToken);
+        if (transaction is not null)
+            await transaction.CommitAsync(cancellationToken);
         return new(ToSummary(project, 0, 1), null);
     }
 

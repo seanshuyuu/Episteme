@@ -124,7 +124,8 @@ public sealed class AuthProgram
                 options.SetAuthorizationEndpointUris("connect/authorize")
                     .SetTokenEndpointUris("connect/token")
                     .SetRevocationEndpointUris("connect/revoke");
-                options.AllowAuthorizationCodeFlow().AllowRefreshTokenFlow();
+                options.AllowAuthorizationCodeFlow().AllowRefreshTokenFlow()
+                    .AllowCustomFlow("urn:ietf:params:oauth:grant-type:token-exchange");
                 options.RequireProofKeyForCodeExchange();
                 options.Configure(settings =>
                 {
@@ -156,6 +157,14 @@ public sealed class AuthProgram
                 var host = options.UseAspNetCore().EnableAuthorizationEndpointPassthrough().EnableTokenEndpointPassthrough();
                 if (builder.Environment.IsDevelopment())
                     host.DisableTransportSecurityRequirement();
+            })
+            .AddValidation(options =>
+            {
+                options.UseLocalServer();
+                options.AddAudiences(apiAudience!);
+                options.EnableTokenEntryValidation();
+                options.EnableAuthorizationEntryValidation();
+                options.UseAspNetCore();
             });
         builder.Services.AddHostedService<ClientProvisioningService>();
         builder.Services.AddHostedService<AdministratorBootstrapService>();
@@ -169,8 +178,7 @@ public sealed class AuthProgram
             if (path.StartsWithSegments("/Identity/Account"))
             {
                 if (!mail.Enabled &&
-                    ((!app.Environment.IsDevelopment() && path.StartsWithSegments("/Identity/Account/Register")) ||
-                     path.StartsWithSegments("/Identity/Account/ForgotPassword") ||
+                    (path.StartsWithSegments("/Identity/Account/ForgotPassword") ||
                     path.StartsWithSegments("/Identity/Account/ResetPassword") ||
                      path.StartsWithSegments("/Identity/Account/ResendEmailConfirmation")))
                 {

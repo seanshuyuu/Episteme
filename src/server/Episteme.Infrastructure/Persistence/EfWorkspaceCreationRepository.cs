@@ -27,6 +27,8 @@ public sealed class EfWorkspaceCreationRepository(
                 .SingleOrDefaultAsync(cancellationToken);
             if (user is null || user.Status != UserAccountStatus.Active)
                 return new(null, WorkspaceCreationFailure.Unauthorized);
+            if (command.Actor.IsMcp && !await CanCreateViaMcpAsync(user.Id, cancellationToken))
+                return new(null, WorkspaceCreationFailure.Unauthorized);
 
             db.Workspaces.Add(workspace);
             db.WorkspaceMembers.Add(WorkspaceMember.CreateOwner(workspace.Id, user.Id));
@@ -52,8 +54,16 @@ public sealed class EfWorkspaceCreationRepository(
     public Task<WorkspaceCreationResult> RetryAsync(Guid workspaceId, WorkspaceActor actor, CancellationToken cancellationToken) =>
         CompleteAsync(workspaceId, actor, cancellationToken);
 
-    public async Task<IReadOnlyList<WorkspaceSummary>?> ListPendingAsync(
-        Guid userId, int offset, int count, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<WorkspaceSummary>?> ListPendingAsync(
+        Guid userId, int offset, int count, CancellationToken cancellationToken) =>
+        ListPendingCoreAsync(userId, false, offset, count, cancellationToken);
+
+    public Task<IReadOnlyList<WorkspaceSummary>?> ListPendingForMcpAsync(
+        Guid userId, int offset, int count, CancellationToken cancellationToken) =>
+        ListPendingCoreAsync(userId, true, offset, count, cancellationToken);
+
+    private async Task<IReadOnlyList<WorkspaceSummary>?> ListPendingCoreAsync(
+        Guid userId, bool isMcp, int offset, int count, CancellationToken cancellationToken)
     {
         var result = await db.Users.AsNoTracking()
             .Where(user => user.Id == userId && user.Status == UserAccountStatus.Active)
@@ -61,6 +71,8 @@ public sealed class EfWorkspaceCreationRepository(
             {
                 Items = db.Workspaces.AsNoTracking()
                     .Where(workspace => workspace.Status == WorkspaceStatus.Provisioning &&
+                        (!isMcp || db.McpUserSettings.Any(setting => setting.UserId == user.Id &&
+                            setting.Enabled && setting.AllowCreateWorkspace)) &&
                         db.WorkspaceMembers.Any(member => member.WorkspaceId == workspace.Id &&
                             member.UserId == user.Id && member.Status == WorkspaceMemberStatus.Active &&
                             member.Role == WorkspaceRole.Owner))
@@ -90,7 +102,9 @@ public sealed class EfWorkspaceCreationRepository(
             .SingleOrDefaultAsync(cancellationToken);
         if (user is null || user.Status != UserAccountStatus.Active)
             return new(null, WorkspaceCreationFailure.Unauthorized);
-        if (!actor.IsSystemAdministrator && !await db.WorkspaceMembers.AnyAsync(member =>
+        if (actor.IsMcp && !await CanCreateViaMcpAsync(actor.UserId, cancellationToken))
+            return new(null, WorkspaceCreationFailure.Unauthorized);
+        if ((!actor.IsSystemAdministrator || actor.IsMcp) && !await db.WorkspaceMembers.AnyAsync(member =>
                 member.WorkspaceId == workspaceId && member.UserId == actor.UserId &&
                 member.Status == WorkspaceMemberStatus.Active && member.Role == WorkspaceRole.Owner, cancellationToken))
             return new(null, WorkspaceCreationFailure.Unauthorized);
@@ -115,4 +129,8 @@ public sealed class EfWorkspaceCreationRepository(
         return new(new WorkspaceSummary(workspace.Id, workspace.Name, workspace.Slug, workspace.Type,
             workspace.Description, workspace.DefaultBranch, workspace.ConcurrencyStamp), null);
     }
+
+    private Task<bool> CanCreateViaMcpAsync(Guid userId, CancellationToken cancellationToken) =>
+        db.McpUserSettings.AsNoTracking().AnyAsync(setting =>
+            setting.UserId == userId && setting.Enabled && setting.AllowCreateWorkspace, cancellationToken);
 }

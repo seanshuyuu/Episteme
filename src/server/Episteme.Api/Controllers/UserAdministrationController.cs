@@ -2,14 +2,16 @@ using Episteme.Application.Identity;
 using Episteme.Application.Workspaces;
 using Episteme.Domain.Identity;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 
 namespace Episteme.Api.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/v1/admin/users")]
-public sealed class UserAdministrationController(IUserAdministrationService service) : ControllerBase
+public sealed class UserAdministrationController(IUserAdministrationService service, IHostEnvironment environment) : ControllerBase
 {
     /// <summary>Resets a user's password using Identity's password policy and token providers.</summary>
     [HttpPut("{userId:guid}/password")]
@@ -20,7 +22,7 @@ public sealed class UserAdministrationController(IUserAdministrationService serv
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> ResetPassword(Guid userId, ResetUserPasswordRequest request, CancellationToken cancellationToken)
     {
-        if (!Request.IsHttps)
+        if (!PasswordTransportAllowed)
             return Problem(statusCode: 400, title: "HTTPS is required for password operations");
         if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
             return Unauthorized();
@@ -69,7 +71,7 @@ public sealed class UserAdministrationController(IUserAdministrationService serv
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(CreateUserRequest request, CancellationToken cancellationToken)
     {
-        if (!Request.IsHttps)
+        if (!PasswordTransportAllowed)
             return Problem(statusCode: 400, title: "HTTPS is required for password operations");
         if (!WorkspaceActorClaims.TryGetActor(User, out var actor))
             return Unauthorized();
@@ -182,7 +184,10 @@ public sealed class UserAdministrationController(IUserAdministrationService serv
 
     private static ManagedUserResponse ToResponse(ManagedUser user) =>
         new(user.Id, user.UserName, user.Email, user.Status.ToString(), user.CreatedAt,
-            user.IsAdministrator, user.OwnedWorkspaceCount);
+            user.IsAdministrator, user.OwnedWorkspaceCount, user.DisplayName);
+
+    /// <summary>Passwords travel only over HTTPS, except in Development for the local HTTP trial deployment.</summary>
+    private bool PasswordTransportAllowed => Request.IsHttps || environment.IsDevelopment();
 
     private ObjectResult TokenFailure(UserTokenFailure failure) => failure switch
     {
@@ -219,7 +224,7 @@ public sealed record ResetUserPasswordRequest(string Password)
 public sealed record SetAdministratorRequest(bool? IsAdministrator);
 /// <summary>Describes a managed user without credentials.</summary>
 public sealed record ManagedUserResponse(Guid Id, string? UserName, string? Email, string Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0, string? DisplayName = null);
 /// <summary>Contains one page of managed users.</summary>
 public sealed record ManagedUserListResponse(IReadOnlyList<ManagedUserResponse> Items, int Offset, int Limit, bool HasMore);
 /// <summary>System totals and the three newest user accounts for the admin dashboard.</summary>

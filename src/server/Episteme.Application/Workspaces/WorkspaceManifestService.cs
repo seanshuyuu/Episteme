@@ -38,7 +38,7 @@ public sealed class WorkspaceManifestService(WorkspaceAccessService access, IWor
             return await manifests.ExportWithDirectoriesAsync(workspaceId, actor, cancellationToken);
         }
         var result = await access.AuthorizeAsync(new WorkspaceAccessRequest(
-            workspaceId, actor.UserId, actor.Scopes, actor.IsSystemAdministrator, WorkspacePermission.Read), cancellationToken);
+            workspaceId, actor.UserId, actor.Scopes, actor.IsSystemAdministrator, WorkspacePermission.Read, actor.IsMcp), cancellationToken);
         if (!result.Succeeded)
             return new(null, result.Failure);
         var workspace = result.Workspace!;

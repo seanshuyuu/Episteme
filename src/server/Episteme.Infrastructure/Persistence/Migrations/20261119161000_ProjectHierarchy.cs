@@ -1,9 +1,11 @@
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
 namespace Episteme.Infrastructure.Persistence.Migrations;
 
+[DbContext(typeof(EpistemeDbContext))]
 [Migration("20261119161000_ProjectHierarchy")]
 public partial class ProjectHierarchy : Migration
 {
@@ -27,20 +29,30 @@ CREATE TABLE IF NOT EXISTS "Projects" (
 );
 """);
         migrationBuilder.Sql("""
-ALTER TABLE "Projects"
-ADD CONSTRAINT "FK_Projects_Workspaces_WorkspaceId"
-FOREIGN KEY ("WorkspaceId") REFERENCES "Workspaces"("Id") ON DELETE RESTRICT;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = '"Projects"'::regclass
+        AND conname = 'FK_Projects_Workspaces_WorkspaceId') THEN
+        ALTER TABLE "Projects" ADD CONSTRAINT "FK_Projects_Workspaces_WorkspaceId"
+            FOREIGN KEY ("WorkspaceId") REFERENCES "Workspaces"("Id") ON DELETE RESTRICT;
+    END IF;
+END $$;
 """);
         migrationBuilder.Sql("""
-ALTER TABLE "Projects"
-ADD CONSTRAINT "FK_Projects_AspNetUsers_CreatedByUserId"
-FOREIGN KEY ("CreatedByUserId") REFERENCES "AspNetUsers"("Id") ON DELETE RESTRICT;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = '"Projects"'::regclass
+        AND conname = 'FK_Projects_AspNetUsers_CreatedByUserId') THEN
+        ALTER TABLE "Projects" ADD CONSTRAINT "FK_Projects_AspNetUsers_CreatedByUserId"
+            FOREIGN KEY ("CreatedByUserId") REFERENCES "AspNetUsers"("Id") ON DELETE RESTRICT;
+    END IF;
+END $$;
 """);
         migrationBuilder.Sql("""
-CREATE UNIQUE INDEX "IX_Projects_Slug" ON "Projects" ("WorkspaceId", "Slug");
-CREATE UNIQUE INDEX "IX_Projects_StorageKey" ON "Projects" ("StorageKey");
-CREATE INDEX "IX_Projects_WorkspaceId" ON "Projects" ("WorkspaceId");
-CREATE INDEX "IX_Projects_CreatedByUserId" ON "Projects" ("CreatedByUserId");
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_Projects_Slug" ON "Projects" ("WorkspaceId", "Slug");
+CREATE UNIQUE INDEX IF NOT EXISTS "IX_Projects_StorageKey" ON "Projects" ("StorageKey");
+CREATE INDEX IF NOT EXISTS "IX_Projects_WorkspaceId" ON "Projects" ("WorkspaceId");
+CREATE INDEX IF NOT EXISTS "IX_Projects_CreatedByUserId" ON "Projects" ("CreatedByUserId");
 """);
         migrationBuilder.Sql("""
 INSERT INTO "Projects"

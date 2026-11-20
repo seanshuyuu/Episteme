@@ -16,6 +16,8 @@ public interface IWorkspaceCreationRepository
     Task<WorkspaceCreationResult> CreateAsync(CreateWorkspaceCommand command, CancellationToken cancellationToken);
     Task<WorkspaceCreationResult> RetryAsync(Guid workspaceId, WorkspaceActor actor, CancellationToken cancellationToken);
     Task<IReadOnlyList<WorkspaceSummary>?> ListPendingAsync(Guid userId, int offset, int count, CancellationToken cancellationToken);
+    Task<IReadOnlyList<WorkspaceSummary>?> ListPendingForMcpAsync(Guid userId, int offset, int count, CancellationToken cancellationToken) =>
+        throw new NotSupportedException("MCP workspace provisioning is not supported by this repository.");
 }
 
 public interface IWorkspaceRepositoryProvisioner
@@ -68,7 +70,9 @@ public sealed class WorkspaceCreationService(IWorkspaceCreationRepository reposi
             return new(null, false, WorkspaceListingFailure.Unauthorized);
         if (offset < 0 || offset > int.MaxValue - 101 || limit is < 1 or > 100)
             return new(null, false, WorkspaceListingFailure.InvalidPage);
-        var items = await repository.ListPendingAsync(actor.UserId, offset, limit + 1, cancellationToken);
+        var items = actor.IsMcp
+            ? await repository.ListPendingForMcpAsync(actor.UserId, offset, limit + 1, cancellationToken)
+            : await repository.ListPendingAsync(actor.UserId, offset, limit + 1, cancellationToken);
         return items is null
             ? new(null, false, WorkspaceListingFailure.InactiveUser)
             : new(items.Take(limit).ToArray(), items.Count > limit, null);

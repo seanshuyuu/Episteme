@@ -30,8 +30,11 @@ public sealed class IdentityEmailTests
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         try
         {
-            var register = await browser.GetStringAsync("/Identity/Account/Register");
-            using var registration = await browser.PostAsync("/Identity/Account/Register", Form(
+            const string returnUrl = "/connect/authorize?client_id=test&state=state";
+            var registerUrl = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString(
+                "/Identity/Account/Register", "returnUrl", returnUrl);
+            var register = await browser.GetStringAsync(registerUrl);
+            using var registration = await browser.PostAsync(registerUrl, Form(
                 register, ("Input.Email", email), ("Input.Password", password), ("Input.ConfirmPassword", password)));
             Assert.Equal(HttpStatusCode.Redirect, registration.StatusCode);
             Assert.Single(sender.Messages);
@@ -41,6 +44,11 @@ public sealed class IdentityEmailTests
             Assert.False(user.EmailConfirmed);
             var confirmationPage = await browser.GetStringAsync(registration.Headers.Location!);
             Assert.DoesNotContain("code=", confirmationPage, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("请检查邮箱", confirmationPage);
+            var confirmationLogin = Regex.Match(confirmationPage, "href=\"([^\"]*Account/Login[^\"]*)\"");
+            Assert.True(confirmationLogin.Success);
+            var loginUri = new Uri(new Uri("https://auth.example"), WebUtility.HtmlDecode(confirmationLogin.Groups[1].Value));
+            Assert.Equal(returnUrl, Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(loginUri.Query)["returnUrl"].ToString());
 
             var login = await browser.GetStringAsync("/Identity/Account/Login");
             Assert.Contains("/Identity/Account/Register", login);

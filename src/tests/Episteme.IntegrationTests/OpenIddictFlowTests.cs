@@ -273,7 +273,7 @@ public sealed class OpenIddictFlowTests
     }
 
     [PostgresFact]
-    public async Task Nondevelopment_identity_disables_unverified_registration_and_password_recovery()
+    public async Task Nondevelopment_identity_allows_registration_but_disables_password_recovery_without_mail()
     {
         var connection = Environment.GetEnvironmentVariable("EPISTEME_TEST_POSTGRES")!;
         var certificatePath = Path.GetTempFileName();
@@ -294,7 +294,7 @@ public sealed class OpenIddictFlowTests
             Assert.Equal(HttpStatusCode.OK, loginPage.StatusCode);
             var html = await loginPage.Content.ReadAsStringAsync();
             await AssertLoginAssetsAsync(browser, html);
-            Assert.DoesNotContain("/Identity/Account/Register", html);
+            Assert.Contains("/Identity/Account/Register", html);
             Assert.DoesNotContain("/Identity/Account/ForgotPassword", html);
             Assert.DoesNotContain("/Identity/Account/ResendEmailConfirmation", html);
             var antiforgery = AntiForgeryToken(html);
@@ -316,7 +316,35 @@ public sealed class OpenIddictFlowTests
                 ["__RequestVerificationToken"] = antiforgery
             });
             Assert.Equal(HttpStatusCode.OK, (await secondBrowser.SendAsync(loginPost)).StatusCode);
-            foreach (var path in new[] { "Register", "ForgotPassword", "ResetPassword", "ResendEmailConfirmation" })
+            var registerPage = await browser.GetStringAsync("/Identity/Account/Register");
+            var email = $"{Guid.NewGuid():N}@example.test";
+            try
+            {
+                using var registered = await browser.PostAsync("/Identity/Account/Register", new FormUrlEncodedContent(
+                    new Dictionary<string, string>
+                    {
+                        ["Input.Email"] = email,
+                        ["Input.Password"] = "Episteme-Test-Password-42!",
+                        ["Input.ConfirmPassword"] = "Episteme-Test-Password-42!",
+                        ["__RequestVerificationToken"] = AntiForgeryToken(registerPage)
+                    }));
+                Assert.Equal(HttpStatusCode.Redirect, registered.StatusCode);
+                Assert.Contains(registered.Headers.GetValues("Set-Cookie"),
+                    value => value.StartsWith(".AspNetCore.Identity.Application=", StringComparison.Ordinal));
+            }
+            finally
+            {
+                await using var cleanup = factory.Services.CreateAsyncScope();
+                var users = cleanup.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+                var user = await users.FindByEmailAsync(email);
+                if (user is not null)
+                {
+                    var db = cleanup.ServiceProvider.GetRequiredService<EpistemeDbContext>();
+                    await db.AccountAuditEvents.Where(a => a.ActorUserId == user.Id).ExecuteDeleteAsync();
+                    Assert.True((await users.DeleteAsync(user)).Succeeded);
+                }
+            }
+            foreach (var path in new[] { "ForgotPassword", "ResetPassword", "ResendEmailConfirmation" })
                 Assert.Equal(HttpStatusCode.NotFound, (await browser.GetAsync($"/Identity/Account/{path}")).StatusCode);
         }
         finally
@@ -364,16 +392,35 @@ public sealed class OpenIddictFlowTests
         var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         try
         {
-            var token = AntiForgeryToken(await browser.GetStringAsync("/Identity/Account/Register"));
-            using var response = await browser.PostAsync("/Identity/Account/Register", new FormUrlEncodedContent(
+            const string returnUrl = "/Identity/Account/Manage?tab=profile&source=register";
+            var registerUrl = QueryHelpers.AddQueryString("/Identity/Account/Register", "returnUrl", returnUrl);
+            var register = await browser.GetStringAsync(registerUrl);
+            Assert.Contains("/css/auth-login.css", register);
+            Assert.Contains("注册 Episteme", register);
+            using var invalid = await browser.PostAsync(registerUrl, new FormUrlEncodedContent(
+                new Dictionary<string, string>
+                {
+                    ["Input.Email"] = email,
+                    ["Input.Password"] = password,
+                    ["Input.ConfirmPassword"] = "mismatch",
+                    ["__RequestVerificationToken"] = AntiForgeryToken(register)
+                }));
+            Assert.Equal(HttpStatusCode.OK, invalid.StatusCode);
+            var failedPage = await invalid.Content.ReadAsStringAsync();
+            var form = Regex.Match(failedPage, "<form[^>]*class=\"login-form\"[^>]*>");
+            Assert.True(form.Success);
+            var action = Regex.Match(form.Value, "action=\"([^\"]+)\"");
+            Assert.True(action.Success);
+            using var response = await browser.PostAsync(WebUtility.HtmlDecode(action.Groups[1].Value), new FormUrlEncodedContent(
                 new Dictionary<string, string>
                 {
                     ["Input.Email"] = email,
                     ["Input.Password"] = password,
                     ["Input.ConfirmPassword"] = password,
-                    ["__RequestVerificationToken"] = token
+                    ["__RequestVerificationToken"] = AntiForgeryToken(failedPage)
                 }));
             Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+            Assert.Equal(returnUrl, response.Headers.Location?.OriginalString);
             var user = await users.FindByEmailAsync(email);
             Assert.NotNull(user);
             Assert.NotEqual(password, user.PasswordHash);
@@ -443,6 +490,110 @@ public sealed class OpenIddictFlowTests
     }
 
     [PostgresFact]
+    public async Task Mcp_token_exchange_is_limited_to_enabled_users_and_immediately_revocable()
+    {
+        var connection = Environment.GetEnvironmentVariable("EPISTEME_TEST_POSTGRES")!;
+        var clientId = $"auth-mcp-{Guid.NewGuid():N}";
+        var email = $"{Guid.NewGuid():N}@example.test";
+        const string password = "Episteme-Test-Password-42!";
+        await using var authFactory = new AuthFactory(connection, clientId);
+        using var browser = authFactory.CreateClient(new WebApplicationFactoryClientOptions
+            { BaseAddress = new Uri("https://auth.example"), AllowAutoRedirect = false });
+        await using var scope = authFactory.Services.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var user = new ApplicationUser { Id = Guid.NewGuid(), UserName = email, Email = email };
+        Assert.True((await users.CreateAsync(user, password)).Succeeded);
+        try
+        {
+            var loginPage = await browser.GetStringAsync("/Identity/Account/Login");
+            using var login = await browser.PostAsync("/Identity/Account/Login", new FormUrlEncodedContent(
+                new Dictionary<string, string> { ["Input.Email"] = email, ["Input.Password"] = password,
+                    ["__RequestVerificationToken"] = AntiForgeryToken(loginPage) }));
+            Assert.Equal(HttpStatusCode.Redirect, login.StatusCode);
+            var verifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+            var request = new Dictionary<string, string?>
+            {
+                ["client_id"] = clientId, ["redirect_uri"] = "https://client.example/callback",
+                ["response_type"] = "code", ["scope"] = "openid workspaces.read tokens.manage",
+                ["code_challenge"] = WebEncoders.Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))),
+                ["code_challenge_method"] = "S256", ["resource"] = "https://api.example/"
+            };
+            var consent = await browser.GetStringAsync(QueryHelpers.AddQueryString("/connect/authorize", request));
+            var form = request.ToDictionary(kv => kv.Key, kv => kv.Value!);
+            form["decision"] = "accept";
+            form["__RequestVerificationToken"] = AntiForgeryToken(consent);
+            using var approved = await browser.PostAsync("/connect/authorize", new FormUrlEncodedContent(form));
+            Assert.Equal(HttpStatusCode.Redirect, approved.StatusCode);
+            var code = QueryHelpers.ParseQuery(approved.Headers.Location!.Query)["code"].ToString();
+            using var apiExchange = await browser.PostAsync("/connect/token", new FormUrlEncodedContent(
+                new Dictionary<string, string> { ["grant_type"] = "authorization_code", ["client_id"] = clientId,
+                    ["redirect_uri"] = "https://client.example/callback", ["code"] = code, ["code_verifier"] = verifier }));
+            var apiBody = await apiExchange.Content.ReadAsStringAsync();
+            Assert.True(apiExchange.IsSuccessStatusCode, apiBody);
+            using var apiJson = JsonDocument.Parse(apiBody);
+            var accessToken = apiJson.RootElement.GetProperty("access_token").GetString()!;
+            await using var api = new ManagedApiFactory(connection, authFactory);
+            using var apiClient = api.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://api.example") });
+            apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            var exchangeRequest = new Dictionary<string, string>
+            {
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:token-exchange",
+                ["client_id"] = clientId, ["subject_token"] = accessToken,
+                ["subject_token_type"] = "urn:ietf:params:oauth:token-type:access_token",
+                ["resource"] = "https://mcp.example/mcp", ["scope"] = "workspaces.read"
+            };
+            using (var disabled = await browser.PostAsync("/connect/token", new FormUrlEncodedContent(exchangeRequest)))
+                Assert.Equal(HttpStatusCode.BadRequest, disabled.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await apiClient.PutAsJsonAsync("/api/v1/mcp/settings/personal",
+                new { enabled = true, allowCreateWorkspace = false })).StatusCode);
+            var wrongResource = new Dictionary<string, string>(exchangeRequest) { ["resource"] = "https://api.example/" };
+            using (var deniedResource = await browser.PostAsync("/connect/token", new FormUrlEncodedContent(wrongResource)))
+                Assert.Equal(HttpStatusCode.BadRequest, deniedResource.StatusCode);
+            using var mcpExchange = await browser.PostAsync("/connect/token", new FormUrlEncodedContent(exchangeRequest));
+            var body = await mcpExchange.Content.ReadAsStringAsync();
+            Assert.True(mcpExchange.IsSuccessStatusCode, body);
+            using var token = JsonDocument.Parse(body);
+            Assert.InRange(token.RootElement.GetProperty("expires_in").GetInt32(), 30 * 24 * 3600 - 10, 30 * 24 * 3600);
+            Assert.False(token.RootElement.TryGetProperty("refresh_token", out _));
+            var longToken = token.RootElement.GetProperty("access_token").GetString()!;
+            using var payload = JsonDocument.Parse(WebEncoders.Base64UrlDecode(longToken.Split('.')[1]));
+            Assert.Equal("https://mcp.example/mcp", payload.RootElement.GetProperty("aud").GetString());
+            var tokenId = payload.RootElement.GetProperty("oi_tkn_id").GetString();
+            Assert.NotNull(tokenId);
+            apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", longToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await apiClient.GetAsync("/api/v1/me/tokens")).StatusCode);
+            apiClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            var replayExchange = new Dictionary<string, string>(exchangeRequest) { ["subject_token"] = longToken };
+            using (var deniedReplay = await browser.PostAsync("/connect/token", new FormUrlEncodedContent(replayExchange)))
+                Assert.Equal(HttpStatusCode.BadRequest, deniedReplay.StatusCode);
+            await using var mcp = new ManagedMcpFactory(connection, authFactory);
+            using var mcpClient = mcp.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://mcp.example") });
+            mcpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", longToken);
+            mcpClient.DefaultRequestHeaders.Accept.ParseAdd("application/json, text/event-stream");
+            using var before = await mcpClient.PostAsJsonAsync("/mcp",
+                new { jsonrpc = "2.0", id = 1, method = "tools/list", @params = new { } });
+            Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+            Assert.Equal(HttpStatusCode.NoContent, (await apiClient.DeleteAsync($"/api/v1/me/tokens/{tokenId}")).StatusCode);
+            using var after = await mcpClient.PostAsJsonAsync("/mcp",
+                new { jsonrpc = "2.0", id = 2, method = "tools/list", @params = new { } });
+            Assert.Equal(HttpStatusCode.Unauthorized, after.StatusCode);
+        }
+        finally
+        {
+            var apps = scope.ServiceProvider.GetRequiredService<IOpenIddictApplicationManager>();
+            var application = await apps.FindByClientIdAsync(clientId);
+            if (application is not null) await apps.DeleteAsync(application);
+            var db = scope.ServiceProvider.GetRequiredService<EpistemeDbContext>();
+            await db.AccountAuditEvents.Where(a => a.ActorUserId == user.Id).ExecuteDeleteAsync();
+            await db.McpUserSettings.Where(s => s.UserId == user.Id).ExecuteDeleteAsync();
+            await using var cleanup = authFactory.Services.CreateAsyncScope();
+            var cleanupUsers = cleanup.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            var current = await cleanupUsers.FindByIdAsync(user.Id.ToString());
+            if (current is not null) Assert.True((await cleanupUsers.DeleteAsync(current)).Succeeded);
+        }
+    }
+
+    [PostgresFact]
     public async Task Authorization_code_with_pkce_issues_jwt_and_rotates_and_revokes_refresh_tokens()
     {
         var connection = Environment.GetEnvironmentVariable("EPISTEME_TEST_POSTGRES")!;
@@ -503,6 +654,10 @@ public sealed class OpenIddictFlowTests
                 Assert.Contains("invalid_request", await plain.Content.ReadAsStringAsync());
             }
             var consent = await browser.GetStringAsync(authorizationUrl);
+            Assert.Contains("授权应用访问", consent);
+            Assert.Contains("读取工作空间和文档", WebUtility.HtmlDecode(consent));
+            Assert.Contains("workspaces.read", consent);
+            Assert.Contains("https://api.example/", consent);
             var form = request.ToDictionary(kv => kv.Key, kv => kv.Value!);
             form["decision"] = "accept";
             using (var noCsrf = await browser.PostAsync("/connect/authorize", new FormUrlEncodedContent(form)))
@@ -1266,6 +1421,7 @@ public sealed class OpenIddictFlowTests
             builder.UseSetting("ConnectionStrings:Episteme", connection);
             builder.UseSetting("Authentication:Authority", "https://auth.example/");
             builder.UseSetting("Authentication:Audience", "https://mcp.example/mcp");
+            builder.UseSetting("Authentication:RequireTokenEntryValidation", "false");
             builder.ConfigureTestServices(services =>
                 services.PostConfigure<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme, options =>
                 {

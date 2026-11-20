@@ -4,6 +4,31 @@ namespace Episteme.Client;
 
 public interface IEpistemeApi
 {
+    [Get("/api/v1/mcp/settings/personal")]
+    Task<McpPersonalSettingsResponse> GetMcpPersonalSettingsAsync(CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/mcp/settings/personal")]
+    Task<McpPersonalSettingsResponse> SetMcpPersonalSettingsAsync(
+        [Body] SetMcpPersonalSettingsRequest request, CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/mcp/settings/workspaces/{workspaceId}")]
+    Task<McpWorkspaceSettingsResponse> GetMcpWorkspaceSettingsAsync(Guid workspaceId, CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/mcp/settings/workspaces/{workspaceId}/personal")]
+    Task<McpWorkspaceSettingsResponse> SetMcpWorkspacePermissionsAsync(Guid workspaceId,
+        [Body] SetMcpPermissionsRequest request, CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/mcp/settings/workspaces/{workspaceId}/enabled")]
+    Task<McpWorkspaceEnabledResponse> SetMcpWorkspaceEnabledAsync(Guid workspaceId,
+        [Body] SetMcpWorkspaceEnabledRequest request, CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/mcp/settings/workspaces/{workspaceId}/members/{memberId}")]
+    Task<McpPermissionsResponse> GetMcpMemberGrantAsync(Guid workspaceId, Guid memberId, CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/mcp/settings/workspaces/{workspaceId}/members/{memberId}")]
+    Task<McpPermissionsResponse> SetMcpMemberGrantAsync(Guid workspaceId, Guid memberId,
+        [Body] SetMcpPermissionsRequest request, CancellationToken cancellationToken = default);
+
     [Put("/api/v1/admin/users/{userId}/password")]
     Task ResetManagedUserPasswordAsync(Guid userId, [Body] ResetUserPasswordRequest request, CancellationToken cancellationToken = default);
     [Get("/api/v1/admin/users/{userId}/tokens")]
@@ -16,6 +41,16 @@ public interface IEpistemeApi
 
     [Delete("/api/v1/me/authorizations/{authorizationId}")]
     Task RevokeUserAuthorizationAsync(string authorizationId, CancellationToken cancellationToken = default);
+
+    [Get("/api/v1/me/profile")]
+    Task<UserProfileResponse> GetUserProfileAsync(CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/me/profile")]
+    Task<UserProfileResponse> UpdateUserProfileAsync([Body] UpdateUserProfileRequest request, CancellationToken cancellationToken = default);
+
+    [Put("/api/v1/me/password")]
+    Task ChangeUserPasswordAsync([Body] ChangeUserPasswordRequest request, CancellationToken cancellationToken = default);
+
     [Post("/api/v1/admin/users")]
     Task<ManagedUserResponse> CreateUserAsync([Body] CreateUserRequest request, CancellationToken cancellationToken = default);
 
@@ -186,6 +221,12 @@ public interface IEpistemeApi
 }
 
 public sealed record UserAuthorizationListResponse(IReadOnlyList<UserAuthorizationResponse> Items, int Offset, int Limit, bool HasMore);
+public sealed record UserProfileResponse(string? DisplayName, string? Email, string? UserName);
+public sealed record UpdateUserProfileRequest(string? DisplayName);
+public sealed record ChangeUserPasswordRequest(string CurrentPassword, string NewPassword)
+{
+    public override string ToString() => "ChangeUserPasswordRequest { Password = [REDACTED] }";
+}
 public sealed record ResetUserPasswordRequest(string Password)
 {
     public override string ToString() => "ResetUserPasswordRequest { Password = [REDACTED] }";
@@ -242,15 +283,17 @@ public sealed record WorkspaceContentEntryResponse(string Name, string Kind);
 public sealed record WorkspaceDirectoryResponse(string CommitId, IReadOnlyList<WorkspaceContentEntryResponse> Entries);
 public sealed record WorkspaceDocumentResponse(string CommitId, string Content);
 public sealed record WorkspaceBinaryDocumentResponse(string CommitId, byte[] Content);
-public sealed record PutWorkspaceDocumentRequest(string ExpectedHead, string Content);
+public sealed record PutWorkspaceDocumentRequest(string ExpectedHead, string Content, string? Comment = null);
 public sealed record PutWorkspaceBinaryDocumentRequest(string ExpectedHead, byte[] Content);
 public sealed record DeleteWorkspaceDocumentRequest(string ExpectedHead);
 public sealed record DeleteWorkspaceDirectoryRequest(string ExpectedHead, bool Recursive);
 public sealed record MoveWorkspacePathRequest(string ExpectedHead, string DestinationPath);
 public sealed record RestoreWorkspaceDocumentRequest(string ExpectedHead, string SourceCommit);
 public sealed record WorkspaceCommitResponse(string CommitId);
+public sealed record WorkspaceHistoryEntryResponse(
+    string CommitId, string Message, string AuthorName, DateTimeOffset CreatedAt);
 public sealed record WorkspaceDocumentHistoryResponse(
-    string HeadCommitId, IReadOnlyList<string> Commits, int Offset, int Limit, bool HasMore);
+    string HeadCommitId, IReadOnlyList<WorkspaceHistoryEntryResponse> Commits, int Offset, int Limit, bool HasMore);
 
 public sealed record WorkspaceListResponse(
     IReadOnlyList<WorkspaceResponse> Items,
@@ -262,6 +305,14 @@ public sealed record UpdateUserWorkspaceSettingsRequest(string DefaultWorkspaceD
 
 public sealed record UserWorkspaceSettingsResponse(string DefaultWorkspaceDirectory);
 
+public sealed record McpPersonalSettingsResponse(bool Enabled, bool AllowCreateWorkspace);
+public sealed record SetMcpPersonalSettingsRequest(bool Enabled, bool AllowCreateWorkspace);
+public sealed record McpWorkspaceSettingsResponse(bool Enabled, string[] PersonalPermissions, string[] GrantedPermissions, bool IsOwner);
+public sealed record SetMcpWorkspaceEnabledRequest(bool Enabled);
+public sealed record McpWorkspaceEnabledResponse(bool Enabled);
+public sealed record SetMcpPermissionsRequest(string[] Permissions);
+public sealed record McpPermissionsResponse(string[] Permissions);
+
 public sealed record UserTokenResponse(string Id, string? ClientId, string Type, string Status,
     DateTimeOffset? CreatedAt, DateTimeOffset? ExpiresAt);
 public sealed record UserTokenListResponse(IReadOnlyList<UserTokenResponse> Items, int Offset, int Limit, bool HasMore);
@@ -272,7 +323,7 @@ public sealed record CreateUserRequest(string Email, string Password)
 }
 public sealed record SetAdministratorRequest(bool IsAdministrator);
 public sealed record ManagedUserResponse(Guid Id, string? UserName, string? Email, string Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0, string? DisplayName = null);
 public sealed record ManagedUserListResponse(IReadOnlyList<ManagedUserResponse> Items, int Offset, int Limit, bool HasMore);
 public sealed record UserAdministrationOverviewResponse(int TotalUsers, int ActiveUsers, int TotalWorkspaces,
     int ProvisioningWorkspaces, int AdministratorCount, IReadOnlyList<ManagedUserResponse> RecentUsers);

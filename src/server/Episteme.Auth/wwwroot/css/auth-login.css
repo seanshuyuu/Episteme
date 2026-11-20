@@ -64,6 +64,11 @@ a:focus-visible, button:focus-visible, input:focus-visible { outline: 3px solid 
 .divider { display: flex; align-items: center; gap: 12px; margin-top: 24px; color: var(--muted); font-size: 12px; }
 .divider::before, .divider::after { flex: 1; height: 1px; background: var(--line); content: ""; }
 .account-links { display: grid; gap: 9px; margin-top: 24px; color: var(--muted); text-align: center; }
+.consent-scopes { display: grid; gap: 8px; margin: 24px 0 0; padding: 0; list-style: none; }
+.consent-scopes li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; padding: 8px 10px; border-radius: 8px; background: var(--canvas); }
+.consent-scopes small, .consent-resource { color: var(--muted); overflow-wrap: anywhere; }
+.consent-resource { margin: 16px 0 0; font-size: 12px; }
+.consent-actions { margin-top: 22px; }
 .footer { margin: 20px 0 0; color: #9397a8; font-size: 12px; text-align: center; }
 @media (max-width: 700px) {
     .login-shell { padding: 28px 18px; }

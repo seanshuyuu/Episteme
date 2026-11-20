@@ -7,11 +7,20 @@ namespace Episteme.Infrastructure.Persistence;
 
 public sealed class EfWorkspaceListingRepository(EpistemeDbContext dbContext) : IWorkspaceListingRepository
 {
-    public async Task<IReadOnlyList<WorkspaceSummary>?> ListForActiveUserAsync(
+    public Task<IReadOnlyList<WorkspaceSummary>?> ListForActiveUserAsync(
         Guid userId,
         bool isSystemAdministrator,
         int offset,
         int count,
+        CancellationToken cancellationToken) =>
+        ListAsync(userId, isSystemAdministrator, false, offset, count, cancellationToken);
+
+    public Task<IReadOnlyList<WorkspaceSummary>?> ListForMcpUserAsync(
+        Guid userId, int offset, int count, CancellationToken cancellationToken) =>
+        ListAsync(userId, false, true, offset, count, cancellationToken);
+
+    private async Task<IReadOnlyList<WorkspaceSummary>?> ListAsync(
+        Guid userId, bool isSystemAdministrator, bool isMcp, int offset, int count,
         CancellationToken cancellationToken)
     {
         // Fetch account state and the page in one database statement, including when
@@ -26,7 +35,20 @@ public sealed class EfWorkspaceListingRepository(EpistemeDbContext dbContext) : 
                         (isSystemAdministrator || dbContext.WorkspaceMembers.Any(member =>
                             member.WorkspaceId == workspace.Id &&
                             member.UserId == user.Id &&
-                            member.Status == WorkspaceMemberStatus.Active)))
+                            member.Status == WorkspaceMemberStatus.Active)) &&
+                        (!isMcp ||
+                            (dbContext.McpUserSettings.Any(setting => setting.UserId == user.Id && setting.Enabled) &&
+                             dbContext.McpWorkspaceSettings.Any(setting => setting.WorkspaceId == workspace.Id && setting.Enabled) &&
+                             (from member in dbContext.WorkspaceMembers
+                              join setting in dbContext.McpWorkspaceUserSettings
+                                  on new { member.WorkspaceId, member.UserId } equals new { setting.WorkspaceId, setting.UserId }
+                              where member.WorkspaceId == workspace.Id && member.UserId == user.Id &&
+                                  member.Status == WorkspaceMemberStatus.Active &&
+                                  (member.Role == WorkspaceRole.Owner || member.Role == WorkspaceRole.Editor || member.Role == WorkspaceRole.Reader) &&
+                                  (setting.PersonalPermissions & (int)McpPermission.ReadWorkspace) != 0 &&
+                                  (member.Role == WorkspaceRole.Owner ||
+                                   (setting.GrantedPermissions & (int)McpPermission.ReadWorkspace) != 0)
+                              select member).Any())))
                     .OrderBy(workspace => workspace.Slug)
                     .ThenBy(workspace => workspace.Id)
                     .Skip(offset)

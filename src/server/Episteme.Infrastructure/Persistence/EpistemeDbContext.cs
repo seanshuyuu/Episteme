@@ -17,11 +17,34 @@ public sealed class EpistemeDbContext(DbContextOptions<EpistemeDbContext> option
     public DbSet<WorkspaceAuditEvent> WorkspaceAuditEvents => Set<WorkspaceAuditEvent>();
     public DbSet<AccountAuditEvent> AccountAuditEvents => Set<AccountAuditEvent>();
     public DbSet<OAuthRevocationAuditEvent> OAuthRevocationAuditEvents => Set<OAuthRevocationAuditEvent>();
+    public DbSet<McpUserSettings> McpUserSettings => Set<McpUserSettings>();
+    public DbSet<McpWorkspaceSettings> McpWorkspaceSettings => Set<McpWorkspaceSettings>();
+    public DbSet<McpWorkspaceUserSettings> McpWorkspaceUserSettings => Set<McpWorkspaceUserSettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
         builder.UseOpenIddict();
+
+        builder.Entity<McpUserSettings>(entity =>
+        {
+            entity.HasKey(settings => settings.UserId);
+            entity.HasOne<ApplicationUser>().WithOne().HasForeignKey<McpUserSettings>(settings => settings.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<McpWorkspaceSettings>(entity =>
+        {
+            entity.HasKey(settings => settings.WorkspaceId);
+            entity.HasOne<Workspace>().WithOne().HasForeignKey<McpWorkspaceSettings>(settings => settings.WorkspaceId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<McpWorkspaceUserSettings>(entity =>
+        {
+            entity.HasKey(settings => new { settings.WorkspaceId, settings.UserId });
+            entity.HasOne<WorkspaceMember>().WithOne()
+                .HasForeignKey<McpWorkspaceUserSettings>(settings => new { settings.WorkspaceId, settings.UserId })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         builder.Entity<ApplicationUser>(entity =>
         {

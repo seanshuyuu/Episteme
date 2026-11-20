@@ -266,16 +266,28 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         var repository = RepositoryPath(storageKey, branch);
         var commit = await HeadAsync(repository, branch, cancellationToken);
         var data = await RunAsync(repository,
-            ["--literal-pathspecs", "log", "--format=%H", $"--skip={offset}", $"--max-count={limit + 1}",
+            ["--literal-pathspecs", "log", "--format=%H%x00%an%x00%aI%x00%s%x00", $"--skip={offset}", $"--max-count={limit + 1}",
                 "--no-renames", commit, "--", path], 8192, cancellationToken);
-        var commits = StrictUtf8.GetString(data).Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        if (commits.Any(id => !IsObjectId(id)))
-            throw new InvalidOperationException("Git returned an invalid history.");
-        return new(commit, commits.Take(limit).ToArray(), commits.Length > limit, null);
+        var fields = StrictUtf8.GetString(data).Split('\0');
+        var entries = new List<WorkspaceHistoryEntry>((fields.Length + 3) / 4);
+        for (var index = 0; index + 3 < fields.Length; index += 4)
+        {
+            var objectId = fields[index].Trim();
+            var author = fields[index + 1].Trim();
+            var dateText = fields[index + 2].Trim();
+            var subject = fields[index + 3].Trim();
+            if (!IsObjectId(objectId) || string.IsNullOrWhiteSpace(author) ||
+                !DateTimeOffset.TryParse(dateText, CultureInfo.InvariantCulture,
+                    DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var createdAt))
+                throw new InvalidOperationException("Git returned an invalid history.");
+            entries.Add(new(objectId, subject, author, createdAt));
+        }
+        return new(commit, entries.Take(limit).ToArray(), entries.Count > limit, null);
     }
 
     public async Task<WorkspaceWriteResult> WriteAsync(
-        string storageKey, string branch, WorkspaceWriteCommand command, CancellationToken cancellationToken)
+        string storageKey, string branch, WorkspaceWriteCommand command, CancellationToken cancellationToken,
+        McpPermission? mcpPermissions = null)
     {
         var repository = RepositoryPath(storageKey, branch);
         var head = await HeadAsync(repository, branch, cancellationToken);
@@ -297,6 +309,21 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
         }
 
         var current = await FindAsync(repository, head, command.Path, cancellationToken);
+        if (mcpPermissions is { } allowed)
+        {
+            var required = command.Operation switch
+            {
+                WorkspaceWriteOperation.Put or WorkspaceWriteOperation.PutBinary or WorkspaceWriteOperation.Restore =>
+                    current is null ? McpPermission.CreateDocument : McpPermission.UpdateDocument,
+                WorkspaceWriteOperation.Delete or WorkspaceWriteOperation.DeleteDirectory => McpPermission.DeleteDocument,
+                WorkspaceWriteOperation.CreateDirectory => McpPermission.CreateDocument,
+                WorkspaceWriteOperation.MoveDocument or WorkspaceWriteOperation.MoveDirectory =>
+                    McpPermission.CreateDocument | McpPermission.DeleteDocument,
+                _ => McpPermission.None
+            };
+            if (required == McpPermission.None || (allowed & required) != required)
+                return new(null, WorkspaceContentFailure.Unauthorized);
+        }
         var isDirectory = command.Operation is WorkspaceWriteOperation.CreateDirectory or
             WorkspaceWriteOperation.DeleteDirectory or WorkspaceWriteOperation.MoveDirectory;
         if (command.Operation is WorkspaceWriteOperation.CreateDirectory or WorkspaceWriteOperation.PutBinary && current is not null)
@@ -409,10 +436,13 @@ public sealed class GitWorkspaceReader(IConfiguration configuration)
             if (!IsObjectId(tree))
                 throw new InvalidOperationException("Git returned an invalid tree ID.");
             var author = command.Actor.UserId.ToString("N");
+            var comment = string.IsNullOrWhiteSpace(command.Comment)
+                ? $"Episteme document {command.Operation.ToString().ToLowerInvariant()}"
+                : command.Comment.Trim();
             var created = StrictUtf8.GetString(await RunAsync(repository,
                 ["-c", $"user.name=Episteme {author}", "-c", $"user.email={author}@episteme.invalid",
                     "commit-tree", tree, "-p", head], 128, cancellationToken, index,
-                $"Episteme document {command.Operation.ToString().ToLowerInvariant()}\n", author)).Trim();
+                $"{comment}\n", author)).Trim();
             if (!IsObjectId(created))
                 throw new InvalidOperationException("Git returned an invalid commit ID.");
             var update = await RunResultAsync(repository, ["update-ref", $"refs/heads/{branch}", created, head],

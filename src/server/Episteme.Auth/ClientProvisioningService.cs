@@ -28,6 +28,7 @@ public sealed class ClientProvisioningService(IServiceScopeFactory scopeFactory,
             {
                 Permissions.Endpoints.Authorization, Permissions.Endpoints.Token, Permissions.Endpoints.Revocation,
                 Permissions.GrantTypes.AuthorizationCode, Permissions.GrantTypes.RefreshToken,
+                Permissions.Prefixes.GrantType + "urn:ietf:params:oauth:grant-type:token-exchange",
                 Permissions.ResponseTypes.Code, Permissions.Scopes.Email, Permissions.Scopes.Profile,
                 Permissions.Scopes.Roles, Permissions.Prefixes.Scope + "workspaces.read",
                 Permissions.Prefixes.Scope + "workspaces.write", Permissions.Prefixes.Scope + "workspaces.manage",
@@ -47,10 +48,19 @@ public sealed class ClientProvisioningService(IServiceScopeFactory scopeFactory,
         await manager.PopulateAsync(current, existing, cancellationToken);
         if (current.ClientType != descriptor.ClientType || current.ConsentType != descriptor.ConsentType ||
             !current.RedirectUris.SetEquals(descriptor.RedirectUris) ||
-            !current.Permissions.SetEquals(descriptor.Permissions) ||
             !current.Requirements.SetEquals(descriptor.Requirements))
             throw new InvalidOperationException("The configured client differs from the existing registration; update it through a controlled administrative procedure.");
+        if (!current.Permissions.SetEquals(descriptor.Permissions))
+        {
+            var oldPermissions = descriptor.Permissions.ToHashSet(StringComparer.Ordinal);
+            oldPermissions.Remove(Permissions.Prefixes.GrantType + "urn:ietf:params:oauth:grant-type:token-exchange");
+            if (!current.Permissions.SetEquals(oldPermissions))
+                throw new InvalidOperationException("The configured client permissions differ from the expected registration.");
+            current.Permissions.Add(Permissions.Prefixes.GrantType + "urn:ietf:params:oauth:grant-type:token-exchange");
+            await manager.UpdateAsync(existing, current, cancellationToken);
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
 }

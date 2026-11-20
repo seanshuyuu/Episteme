@@ -5,7 +5,7 @@ using System.ComponentModel.DataAnnotations;
 namespace Episteme.Application.Identity;
 
 public sealed record ManagedUser(Guid Id, string? UserName, string? Email, UserAccountStatus Status,
-    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0);
+    DateTimeOffset CreatedAt, bool IsAdministrator, int OwnedWorkspaceCount = 0, string? DisplayName = null);
 public sealed record AdminOwnedWorkspace(Guid Id, string Name, string Type, string Status, DateTimeOffset CreatedAt);
 public sealed record AdminOwnedWorkspaceListResult(
     IReadOnlyList<AdminOwnedWorkspace>? Items, bool HasMore, UserAdministrationFailure? Failure);

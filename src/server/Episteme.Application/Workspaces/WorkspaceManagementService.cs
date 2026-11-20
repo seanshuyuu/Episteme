@@ -2,7 +2,7 @@ using Episteme.Domain.Workspaces;
 
 namespace Episteme.Application.Workspaces;
 
-public sealed record WorkspaceActor(Guid UserId, IReadOnlySet<string> Scopes, bool IsSystemAdministrator);
+public sealed record WorkspaceActor(Guid UserId, IReadOnlySet<string> Scopes, bool IsSystemAdministrator, bool IsMcp = false);
 
 public sealed record UpdateWorkspaceCommand(
     Guid WorkspaceId,

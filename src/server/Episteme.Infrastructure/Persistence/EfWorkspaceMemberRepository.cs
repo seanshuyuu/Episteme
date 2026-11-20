@@ -52,6 +52,14 @@ public sealed class EfWorkspaceMemberRepository(EpistemeDbContext db) : IWorkspa
                 return new(null, WorkspaceManagementFailure.Conflict);
         }
 
+        if (member is not null && (role is null || member.Status != WorkspaceMemberStatus.Active || member.Role != role))
+        {
+            var mcpSettings = await db.McpWorkspaceUserSettings.SingleOrDefaultAsync(
+                settings => settings.WorkspaceId == workspaceId && settings.UserId == userId, cancellationToken);
+            if (mcpSettings is not null)
+                mcpSettings.GrantedPermissions = 0;
+        }
+
         if (role is null)
         {
             member!.Remove();
@@ -90,13 +98,20 @@ public sealed class EfWorkspaceMemberRepository(EpistemeDbContext db) : IWorkspa
             .AsNoTracking().ToListAsync(cancellationToken);
         if (!users.Any(u => u.Id == actor.UserId && u.Status == UserAccountStatus.Active))
             return WorkspaceManagementFailure.Unauthorized;
-        if (!actor.IsSystemAdministrator && !await db.WorkspaceMembers.AnyAsync(m =>
+        if ((!actor.IsSystemAdministrator || actor.IsMcp) && !await db.WorkspaceMembers.AnyAsync(m =>
                 m.WorkspaceId == workspaceId && m.UserId == actor.UserId &&
                 m.Status == WorkspaceMemberStatus.Active && m.Role == WorkspaceRole.Owner, cancellationToken))
             return WorkspaceManagementFailure.Unauthorized;
         if (targetUserId is not null && !users.Any(u => u.Id == target &&
                 (!requireActiveTarget || u.Status == UserAccountStatus.Active)))
             return WorkspaceManagementFailure.NotFound;
+        if (actor.IsMcp)
+        {
+            var required = targetUserId is null ? McpPermission.ReadWorkspace : McpPermission.UpdateWorkspace;
+            var allowed = await EfMcpAuthorization.WorkspacePermissionsAsync(db, workspaceId, actor.UserId, cancellationToken);
+            if ((allowed & required) != required)
+                return WorkspaceManagementFailure.Unauthorized;
+        }
         return null;
     }
 }

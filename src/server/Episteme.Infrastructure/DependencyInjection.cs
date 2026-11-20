@@ -48,11 +48,14 @@ public static class DependencyInjection
         services.AddScoped<IWorkspaceCreationRepository, EfWorkspaceCreationRepository>();
         services.AddScoped<IProjectRepository, EfProjectRepository>();
         services.AddScoped<IProjectService, ProjectService>();
+        services.AddScoped<IMcpProjectService, EfMcpProjectService>();
         services.AddScoped<IWorkspaceRepositoryProvisioner, GitWorkspaceProvisioner>();
         services.AddScoped<IUserWorkspaceSettingsRepository, EfUserWorkspaceSettingsRepository>();
         services.AddScoped<IUserTokenRepository, EfUserTokenRepository>();
         services.AddScoped<IUserAuthorizationRepository, EfUserAuthorizationRepository>();
         services.AddScoped<IUserAdministrationRepository, EfUserAdministrationRepository>();
+        services.AddScoped<IUserProfileRepository, EfUserProfileRepository>();
+        services.AddScoped<IMcpSettingsRepository, EfMcpSettingsRepository>();
         return services;
     }
 }

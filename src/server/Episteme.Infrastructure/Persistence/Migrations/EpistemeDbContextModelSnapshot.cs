@@ -88,6 +88,70 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                     b.ToTable("OAuthRevocationAuditEvents", (string)null);
                 });
 
+            modelBuilder.Entity("Episteme.Domain.Workspaces.Project", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConcurrencyStamp")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DefaultBranch")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("StorageKey")
+                        .IsUnique();
+
+                    b.HasIndex("WorkspaceId", "Slug")
+                        .IsUnique();
+
+                    b.ToTable("Projects", (string)null);
+                });
+
             modelBuilder.Entity("Episteme.Domain.Workspaces.UserWorkspaceSettings", b =>
                 {
                     b.Property<Guid>("UserId")
@@ -218,65 +282,6 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                     b.ToTable("WorkspaceAuditEvents", (string)null);
                 });
 
-            modelBuilder.Entity("Episteme.Domain.Workspaces.Project", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("WorkspaceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(120)
-                        .HasColumnType("character varying(120)");
-
-                    b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(2000)
-                        .HasColumnType("character varying(2000)");
-
-                    b.Property<string>("StorageKey")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<string>("DefaultBranch")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<Guid>("ConcurrencyStamp")
-                        .IsConcurrencyToken()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-                    b.HasIndex("WorkspaceId", "Slug").IsUnique();
-                    b.HasIndex("StorageKey").IsUnique();
-                    b.HasIndex("CreatedByUserId");
-                    b.HasIndex("WorkspaceId");
-                    b.ToTable("Projects", (string)null);
-                });
-
             modelBuilder.Entity("Episteme.Domain.Workspaces.WorkspaceMember", b =>
                 {
                     b.Property<Guid>("WorkspaceId")
@@ -325,6 +330,9 @@ namespace Episteme.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text");
 
                     b.Property<string>("Email")
                         .HasMaxLength(256)
@@ -384,6 +392,54 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("UserNameIndex");
 
                     b.ToTable("AspNetUsers", (string)null);
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpUserSettings", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("AllowCreateWorkspace")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("McpUserSettings");
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpWorkspaceSettings", b =>
+                {
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("WorkspaceId");
+
+                    b.ToTable("McpWorkspaceSettings");
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpWorkspaceUserSettings", b =>
+                {
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("GrantedPermissions")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("PersonalPermissions")
+                        .HasColumnType("integer");
+
+                    b.HasKey("WorkspaceId", "UserId");
+
+                    b.ToTable("McpWorkspaceUserSettings");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -739,6 +795,21 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Episteme.Domain.Workspaces.Project", b =>
+                {
+                    b.HasOne("Episteme.Infrastructure.Identity.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Episteme.Domain.Workspaces.Workspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Episteme.Domain.Workspaces.UserWorkspaceSettings", b =>
                 {
                     b.HasOne("Episteme.Infrastructure.Identity.ApplicationUser", null)
@@ -753,21 +824,6 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                     b.HasOne("Episteme.Infrastructure.Identity.ApplicationUser", null)
                         .WithMany()
                         .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("Episteme.Domain.Workspaces.Project", b =>
-                {
-                    b.HasOne("Episteme.Infrastructure.Identity.ApplicationUser", null)
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("Episteme.Domain.Workspaces.Workspace", null)
-                        .WithMany()
-                        .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -804,6 +860,33 @@ namespace Episteme.Infrastructure.Persistence.Migrations
                     b.HasOne("Episteme.Domain.Workspaces.Workspace", null)
                         .WithMany()
                         .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpUserSettings", b =>
+                {
+                    b.HasOne("Episteme.Infrastructure.Identity.ApplicationUser", null)
+                        .WithOne()
+                        .HasForeignKey("Episteme.Infrastructure.Persistence.McpUserSettings", "UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpWorkspaceSettings", b =>
+                {
+                    b.HasOne("Episteme.Domain.Workspaces.Workspace", null)
+                        .WithOne()
+                        .HasForeignKey("Episteme.Infrastructure.Persistence.McpWorkspaceSettings", "WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Episteme.Infrastructure.Persistence.McpWorkspaceUserSettings", b =>
+                {
+                    b.HasOne("Episteme.Domain.Workspaces.WorkspaceMember", null)
+                        .WithOne()
+                        .HasForeignKey("Episteme.Infrastructure.Persistence.McpWorkspaceUserSettings", "WorkspaceId", "UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
